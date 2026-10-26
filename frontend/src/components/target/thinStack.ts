@@ -37,6 +37,15 @@
  * against different stacks. It is the same reconciliation the coaching line
  * already gets from `grainLevel` and `framing`.
  *
+ * **`remedy` names the button that is actually on screen** (added 2026-10-26,
+ * found by `--combine`'s step 9). While any accepted sub is still unlocated the
+ * page swaps its "N subs missing · Restack" card for "Ready to process?", and it
+ * used to drop the figure along with the card — so one new, unsolved sub dropped
+ * in beside three located ones put "check your solves, then add more subs" back
+ * over a target with three subs a click away. The figure is just as true then;
+ * only the verb changes, to the "Process target" button that locates the new
+ * subs and stacks the lot (the same chain the Restack button runs).
+ *
  * Returns `null` for a healthy depth (no nag), otherwise a level + message.
  * `level` lets the UI pick colour/urgency: "single" (one sub deep — not really a
  * stack) vs "thin" (2–4 — very few).
@@ -95,6 +104,9 @@ export function thinStackWarning(
    * advice is exactly what it has always been. See `readyToStack` in the
    * module docstring for why it changes the sentence. */
   readyToStack?: number | null,
+  /** Which button folds those subs in on this page right now — see `remedy` in
+   * the module docstring. Only read when `readyToStack` is used. */
+  remedy: "restack" | "process" = "restack",
 ): ThinStackWarning | null {
   // Unknown / not-yet-stacked → nothing to warn about.
   if (nFramesUsed == null || !Number.isFinite(nFramesUsed) || nFramesUsed < 0) {
@@ -119,11 +131,14 @@ export function thinStackWarning(
     readyToStack != null && Number.isFinite(readyToStack) && readyToStack >= 1
       ? Math.floor(readyToStack)
       : 0;
+  const them = ready === 1 ? "it" : "them";
+  const foldIn = remedy === "process"
+    ? `press "Process target" to fold ${them} in (it locates your newest subs first)`
+    : `restack to fold ${them} in`;
   const next = ready
     ? `You already have ${ready} more ${ready === 1 ? "sub" : "subs"} accepted and ` +
-      `located that this stack didn't use — restack to fold ${ready === 1 ? "it" : "them"} ` +
-      "in, and a stack only gets cleaner as it combines more frames. No new " +
-      "shooting needed."
+      `located that this stack didn't use — ${foldIn}, and a stack only gets ` +
+      "cleaner as it combines more frames. No new shooting needed."
     : `Check that your subs plate-solved and weren't over-rejected (${where}), ` +
       "then add more subs — a stack only gets cleaner as it combines more frames.";
 

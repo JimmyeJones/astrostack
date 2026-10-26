@@ -3591,6 +3591,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.7 **The thin-stack warning names the located subs a restack would fold in even while a newer sub is still unlocated, by the "Process target" button on screen** (`thinStackWarning` `remedy`, `Target.tsx` `needsProcessing`)
 - ✅ v0.503.6 **Tonight's and "Plan my week"'s framing badge on a single field names the mosaic of the same object he already has ("Mosaic started") instead of prescribing one** (`LibraryTarget.mosaic_companion`, `PlannedTarget`/`WeekTargetPick.mosaic_companion`, `framingRowBadge`)
 - ✅ v0.503.5 **The walk-away "some subs aren't on disk" hold now sees a mosaic panel with no readable sub — it holds instead of publishing a picture missing that part** (`pipeline._panels_with_nothing_readable`, `AutoStackHoldOut.panels_missing`, `holdReasonSentence`, `heldForFilesLine`)
 - ✅ v0.503.4 **A folder in `incoming/` whose every file is unreadable (or still copying) no longer mints an empty "0/0 frames" target on the Library wall and the Dashboard count — a new target is created once one sub can be read; the files are still reported** (`seestack/io/scanner.py` `_hold_back_unreadable_new_target`). Dogfood `--incoming-lag` find; entry in [`SHIPPED.md`](SHIPPED.md).

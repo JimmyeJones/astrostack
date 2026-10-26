@@ -179,6 +179,24 @@ describe("the next step when a restack would already deepen this picture", () =>
     expect(w?.message).toContain("restack to fold them in");
   });
 
+  it("names the Process button when that is the card on screen", () => {
+    // While a new sub is still unlocated the page offers "Process target", not
+    // "Restack" — same chain, different label, so the sentence follows it.
+    const w = thinStackWarning(3, null, "this-page", 3, "process");
+    expect(w?.message).toContain(
+      "You already have 3 more subs accepted and located that this stack didn't use");
+    expect(w?.message).toContain('press "Process target" to fold them in');
+    expect(w?.message).not.toMatch(/restack/);
+    expect(w?.message).not.toMatch(/add more subs/);
+    expect(thinStackWarning(1, null, "this-page", 1, "process")?.message)
+      .toContain('press "Process target" to fold it in');
+  });
+
+  it("ignores the remedy when nothing is waiting", () => {
+    expect(thinStackWarning(3, null, "this-page", 0, "process"))
+      .toEqual(thinStackWarning(3));
+  });
+
   it("is byte-for-byte the old warning when nothing is waiting", () => {
     // Every surface that does not have the figure, an older backend, and a
     // target that really is just thin: all read exactly as before. A nonsense

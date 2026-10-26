@@ -1,5 +1,30 @@
 # Shipped — the record
 
+## 2026-10-26 (Builder, branch `claude/nice-carson-dmwzch`) — the thin-stack warning keeps its measured remedy beside "Ready to process?"
+
+### v0.503.7 — `thinStackWarning(…, readyToStack, remedy)`, `Target.tsx` `needsProcessing`
+
+**What.** The 2026-10-13 fix made the Target page's "Very few frames were combined" warning say *"You already have N
+more subs accepted and located that this stack didn't use — restack to fold them in"* instead of "check your solves,
+then add more subs". It took the figure from `newSubsSinceStack`, which the page zeroes whenever "Ready to process?"
+holds the slot (any accepted sub still unlocated) — a choice of which card speaks, not a measurement. So the moment one
+new, unsolved sub landed beside three located ones the picture lacked, the warning went back to "then add more subs"
+over a target with three subs a click away. Found reading a `--combine --calibration --editor` dogfood pass as one
+paragraph: step 9 drops exactly that one sub, and the Dashboard on the same pass said "3 subs … ready to stack" while
+the Target page said go shooting. That pass was otherwise CLEAN (§10 incoming/ unchanged, masters built, 21 editor ops
+re-rendered, Auto and the taste row clean, no overflow or console error).
+
+**How.** The page now passes the server's `new-light` `n_new_subs` directly, still only when the picture on show is the
+run the warning describes and now also only when the solver is not broken (`solveSetup` — Process would only re-fail
+there). A new optional `remedy` argument (`"restack"` default, `"process"` while `needsProcessing`) names the button
+actually on screen: *press "Process target" to fold them in (it locates your newest subs first)* — the same
+`process.mutate()` chain both buttons run. Every other caller and every no-figure case is byte-for-byte unchanged.
+
+**Tests (+3).** `Target.test.tsx`: an unsolved fourth sub beside three waiting → the warning names the three and the
+Process button, and no Restack card is drawn (fail-before shown: reverting `Target.tsx` alone fails it).
+`thinStack.test.ts`: the Process wording on 3 and on 1 sub; the remedy is ignored when nothing is waiting.
+**Upgrade-safe:** frontend only; no config, schema, API or default change.
+
 ## 2026-10-26 (Builder, branch `claude/nice-carson-igexdq`) — the planners point a single field at the mosaic he already has
 
 ### v0.503.6 — `LibraryTarget.mosaic_companion`, `PlannedTarget.mosaic_companion`, `WeekTargetPick.mosaic_companion`, `framingRowBadge`

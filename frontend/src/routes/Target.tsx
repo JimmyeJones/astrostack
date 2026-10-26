@@ -813,15 +813,23 @@ export function TargetView() {
     // that picture to the *genuine* stack behind it — an editor export becomes
     // the run it was rendered from, which an export shares its membership with
     // — so when the two ids do agree, the count really is about this stack.)
+    //
+    // It reads the server's figure directly rather than `newSubsSinceStack`,
+    // which zeroes it while "Ready to process?" holds the slot: that is a choice
+    // of which card speaks, not a measurement that the subs are gone, and one new
+    // unsolved sub beside three located ones put "then add more subs" back. The
+    // verb follows the card on show. A broken solver still stands it down —
+    // Process would only re-fail there (`solveSetup`, above).
     () => thinStackWarning(
       latestRun?.n_frames_used,
       latestRun?.field_fulls,
       "this-page",
-      latestRun && pictureRun && pictureRun.id === latestRun.id
-        ? newSubsSinceStack
+      latestRun && pictureRun && pictureRun.id === latestRun.id && !solveSetup
+        ? (newLight.data?.n_new_subs ?? null)
         : null,
+      needsProcessing ? "process" : "restack",
     ),
-    [latestRun, pictureRun, newSubsSinceStack],
+    [latestRun, pictureRun, solveSetup, newLight.data, needsProcessing],
   );
 
   // "Is it enough yet?" — judge this target's accumulated integration against a
