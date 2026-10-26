@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- `claude/nice-carson-dmwzch` (Builder 2026-10-26) — the thin-stack warning stops saying "add more subs" over located subs waiting while a new sub is unsolved (`thinStackWarning` readyToStack, `Target.tsx` needsProcessing).
 
 ---
 
