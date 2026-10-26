@@ -1,5 +1,57 @@
 # Shipped — the record
 
+## 2026-10-26 (Builder, branch `claude/nice-carson-pm8g56`) — a hung ffmpeg decoder no longer ignores Cancel
+
+### v0.503.8 — `seestack/video/ffmpeg.py` `iter_frames(should_cancel=, stall_timeout_s=)`, `_DecodeWatchdog`, `VideoDecoderStalled`
+
+**What.** The Scout's 2026-10-26 sweep (3) entry: `iter_frames` blocked in `proc.stdout.read(frame_bytes)` with no
+deadline and `lucky.py` polled `should_cancel` only between frames, so an ffmpeg that stopped producing output (a
+stalled read on the share, a pathological file) could not be cancelled — the Jobs page showed "running" forever and
+every job queued behind it (scans, walk-away auto-stacks) waited for a container restart. The decode was the one
+subprocess with neither a timeout (ASTAP has `timeout_s`, ffprobe `PROBE_TIMEOUT_S`) nor a cancel path.
+
+**How.** `iter_frames` now starts a small daemon watchdog thread per decode. It polls `should_cancel` every 0.25 s
+and times each blocking read (only time spent *waiting on ffmpeg* counts — a slow consumer between frames never trips
+it); on a cancel, or no bytes for `DECODE_STALL_TIMEOUT_S` (300 s — generous, since a NAS share can hiccup and
+recover), it kills the decoder, which makes the stuck read return. The generator then **raises**
+`VideoStackCancelled` or `VideoDecoderStalled` (plain-language message: the file may be damaged or the share stopped
+responding) rather than ending quietly, because a killed decoder's stream looks exactly like a short clip and the
+cut-short path deliberately treats that as a finished capture — that path is unchanged. `VideoStackCancelled` moved
+into `ffmpeg.py` and `lucky.py` re-exports the same class, so `webapp/video.py`'s existing handlers return the
+cancelled result unchanged. Both `grade_video` and `stack_video`'s passes hand their `should_cancel` to the decode.
+The watchdog is joined before the generator's `finally` kills/reaps the process, so two threads never signal one child.
+
+**Tests.** `tests/test_video_decode_watchdog.py` (stub `ffmpeg` shell scripts): cancel before the first frame and
+mid-clip both raise within seconds; a decoder silent past the deadline raises `VideoDecoderStalled`; a consumer slower
+than the deadline is not a stall; a truncated tail still ends cleanly; the decoder process is reaped.
+`tests/webapp/test_video_api.py::test_cancelling_a_check_whose_decoder_hangs_frees_the_worker` is the Scout's repro
+through the real API (real capture, real ffprobe, stub `exec sleep 120` ffmpeg): before the fix the cancelled job
+never finished; after, it is `cancelled` and the queued job runs. Upgrade-safe: no config, schema, layout or API
+change; `iter_frames`' new parameters are keyword-only with defaults.
+
+<details><summary>The Bugs entry as filed</summary>
+
+- **🟡 (Scout 2026-10-26, QA rotation sweep (3)) — a Moon & Sun job whose ffmpeg decoder stops producing
+  frames can't be cancelled, and every job queued behind it (scans, walk-away auto-stacks) waits until the
+  container restarts.** *(Pillar: "just works" autonomy — PRIORITY 2; size **S–M**; severity moderate if it
+  happens — the single worker is wedged and the Jobs page shows "running" forever after Cancel; nothing on disk
+  is touched. Confidence: **reproduced** through the real API; how often a real ffmpeg stalls on his NAS is
+  **unknown**, probably rare.)* `seestack/video/ffmpeg.py::iter_frames` blocks in `proc.stdout.read(frame_bytes)`
+  with no deadline, and `lucky.py` polls `should_cancel` only *between* frames, so a decoder that stalls (stalled
+  read on the share, a pathological file) never returns control. ASTAP is bounded by `timeout_s` and `ffprobe` by
+  `PROBE_TIMEOUT_S`; the decode is the one subprocess with neither. Repro (scratch test in `tests/webapp/`, not
+  landed): a real `lunar_video` capture in `incoming/Lunar_video/`, `SEESTACK_FFMPEG_PATH` → a stub
+  `exec sleep 120` (real ffprobe); `POST /api/videos/Lunar_video/grade`, then `POST /api/jobs/<id>/cancel` →
+  still `running` 15 s later, and a second grade job sits `queued`. Same decode serves the stack job.
+  **Fix shape:** give `iter_frames` the job's `should_cancel` and a stall deadline (no bytes for N s, generous —
+  minutes, not seconds), enforced from a small watchdog thread that `proc.kill()`s the decoder; a kill makes the
+  `read` return short, so the caller must then raise `VideoStackCancelled` / a plain "the decoder stopped
+  responding" error rather than treat the truncated stream as a finished clip (the cut-short path ends a clip
+  cleanly on purpose — keep that distinction). Regression test: the stub above, cancel → `cancelled` within a
+  few seconds, and the queued job then runs.
+
+</details>
+
 ## 2026-10-26 (Builder, branch `claude/nice-carson-dmwzch`) — the thin-stack warning keeps its measured remedy beside "Ready to process?"
 
 ### v0.503.7 — `thinStackWarning(…, readyToStack, remedy)`, `Target.tsx` `needsProcessing`

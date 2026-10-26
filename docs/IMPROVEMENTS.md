@@ -82,25 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟡 (Scout 2026-10-26, QA rotation sweep (3)) — a Moon & Sun job whose ffmpeg decoder stops producing
-  frames can't be cancelled, and every job queued behind it (scans, walk-away auto-stacks) waits until the
-  container restarts.** *(Pillar: "just works" autonomy — PRIORITY 2; size **S–M**; severity moderate if it
-  happens — the single worker is wedged and the Jobs page shows "running" forever after Cancel; nothing on disk
-  is touched. Confidence: **reproduced** through the real API; how often a real ffmpeg stalls on his NAS is
-  **unknown**, probably rare.)* `seestack/video/ffmpeg.py::iter_frames` blocks in `proc.stdout.read(frame_bytes)`
-  with no deadline, and `lucky.py` polls `should_cancel` only *between* frames, so a decoder that stalls (stalled
-  read on the share, a pathological file) never returns control. ASTAP is bounded by `timeout_s` and `ffprobe` by
-  `PROBE_TIMEOUT_S`; the decode is the one subprocess with neither. Repro (scratch test in `tests/webapp/`, not
-  landed): a real `lunar_video` capture in `incoming/Lunar_video/`, `SEESTACK_FFMPEG_PATH` → a stub
-  `exec sleep 120` (real ffprobe); `POST /api/videos/Lunar_video/grade`, then `POST /api/jobs/<id>/cancel` →
-  still `running` 15 s later, and a second grade job sits `queued`. Same decode serves the stack job.
-  **Fix shape:** give `iter_frames` the job's `should_cancel` and a stall deadline (no bytes for N s, generous —
-  minutes, not seconds), enforced from a small watchdog thread that `proc.kill()`s the decoder; a kill makes the
-  `read` return short, so the caller must then raise `VideoStackCancelled` / a plain "the decoder stopped
-  responding" error rather than treat the truncated stream as a finished clip (the cut-short path ends a clip
-  cleanly on purpose — keep that distinction). Regression test: the stub above, cancel → `cancelled` within a
-  few seconds, and the queued job then runs.
-
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
@@ -3610,6 +3591,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.8 **A Moon & Sun job whose ffmpeg decoder stops sending frames can be cancelled, and a decoder silent for 5 minutes is killed with a plain error — the single job worker is no longer wedged until a restart** (`seestack/video/ffmpeg.py` `iter_frames(should_cancel=, stall_timeout_s=)`, `_DecodeWatchdog`, `VideoDecoderStalled`). Scout's sweep (3) entry; full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.503.7 **The thin-stack warning names the located subs a restack would fold in even while a newer sub is still unlocated, by the "Process target" button on screen** (`thinStackWarning` `remedy`, `Target.tsx` `needsProcessing`)
 - ✅ v0.503.6 **Tonight's and "Plan my week"'s framing badge on a single field names the mosaic of the same object he already has ("Mosaic started") instead of prescribing one** (`LibraryTarget.mosaic_companion`, `PlannedTarget`/`WeekTargetPick.mosaic_companion`, `framingRowBadge`)
 - ✅ v0.503.5 **The walk-away "some subs aren't on disk" hold now sees a mosaic panel with no readable sub — it holds instead of publishing a picture missing that part** (`pipeline._panels_with_nothing_readable`, `AutoStackHoldOut.panels_missing`, `holdReasonSentence`, `heldForFilesLine`)
