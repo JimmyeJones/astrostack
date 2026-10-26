@@ -602,7 +602,11 @@ def _cached_week_plan(
         # mosaic (which stands the verdict down). Both can move without any of
         # the acquisition numbers above moving — a rename that identifies the
         # object, or the first stack whose canvas spans more than one field.
-        tuple((t.size_arcmin, t.size_minor_arcmin, t.canvas_is_mosaic)
+        # The mosaic companion is the same kind of input: a "<T> (mosaic)"
+        # target appearing changes what the single field's pick says without
+        # moving the single field itself.
+        tuple((t.size_arcmin, t.size_minor_arcmin, t.canvas_is_mosaic,
+               t.mosaic_companion)
               for t in targets),
     )
     return cached_for_registry(

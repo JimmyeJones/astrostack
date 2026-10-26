@@ -1696,6 +1696,43 @@ def test_the_week_cache_notices_a_target_getting_deeper(client, solved_library):
         plan_router.plan_week = original
 
 
+def test_the_week_cache_notices_a_mosaic_companion_arriving(client, solved_library):
+    """A "<T> (mosaic)" target whose subs have not located yet adds no planned
+    target and moves none — but it changes what the single field's pick says.
+    So the companion is in the week's own signature, or the card would keep
+    saying "Needs 3×3 mosaic" for a whole TTL."""
+    import webapp.routers.plan as plan_router
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    params = {"when": JAN_EVENING}
+    assert client.get("/api/plan/week", params=params).status_code == 200
+
+    calls = {"n": 0}
+    real = plan_router.plan_week
+
+    def _counted(*a, **kw):  # noqa: ANN002, ANN003, ANN202
+        calls["n"] += 1
+        return real(*a, **kw)
+
+    plan_router.plan_week = _counted
+    try:
+        assert client.get("/api/plan/week", params=params).status_code == 200
+        assert calls["n"] == 0
+        # Matched by the convention's name, with no solved position of its own.
+        from seestack.io.scanner import mosaic_target_name
+
+        name = mosaic_target_name("M_42")
+        _add_mosaic_of_m42(solved_library, name=name, ra=None, dec=None)
+        tonight = client.get("/api/plan/tonight", params=params).json()
+        m42 = next(t for t in tonight["targets"]
+                   if t["already_targeted"] and t["target_safe"] == "M_42")
+        assert m42["mosaic_companion"] == name
+        assert client.get("/api/plan/week", params=params).status_code == 200
+        assert calls["n"] == 1
+    finally:
+        plan_router.plan_week = real
+
+
 def test_plan_week_min_alt_narrows_what_qualifies(client, solved_library):
     """A high altitude floor is honoured, exactly as the other planners honour it
     — a beginner with trees isn't told to shoot something at 20°."""
