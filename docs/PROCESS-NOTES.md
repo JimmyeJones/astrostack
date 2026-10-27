@@ -2,7 +2,8 @@
 
 ## 2026-10-27 (Builder, branch `claude/nice-carson-3du8rr`) — dogfood `--restack --big --mosaic --editor`: one polish fix (v0.503.11)
 
-- **Start:** no open PRs, no ungated bug; FOCUS suggested `--restack --big`, run with `--mosaic --editor` so the
+- **Start:** no open PRs, no ungated bug; baseline suite 8308 passed / 1 failed (the flake below) / 7 skipped;
+  pre-merge 8309 passed / 7 skipped (18m23s); vitest 4,868 green. FOCUS suggested `--restack --big`, run with `--mosaic --editor` so the
   restacked field, the 2×2 and the full-size 2×2 are all driven.
 - **Pass:** EXIT 0. Restack: 2 runs (3 → 6 subs), reel available, noise-delta pixel-exact (ratio 1.658). All 21 ops
   re-render on all three editor drives; full-size loupe follows the navigator and hugs its window; Auto trim 7.9 %
