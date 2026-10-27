@@ -1,5 +1,32 @@
 # Process notes & QA sweep records
 
+## 2026-10-27 (Scout, branch `claude/beautiful-newton-aovpvx`) — QA rotation sweep (4), the 2026-10-23 sweep's in-flight-job leads reproduced with a held real job: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated, so nothing owed.
+  No open PRs at start. Suite 8296 passed / 7 skipped on `08a7a4dd` (xdist `-n 4`, BLAS capped, 16m55s).
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors). Read as
+  one paragraph, next-best-move, readiness and the mosaic map agree on ~1 min a typical panel with the top-right
+  thinner, and Tonight's week plan names the mosaic every night.
+- **Sweep (4).** The 2026-10-23 (4) sweep added the merge's 409 and left three mutating routes with the same missing
+  job check, asking the next (4) sweep to reproduce one *the same way* before filing. The method was the merge
+  test's: hold the real job body on a `threading.Event`, press the route through the real client, release. The
+  probe test was in `tests/webapp/` (scratch, deleted).
+  - **`DELETE /api/targets/{safe}?remove_files=false`** (the UI's only form) **mid-`stack`:** 200; the job finished
+    `done`, `run_id: 1` (by reading, `refresh_target_stats` returns `None` for a missing entry rather than raising). The folder
+    and its `master.*` stayed on disk, and the next `POST /api/scan` re-adopted the target with its picture. A
+    "remove from library, keep files" with no job running behaves the same way. **Holds.**
+  - **`DELETE …/stack-runs/{id}` mid-`editor_export` of that run** (held inside `_render_recipe_fullres`): 200; the
+    export then ended `error`, a plain `FileNotFoundError` from `_carry_provenance`, *before*
+    `write_stack_outputs`. No orphan file, no half-recorded run, cover `None`. Failing closed is right when the
+    picture being exported was deleted. **Holds.** `stack_runs.id` is `AUTOINCREMENT`, so no annotation from a
+    deleted run can re-attach to a later one.
+  - **`POST …/cache/clear` under a running stack:** not run, judged low-stakes by reading. No stack-path code
+    reads `stage2_aligned/` (`stage2_path_for` has no caller), and with the owner's `copy_to_cache` off stage 1 is
+    empty and every reader falls back to `source_path` (`readable_frame_path`).
+  - **Left:** `DELETE /api/targets/{safe}?remove_files=true` mid-job, which is API-only (the UI always sends
+    `false`). It is the one remaining shape of this lead and the lowest-stakes one.
+- **Rotation: (4) done → next sweep is (1).**
+
 ## 2026-10-27 (Builder, branch `claude/nice-carson-viz24y`) — dogfood `--empty`, then `--deep --closing --editor`: one polish fix (v0.503.9), otherwise CLEAN
 
 - **Start:** no ungated bug, no open beginner feature that is not built, declined or gated; took FOCUS's suggested
