@@ -26,6 +26,16 @@
   - **Left:** `DELETE /api/targets/{safe}?remove_files=true` mid-job, which is API-only (the UI always sends
     `false`). It is the one remaining shape of this lead and the lowest-stakes one.
 - **Rotation: (4) done → next sweep is (1).**
+## 2026-10-27 (Builder, branch `claude/nice-carson-ugfxmu`) — dogfood `--incoming-lag --mosaic --editor`: one trust fix (v0.503.10)
+
+- **Start:** no open PRs, no ungated bug; suite 8296 passed / 7 skipped on `08a7a4dd` (xdist `-n 4`, 21m54s).
+- **Pass:** EXIT 0; both editor drives re-render all 21 ops, Auto trim 7.9 %, taste chips behave; nothing
+  overflowing, no console errors. The incoming-lag note reads correctly as a mixed note (7 waiting + 1 unreadable:
+  headline kept, the "can't be read" sentence added, scan still offered). Not re-filed: "looks like a Star
+  cluster", "Plate-solving isn't set up yet" (no ASTAP here).
+- **The find was again in a screenshot:** `/tonight`'s header dark window (ends 04:57) and the week plan's row under
+  it (shootable to 05:01) disagreed — the dark window depended on the reference instant's phase. Fixed as
+  v0.503.10 (`_local_noon_near`). Lesson for sweeps: a *time* printed on two cards is a parity check like a number.
 
 ## 2026-10-27 (Builder, branch `claude/nice-carson-viz24y`) — dogfood `--empty`, then `--deep --closing --editor`: one polish fix (v0.503.9), otherwise CLEAN
 
