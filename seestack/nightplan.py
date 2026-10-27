@@ -548,6 +548,38 @@ def _dark_window_after_noon(location, t_noon: datetime) -> DarkWindow | None:  #
     return None  # Sun never sets tonight.
 
 
+_NOON_STEP_MIN = 15
+
+
+def _local_noon_near(location, ref: datetime) -> datetime:  # noqa: ANN001
+    """The local solar noon nearest ``ref``, as a stamp on fixed UTC quarter-hours.
+
+    Starts from the nearest *mean* local noon (``12:00 - lon/15`` h UTC) and takes
+    the highest Sun in the hour either side of it, which always holds the true
+    noon (the equation of time never exceeds ~17 minutes). Two properties matter:
+
+    - **The stamp never depends on ``ref``'s own phase.** :func:`_dark_window_after_noon`
+      hangs the night's 4-minute grid off this stamp; the old search ran from
+      ``ref - 12 h`` in quarter-hour steps, so the night's edges moved by up to a
+      step with the instant it was asked at — Tonight (asked at "now") and Plan my
+      week (asked at local noon) printed two different ends of one dark window,
+      one card above the other.
+    - **It is defined at local midnight.** A ``ref ± 12 h`` argmax there has both
+      noons just outside its ends and returned whichever clipped edge was higher.
+    """
+    lon = ((float(location.lon.to_value("deg")) + 180.0) % 360.0) - 180.0
+    d = ref.astimezone(timezone.utc).date()
+    mean = datetime(d.year, d.month, d.day, 12, 0, 0, tzinfo=timezone.utc) - timedelta(
+        hours=lon / 15.0)
+    mean = min((mean + timedelta(days=k) for k in (-1, 0, 1)),
+               key=lambda m: abs((m - ref).total_seconds()))
+    lo = mean - timedelta(hours=1)
+    lo = lo.replace(second=0, microsecond=0) - timedelta(minutes=lo.minute % _NOON_STEP_MIN)
+    stamps, times = _times_grid(lo, lo + timedelta(hours=2, minutes=_NOON_STEP_MIN),
+                                float(_NOON_STEP_MIN))
+    return stamps[int(np.argmax(_sun_altitudes(times, location)))]
+
+
 def _find_dark_window(observer: Observer, when_utc: datetime) -> DarkWindow | None:
     """Astronomical dark window that ``when_utc`` sits in, or the next one after it.
 
@@ -562,17 +594,17 @@ def _find_dark_window(observer: Observer, when_utc: datetime) -> DarkWindow | No
     location = observer.earth_location()
 
     ref = when_utc.astimezone(timezone.utc)
-    # Local solar noon nearest the reference: highest Sun altitude in ±12 h.
-    noon_stamps, noon_times = _times_grid(ref - timedelta(hours=12),
-                                          ref + timedelta(hours=12), 15.0)
-    noon_alt = _sun_altitudes(noon_times, location)
-    t_noon = noon_stamps[int(np.argmax(noon_alt))]
+    t_noon = _local_noon_near(location, ref)
 
     # When the reference is before the nearest noon (small hours / pre-dawn), the
     # user may still be inside the *previous* night's darkness; prefer that ongoing
-    # window if ``when_utc`` hasn't passed its end yet.
+    # window if ``when_utc`` hasn't passed its end yet. That day's noon is searched
+    # for in its own right rather than taken as ``t_noon - 24 h``: solar noon
+    # drifts by up to half a minute a day, so the two can sit a quarter-hour apart
+    # and the night would again depend on which side of noon it was asked from.
     if ref < t_noon:
-        prev = _dark_window_after_noon(location, t_noon - timedelta(hours=24))
+        prev = _dark_window_after_noon(
+            location, _local_noon_near(location, t_noon - timedelta(hours=24)))
         if prev is not None and ref < prev.end:
             return prev
 

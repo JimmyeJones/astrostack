@@ -441,6 +441,45 @@ def test_find_dark_window_after_midnight_returns_the_ongoing_night():
     assert w.end.date() == _JUL_PREDAWN.date()
 
 
+@pytest.mark.parametrize("site", [
+    Observer(lat_deg=40.0, lon_deg=-2.0),      # the dogfood scratch site
+    Observer(lat_deg=40.0, lon_deg=-74.0),
+    Observer(lat_deg=-33.9, lon_deg=151.2),    # east of Greenwich, southern sky
+    Observer(lat_deg=60.0, lon_deg=25.0),      # long autumn nights at latitude
+], ids=["lon-2", "lon-74", "lon+151", "lat60"])
+@pytest.mark.parametrize("day", ["2026-03-11", "2026-08-20", "2026-10-27"])
+def test_one_night_has_one_dark_window_whenever_it_is_asked_about(site, day):
+    # Regression: the night's edges used to move with the instant the planner was
+    # asked at — the local-noon search ran on a 15-minute grid starting at
+    # ``ref - 12 h``, and the dark window's 4-minute grid hangs off that noon. So
+    # Tonight (asked at "now") said 04:57 while Plan my week (asked at local noon)
+    # said 05:01 for the very same night, one card above the other; and just after
+    # local midnight the ±12 h search had both noons outside its ends.
+    d = datetime.fromisoformat(day).replace(tzinfo=timezone.utc)
+    noon = d.replace(hour=12) - timedelta(hours=site.lon_deg / 15.0)
+    want = np_plan._find_dark_window(site, noon)
+    assert want is not None
+    seen = set()
+    ref = noon
+    while ref < want.end:
+        w = np_plan._find_dark_window(site, ref)
+        seen.add((w.start, w.end))
+        ref += timedelta(minutes=41, seconds=7)
+    assert seen == {(want.start, want.end)}
+
+
+def test_tonight_and_the_week_plan_agree_on_tonights_dark_window():
+    # The two cards on the Tonight page, asked the way the routes ask them:
+    # ``plan_tonight`` at "now" and the week's first night from the same "now".
+    site = Observer(lat_deg=40.0, lon_deg=-2.0)
+    for minute in (0, 7, 13, 22, 38, 51):
+        now = datetime(2026, 10, 27, 13, minute, 29, tzinfo=timezone.utc)
+        tonight = plan_tonight(site, now, include_catalog=False).dark_window
+        _label, week_first = np_plan.upcoming_dark_windows(site, now, 1)[0]
+        assert tonight["end_utc"] == week_first.end.isoformat(), minute
+        assert tonight["start_utc"] == week_first.start.isoformat(), minute
+
+
 def test_next_observing_windows_after_midnight_reports_tonight_not_tomorrow():
     # Regression: a pre-dawn user asking "when can I next shoot M92?" must be told
     # about the darkness still left *tonight*, not sent to tomorrow night. Before the

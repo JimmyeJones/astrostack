@@ -1,5 +1,31 @@
 # Shipped — the record
 
+## 2026-10-27 (Builder, branch `claude/nice-carson-ugfxmu`) — one night, one dark window
+
+- **v0.503.10** — 🐛 BUG FIX (PRIORITY 3, trust — the Tonight page), read off the `--incoming-lag --mosaic --editor`
+  dogfood screenshot of `/tonight`: the header said the dark window ran **06:45 PM – 04:57 AM (10.2 h)** while the
+  "Plan my week" row directly under it said tonight's best target was shootable **12:30 AM – 05:01 AM, 4.6 h** on a
+  **10.3 h** night — past the end of the darkness the page had just stated — and the "Add more" table further down
+  said **12:30–04:57, 4.5 h** for the same target.
+  **Cause:** `_find_dark_window` found local noon as the argmax of the Sun's altitude on a 15-minute grid that
+  *started at* `ref − 12 h`, and `_dark_window_after_noon` hangs the night's 4-minute grid off that noon stamp. So
+  the night's edges moved by up to a step with the instant the planner was asked at: Tonight asks at "now", the
+  week plan at local noon. Measured at the dogfood site on 2026-10-27, references every 7 minutes produced **four**
+  different windows (ends 04:58 / 04:59 / 05:00 / 05:01). A second, rarer shape: just after local midnight both
+  noons lie just outside a `ref ± 12 h` grid, and the argmax returned whichever *clipped edge* was higher; and the
+  previous-night path used `t_noon − 24 h`, which can sit a quarter-hour from that day's own noon.
+  **Fix:** new `nightplan._local_noon_near(location, ref)` starts from the nearest *mean* local noon
+  (`12:00 − lon/15` UTC), searches the hour either side of it on **fixed UTC quarter-hours** (the equation of time
+  never exceeds ~17 min, so the true noon is always inside), and is used for both the current and the previous
+  night. Every caller of `_find_dark_window` (Tonight, the week plan, next windows, season closing, best months,
+  the live page) now gets the same night from any reference. Swept 1,199 references at four sites (both
+  hemispheres, ±lon, lat 60°) over a year: 13 disagreements before, **0** after.
+  **Tests (+13, all shown failing on `origin/main`):** `test_one_night_has_one_dark_window_whenever_it_is_asked_about`
+  (4 sites × 3 dates, references every ~41 min from local noon to the window's end, including after midnight) and
+  `test_tonight_and_the_week_plan_agree_on_tonights_dark_window` (`plan_tonight`'s `dark_window` vs
+  `upcoming_dark_windows`' first night from the same "now", at six minute phases). Windows move by at most one
+  4-minute step; no config, schema, on-disk, default, endpoint or response-shape change.
+
 ## 2026-10-27 (Builder, branch `claude/nice-carson-viz24y`) — Tonight's Night picker names the night it is planning
 
 ### v0.503.9 — `frontend/src/tonight.ts::shownNightDate`, `routes/Tonight.tsx` header picker
