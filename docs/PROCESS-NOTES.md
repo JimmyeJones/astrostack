@@ -1,5 +1,18 @@
 # Process notes & QA sweep records
 
+## 2026-10-27 (Builder, branch `claude/nice-carson-3du8rr`) — dogfood `--restack --big --mosaic --editor`: one polish fix (v0.503.11)
+
+- **Start:** no open PRs, no ungated bug; FOCUS suggested `--restack --big`, run with `--mosaic --editor` so the
+  restacked field, the 2×2 and the full-size 2×2 are all driven.
+- **Pass:** EXIT 0. Restack: 2 runs (3 → 6 subs), reel available, noise-delta pixel-exact (ratio 1.658). All 21 ops
+  re-render on all three editor drives; full-size loupe follows the navigator and hugs its window; Auto trim 7.9 %
+  with the highlight-hold offer; scale pair 0 of 16 moved; taste chips 10 live / 2 at-limit. Nothing overflowing,
+  no console errors. Not re-filed: "looks like a Star cluster", "Plate-solving isn't set up yet" (no ASTAP here).
+- **The find was a screenshot again** (History): the Noise trend said "Cleaner … (σ 0.001 vs 0.001)" beside a run
+  card's "-43% noise vs your last stack". Fixed as v0.503.11 (`noiseTrendSummary`). The same fixed-3-decimals
+  shape at the owner's σ 0.015–0.020 is a plateau's few-percent step, which is why it was worth fixing rather than
+  calling it a fixture artefact.
+
 ## 2026-10-27 (Scout, branch `claude/beautiful-newton-aovpvx`) — QA rotation sweep (4), the 2026-10-23 sweep's in-flight-job leads reproduced with a held real job: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated, so nothing owed.

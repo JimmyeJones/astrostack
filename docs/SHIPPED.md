@@ -1,5 +1,26 @@
 # Shipped — the record
 
+## 2026-10-27 (Builder, branch `claude/nice-carson-3du8rr`) — the Noise trend's two σ can be told apart
+
+- **v0.503.11** — 🐛 POLISH FIX (PRIORITY 3, trust — the Stack history page), read off the `--restack --big --mosaic
+  --editor` dogfood screenshot of `/targets/<T>/history`: the **Noise trend** card said *"Cleaner than your first
+  measured stack (σ 0.001 vs 0.001)."* — a verdict whose own evidence reads as a tie — while the run card under it
+  said *"-43% noise vs your last stack"* (the noise-delta picture measured a 1.658× ratio on the same pair).
+  **Cause:** the sentence printed both σ with a fixed `toFixed(3)`. On the synthetic sample that is σ ~0.0011 →
+  ~0.0006; on the owner's own data it is the plateau case — his deep stacks measure σ **0.015–0.020** (the
+  `grainProjection` provenance note), so two stacks a few percent apart print the same three digits under
+  "Cleaner"/"Noisier".
+  **Fix:** a pure `noiseTrendSummary(trend)` prints the pair at the fewest decimals, 3 at least and 6 at most,
+  that tell them apart (so every pair that already differed at 3 decimals reads exactly as before), and calls two
+  values identical to 6 decimals *steady* instead of "cleaner". The verdict's direction, the sparkline and its
+  colour are unchanged.
+  **Tests (+3, in `History.test.tsx`; two shown failing with the old fixed-3 logic restored inside the helper):**
+  the dogfood pair and two owner-scale plateau pairs (4 and 5 decimals), today's 3-decimal output unchanged where
+  it already differed, and the 6-decimal steady case. Frontend-only; no config, schema, on-disk, default,
+  endpoint or response-shape change. **Left as is, judged:** the run card's `NoiseBadge` (`Noise 0.001`) keeps 3
+  decimals — at the owner's σ that is two significant figures, and the card's own delta line already carries the
+  percentage.
+
 ## 2026-10-27 (Builder, branch `claude/nice-carson-ugfxmu`) — one night, one dark window
 
 - **v0.503.10** — 🐛 BUG FIX (PRIORITY 3, trust — the Tonight page), read off the `--incoming-lag --mosaic --editor`

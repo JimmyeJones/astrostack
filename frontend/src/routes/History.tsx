@@ -113,6 +113,26 @@ export function noiseTrendSeries(runs: StackRun[]): number[] {
   return out;
 }
 
+// The Noise trend card's one-line verdict on a `noiseTrendSeries` (oldest →
+// newest). The two σ it quotes are what the reader checks the verdict against,
+// so they are printed at the fewest decimals (3 at least, 6 at most) that tell
+// them apart: a fixed 3 printed "Cleaner … (σ 0.001 vs 0.001)" beside a 43 %
+// drop, and a plateaued deep target (σ ~0.018, a few % apart) reads the same
+// way. Two values identical to 6 decimals are reported as steady. Pure.
+export function noiseTrendSummary(trend: number[]): string {
+  const first = trend[0];
+  const last = trend[trend.length - 1];
+  let d = 3;
+  while (d < 6 && last.toFixed(d) === first.toFixed(d)) d++;
+  if (last.toFixed(d) === first.toFixed(d)) {
+    return `Steady around σ ${first.toFixed(3)}.`;
+  }
+  const pair = `σ ${last.toFixed(d)} vs ${first.toFixed(d)}`;
+  return last < first
+    ? `Cleaner than your first measured stack (${pair}).`
+    : `Noisier than your first measured stack (${pair}).`;
+}
+
 // Translate the raw STACKER FITS card ("mean" / "sigma-clip" / "min-max-reject"
 // / "drizzle") into a plain-language "how it was combined" line for the Info
 // panel — the raw value is engine jargon a beginner won't recognise. Returns
@@ -1985,11 +2005,7 @@ export function HistoryView() {
                 </HintAnchor>
               </Group>
               <Text size="xs" c="dimmed">
-                {trend[trend.length - 1] < trend[0]
-                  ? `Cleaner than your first measured stack (σ ${trend[trend.length - 1].toFixed(3)} vs ${trend[0].toFixed(3)}).`
-                  : trend[trend.length - 1] > trend[0]
-                    ? `Noisier than your first measured stack (σ ${trend[trend.length - 1].toFixed(3)} vs ${trend[0].toFixed(3)}).`
-                    : `Steady around σ ${trend[0].toFixed(3)}.`}
+                {noiseTrendSummary(trend)}
               </Text>
               {integration ? (
                 <Text
