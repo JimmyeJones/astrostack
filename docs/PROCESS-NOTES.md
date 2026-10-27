@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-10-27 (Builder, branch `claude/nice-carson-jxxq55`) — big-picture dogfood `--dithered --big --mosaic --editor`: CLEAN; nothing shipped
+
+- **Start:** no open PRs; suite 8296 passed / 7 skipped on `cbe0881e` (xdist `-n 4`, BLAS capped, 16m22s). FOCUS: no
+  ungated bug; the Features section still has no open beginner item that is not built, declined or gated, so took
+  the last run's suggested `--dithered --big` (plus `--mosaic --editor`, so every canvas shape is driven).
+- **What it covered:** four editor drives — single field, 2×2, full-size 2×2 (decimated 847 px preview), dithered
+  2×2 — each re-rendering all 21 ops with undo/redo applied. Full-size loupe: caption, Noise-reduction caveat,
+  navigator follow and split view all as designed, box hugs the window. Auto trim 7.9 % (2×2), 7 % (full size),
+  30.7 % (dithered, against the recorded 30.3 % apron — no move); highlight-hold offered on the 2×2 and dithered.
+  Scale pair: 0 of 16 canvas-independent answers moved. Target, Dashboard and Tonight paragraphs agree on every
+  target; nothing overflowing, no console errors.
+- **Not findings, already recorded:** "looks like a Star cluster" (2026-10-17); "2×2 … about 3 fields of sky"
+  (v0.428.2 / v0.492.47 area-based pricing); the dithered canvas's "about 14 % … thin edge" beside a 31 % trim (the
+  v0.493.0 LEAD in Bugs); `/life-list [Still to shoot]` 14.5k px phone (v0.492.2); the Dashboard's "Plate-solving
+  isn't set up yet" (dogfood ships no ASTAP); the dithered canvas's silent panel map (by design, pinned).
+
 ## 2026-10-26 (Scout, branch `claude/beautiful-newton-k4ixuv`) — QA rotation sweep (3), new angle — a *hung* ffmpeg decoder against the Cancel button and the single job worker: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8288 passed / 7 skipped on `cb855387` (xdist `-n 4`, BLAS capped, 18m10s). **Inbox:** the same four (#878,
