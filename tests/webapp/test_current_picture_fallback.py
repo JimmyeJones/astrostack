@@ -204,9 +204,15 @@ def test_a_healthy_library_never_opens_a_project_for_the_fallback(
 
     opens: list[str] = []
     real = Library.open_target
+    ours = (solved_library / "library").resolve()
 
     def counted(self, safe_name, *args, **kwargs):
-        opens.append(safe_name)
+        # Only *this* library's opens. The patch is process-wide, and the job
+        # worker of an earlier test's app is not joined on shutdown, so a job it
+        # left in flight in the same xdist worker can still be opening its own
+        # library's NGC_7000 — which this assertion read as the archive's open.
+        if Path(self.root).resolve() == ours:
+            opens.append(safe_name)
         return real(self, safe_name, *args, **kwargs)
 
     monkeypatch.setattr(Library, "open_target", counted)

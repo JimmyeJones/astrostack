@@ -12,6 +12,19 @@
   card's "-43% noise vs your last stack". Fixed as v0.503.11 (`noiseTrendSummary`). The same fixed-3-decimals
   shape at the owner's σ 0.015–0.020 is a plateau's few-percent step, which is why it was worth fixing rather than
   calling it a fixture artefact.
+- **Second task: the recurring gallery-zip flake, root-caused.** The baseline suite came back `1 failed, 8308
+  passed` on `test_a_healthy_library_never_opens_a_project_for_the_fallback` (`assert ['NGC_7000'] == []`) —
+  its fourth recorded sighting, and the 2026-10-13 watcher-ordering fix had not closed it. It passed 480/480 run
+  alone, including 400 under `-n 8` with eight CPU burners, so it was not load inside the test. **Mechanism:** the
+  test patches `Library.open_target` *process-wide*, and `JobManager.stop()` does not join its worker, so a job an
+  earlier test's app left in flight in the same xdist worker keeps opening **its own** library — `NGC_7000` is
+  the synthetic library's last target, which is why the name never varied. A scratch test with a foreign thread
+  opening another library's `NGC_7000` reproduced the exact failure at line 216; counting only opens whose
+  `Library.root` is this test's library fixes it, and the guard is still armed (making `current_picture_path`
+  always open a project fails it). `test_pipeline_qc_isolation.py::test_refreshed_only_target_is_requeued_for_qc`
+  (`qc_calls == ["M_42"]`) had the same shape and got the same filter. The other two process-wide
+  `open_target` patches can't be fooled this way (`test_plan` raises, `test_cleanup_suggestions` asserts a name no
+  other test uses). Test-only, no version.
 
 ## 2026-10-27 (Scout, branch `claude/beautiful-newton-aovpvx`) — QA rotation sweep (4), the 2026-10-23 sweep's in-flight-job leads reproduced with a held real job: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
