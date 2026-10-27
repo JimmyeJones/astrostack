@@ -5,7 +5,7 @@ import {
   isoDate, minAltOptions, MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel,
   moonShootColor, moonShootLabel, moonShootWindowNote,
   moonWindowNote, notUpTonightNote, objectTypeBucket, partitionByUpTonight,
-  planDateBounds, planNightLabel, scoreColor, splitTargets, targetRowLabel, typeFilterOptions,
+  planDateBounds, planNightLabel, shownNightDate, scoreColor, splitTargets, targetRowLabel, typeFilterOptions,
   usableWindowNote,
 } from "./tonight";
 import type { NightPlan, PlannedTarget } from "./api/client";
@@ -418,6 +418,26 @@ describe("planDateBounds", () => {
     expected.setDate(expected.getDate() + MAX_PLAN_LOOKAHEAD_DAYS);
     expect(max).toBe(isoDate(expected));
     expect(new Date(max).getTime()).toBeGreaterThan(new Date(min).getTime());
+  });
+});
+
+describe("shownNightDate", () => {
+  it("shows the picked date as is", () => {
+    expect(shownNightDate("2026-08-01", "2026-07-15T20:00:00Z")).toBe("2026-08-01");
+  });
+  it("shows the night the dark window opens on when nothing is picked", () => {
+    const start = new Date(2026, 6, 15, 21, 30); // local evening
+    expect(shownNightDate("", start.toISOString())).toBe("2026-07-15");
+  });
+  it("after midnight it is still the night under way, not the new calendar day", () => {
+    // The plan made at 02:00 on the 16th is for the night that opened on the 15th.
+    const start = new Date(2026, 6, 15, 22, 0);
+    expect(shownNightDate(null, start.toISOString())).toBe("2026-07-15");
+  });
+  it("stays blank rather than guess with no dark window, or a bad one", () => {
+    expect(shownNightDate("", null)).toBe("");
+    expect(shownNightDate(undefined, undefined)).toBe("");
+    expect(shownNightDate("", "garbage")).toBe("");
   });
 });
 

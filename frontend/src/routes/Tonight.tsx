@@ -26,7 +26,7 @@ import {
   readinessFramingScope, recentreNudgeRowBadge,
   moonCueForTarget, moonPhaseLabel, moonShootColor, moonShootLabel,
   moonShootWindowNote, moonWindowNote, notUpTonightNote,
-  partitionByUpTonight, planDateBounds, planNightLabel, scoreColor, splitTargets,
+  partitionByUpTonight, planDateBounds, planNightLabel, scoreColor, shownNightDate, splitTargets,
   targetRowLabel, typeFilterOptions, usableWindowNote,
 } from "../tonight";
 
@@ -307,6 +307,7 @@ export function TonightView() {
     );
   }
 
+  const shownDate = shownNightDate(date, data.dark_window?.start_utc);
   const header = (
     <Group justify="space-between" align="flex-end" wrap="wrap">
       <div>
@@ -325,8 +326,8 @@ export function TonightView() {
         <TextInput
           type="date"
           label="Night"
-          value={date}
-          min={bounds.min}
+          value={shownDate}
+          min={shownDate && shownDate < bounds.min ? shownDate : bounds.min}
           max={bounds.max}
           onChange={(e) => setDate(e.currentTarget.value)}
           rightSection={date
