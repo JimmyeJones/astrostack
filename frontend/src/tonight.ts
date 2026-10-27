@@ -284,6 +284,23 @@ export function planDateBounds(now: Date): { min: string; max: string } {
   return { min: isoDate(now), max: isoDate(max) };
 }
 
+// What the Night picker should *show*. An empty pick means "tonight", and a
+// native date input renders that as a bare "mm/dd/yyyy" — which reads as a
+// form field still waiting to be filled in, under a heading that says it is
+// already planning tonight. So show the night the plan is actually for: the
+// local date the dark window opens on (after midnight that is still
+// yesterday's date — the night that is under way). With no dark window to go
+// by (no site, polar day) it stays blank rather than guess.
+export function shownNightDate(
+  date: string | null | undefined,
+  darkStartUtc: string | null | undefined,
+): string {
+  if (date) return date;
+  if (!darkStartUtc) return "";
+  const d = new Date(darkStartUtc);
+  return Number.isNaN(d.getTime()) ? "" : isoDate(d);
+}
+
 // A friendly label for which night the plan is for. Tonight (empty/today) reads
 // "tonight"; a future pick names the date ("the night of Sat 15 Aug"). `now` is
 // injectable for testing. Returns "" for tonight so callers can keep their

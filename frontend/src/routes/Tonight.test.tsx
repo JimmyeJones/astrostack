@@ -483,6 +483,33 @@ describe("TonightView", () => {
     expect(screen.getByDisplayValue("45°")).toBeInTheDocument();
   });
 
+  it("shows the night it is planning in the Night picker, not a blank mm/dd/yyyy", async () => {
+    const start = new Date(2026, 0, 15, 19, 0);
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      dark_window: {
+        start_utc: start.toISOString(), end_utc: new Date(2026, 0, 16, 5, 0).toISOString(),
+        duration_minutes: 600, sun_alt_threshold_deg: -18,
+      },
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
+    const picker = screen.getByLabelText("Night") as HTMLInputElement;
+    expect(picker.value).toBe("2026-01-15");
+    // It is a display of tonight, not a pick: no reset button, and the
+    // picker's floor lets the shown night be valid even if it is behind today.
+    expect(screen.queryByRole("button", { name: "Tonight" })).not.toBeInTheDocument();
+    expect(picker.min <= "2026-01-15").toBe(true);
+  });
+
+  it("leaves the Night picker blank when there is no dark window to name", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(
+      plan({ location_source: "none", observer: null, dark_window: null, moon_illumination: null }));
+    renderTonight();
+    const picker = await screen.findByLabelText("Night") as HTMLInputElement;
+    expect(picker.value).toBe("");
+  });
+
   it("plans a chosen future night by passing the date to the API", async () => {
     const spy = vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({}));
     renderTonight();

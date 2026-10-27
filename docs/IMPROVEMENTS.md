@@ -3591,6 +3591,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.9 **Tonight's Night picker shows the night it is planning (the date the dark window opens on) instead of a blank `mm/dd/yyyy`** (`tonight.ts::shownNightDate`); dogfood find, entry in `SHIPPED.md`.
 - ✅ v0.503.8 **A Moon & Sun job whose ffmpeg decoder stops sending frames can be cancelled, and a decoder silent for 5 minutes is killed with a plain error — the single job worker is no longer wedged until a restart** (`seestack/video/ffmpeg.py` `iter_frames(should_cancel=, stall_timeout_s=)`, `_DecodeWatchdog`, `VideoDecoderStalled`). Scout's sweep (3) entry; full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.503.7 **The thin-stack warning names the located subs a restack would fold in even while a newer sub is still unlocated, by the "Process target" button on screen** (`thinStackWarning` `remedy`, `Target.tsx` `needsProcessing`)
 - ✅ v0.503.6 **Tonight's and "Plan my week"'s framing badge on a single field names the mosaic of the same object he already has ("Mosaic started") instead of prescribing one** (`LibraryTarget.mosaic_companion`, `PlannedTarget`/`WeekTargetPick.mosaic_companion`, `framingRowBadge`)

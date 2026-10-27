@@ -1,5 +1,18 @@
 # Process notes & QA sweep records
 
+## 2026-10-27 (Builder, branch `claude/nice-carson-viz24y`) — dogfood `--empty`, then `--deep --closing --editor`: one polish fix (v0.503.9), otherwise CLEAN
+
+- **Start:** no ungated bug, no open beginner feature that is not built, declined or gated; took FOCUS's suggested
+  `--empty` (last run 2026-10-16) and `--deep --closing`, with `--editor`.
+- **`--empty`:** EXIT 0, nothing overflowing, no console errors; heights identical to the 2026-10-16 baseline
+  (tallest `[phone] /life-list [Still to shoot]` 14,604 px, `/settings/more` 5,042).
+- **`--deep --closing --editor`:** EXIT 0; all 21 ops re-render, undo/redo apply, taste chips answer live vs.
+  marked correctly; frames table 301 of 1,200 rows / 7,542 nodes / first paint 955 ms, 601 after scrolling; the
+  closing card and the week plan name the same target and night. Not re-filed: "looks like a Star cluster", the
+  "Plate-solving isn't set up yet" notice (no ASTAP in dogfood), the 3×3 mosaic pricing.
+- **The find was in a screenshot, not the probe's text:** every Tonight visit opened its Night picker as a blank
+  `mm/dd/yyyy` under a heading already planning tonight — fixed as v0.503.9 (`shownNightDate`).
+
 ## 2026-10-27 (Builder, branch `claude/nice-carson-jxxq55`) — big-picture dogfood `--dithered --big --mosaic --editor`: CLEAN; nothing shipped
 
 - **Start:** no open PRs; suite 8296 passed / 7 skipped on `cbe0881e` (xdist `-n 4`, BLAS capped, 16m22s). FOCUS: no

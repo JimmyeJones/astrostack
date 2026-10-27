@@ -1,5 +1,26 @@
 # Shipped — the record
 
+## 2026-10-27 (Builder, branch `claude/nice-carson-viz24y`) — Tonight's Night picker names the night it is planning
+
+### v0.503.9 — `frontend/src/tonight.ts::shownNightDate`, `routes/Tonight.tsx` header picker
+
+**What.** Found reading the `--empty` and `--deep --closing` dogfood screenshots: the Tonight page's **Night** date
+picker opened as a bare `mm/dd/yyyy` on every visit, directly under a heading saying it is already planning
+tonight and beside a dark window it had already worked out — a blank form field reads to a beginner as "fill this
+in first". An empty pick has always meant "tonight"; the input just had nothing to show for it.
+
+**How.** `shownNightDate(date, dark_window.start_utc)` gives the picker its displayed value: the user's pick as is,
+else the local date the plan's dark window opens on — so after midnight it is still the night under way, not the
+new calendar day — else blank (no site, polar day: nothing to name, so no guess). The query state is untouched (an
+empty pick still sends no `date`), so the "Tonight" reset button still appears only for a real pick, and the
+picker's `min` drops to the shown night when that is behind today so the field never renders out of range. The
+error-state picker (no `data`) is unchanged.
+
+**Tests.** `tonight.test.ts` (+4: pick wins, dark-window night, after-midnight night, blank without/with a bad
+window) and `Tonight.test.tsx` (+2: the planned night is shown with no reset button and an in-range `min` — fails
+before, shown by reverting the value; blank on a site-less install). Upgrade-safe: frontend-only, no API, config,
+schema or default change.
+
 ## 2026-10-26 (Builder, branch `claude/nice-carson-pm8g56`) — a hung ffmpeg decoder no longer ignores Cancel
 
 ### v0.503.8 — `seestack/video/ffmpeg.py` `iter_frames(should_cancel=, stall_timeout_s=)`, `_DecodeWatchdog`, `VideoDecoderStalled`
