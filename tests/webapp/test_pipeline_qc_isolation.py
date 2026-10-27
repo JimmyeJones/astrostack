@@ -15,6 +15,8 @@ and carry on (and a cancel must still classify as a cancel, not an error).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from seestack.io.library import Library
 from webapp import pipeline
 from webapp.config import Settings
@@ -99,9 +101,13 @@ def test_refreshed_only_target_is_requeued_for_qc(solved_library, monkeypatch):
 
     qc_calls: list[str] = []
     real_open = Library.open_target
+    ours = (solved_library / "library").resolve()
 
     def spy_open(self, safe):  # noqa: ANN001
-        qc_calls.append(safe)
+        # This library's opens only: the patch is process-wide, and a job an
+        # earlier test's app left in flight can still be opening its own library.
+        if Path(self.root).resolve() == ours:
+            qc_calls.append(safe)
         return real_open(self, safe)
 
     monkeypatch.setattr(Library, "open_target", spy_open)

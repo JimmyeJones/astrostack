@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import roughCases from "../roughlyAligned.cases.json";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, panelGainSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, contributingSubs, calibrationSummaryText, autoDrizzleNote, drizzleDegradedNote, rejectionDegradedNote, removedOverlayCaption, derivedFromNote, overwrittenPictureNote } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, noiseTrendSummary, combineMethodLabel, formatEngineVersion, photometricSummaryText, panelGainSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, contributingSubs, calibrationSummaryText, autoDrizzleNote, drizzleDegradedNote, rejectionDegradedNote, removedOverlayCaption, derivedFromNote, overwrittenPictureNote } from "./History";
 import { formatIntegration, formatStampDateTime } from "../format";
 import * as client from "../api/client";
 import { FULL_RES_PNG_MAX_LONG_EDGE } from "../fullres";
@@ -1499,6 +1499,30 @@ describe("calibrationSummaryText", () => {
       [{ key: "CALSTAT", value: "dark" }], null, [skip], [warn]);
     expect(r?.skipped).toBe(skip);
     expect(r?.mismatch).toBe(warn);
+  });
+});
+
+describe("noiseTrendSummary", () => {
+  it("quotes the two σ at the precision that tells them apart", () => {
+    // The dogfood sample: a 43 % drop that a fixed 3 decimals printed as
+    // "σ 0.001 vs 0.001" under the word "Cleaner".
+    expect(noiseTrendSummary([0.00112, 0.00064]))
+      .toBe("Cleaner than your first measured stack (σ 0.0006 vs 0.0011).");
+    // A plateaued deep target at the owner's measured σ (~0.018), a few % apart.
+    expect(noiseTrendSummary([0.0183, 0.0179]))
+      .toBe("Cleaner than your first measured stack (σ 0.0179 vs 0.0183).");
+    expect(noiseTrendSummary([0.01831, 0.01834]))
+      .toBe("Noisier than your first measured stack (σ 0.01834 vs 0.01831).");
+  });
+
+  it("keeps today's 3 decimals where they already differ", () => {
+    expect(noiseTrendSummary([0.05, 0.04, 0.03]))
+      .toBe("Cleaner than your first measured stack (σ 0.030 vs 0.050).");
+  });
+
+  it("calls two values the same to 6 decimals steady, never cleaner", () => {
+    expect(noiseTrendSummary([0.0183, 0.01830000001])).toBe("Steady around σ 0.018.");
+    expect(noiseTrendSummary([0.02, 0.02])).toBe("Steady around σ 0.020.");
   });
 });
 

@@ -1,5 +1,32 @@
 # Process notes & QA sweep records
 
+## 2026-10-27 (Builder, branch `claude/nice-carson-3du8rr`) — dogfood `--restack --big --mosaic --editor`: one polish fix (v0.503.11)
+
+- **Start:** no open PRs, no ungated bug; baseline suite 8308 passed / 1 failed (the flake below) / 7 skipped;
+  pre-merge 8309 passed / 7 skipped (18m23s); vitest 4,868 green. FOCUS suggested `--restack --big`, run with `--mosaic --editor` so the
+  restacked field, the 2×2 and the full-size 2×2 are all driven.
+- **Pass:** EXIT 0. Restack: 2 runs (3 → 6 subs), reel available, noise-delta pixel-exact (ratio 1.658). All 21 ops
+  re-render on all three editor drives; full-size loupe follows the navigator and hugs its window; Auto trim 7.9 %
+  with the highlight-hold offer; scale pair 0 of 16 moved; taste chips 10 live / 2 at-limit. Nothing overflowing,
+  no console errors. Not re-filed: "looks like a Star cluster", "Plate-solving isn't set up yet" (no ASTAP here).
+- **The find was a screenshot again** (History): the Noise trend said "Cleaner … (σ 0.001 vs 0.001)" beside a run
+  card's "-43% noise vs your last stack". Fixed as v0.503.11 (`noiseTrendSummary`). The same fixed-3-decimals
+  shape at the owner's σ 0.015–0.020 is a plateau's few-percent step, which is why it was worth fixing rather than
+  calling it a fixture artefact.
+- **Second task: the recurring gallery-zip flake, root-caused.** The baseline suite came back `1 failed, 8308
+  passed` on `test_a_healthy_library_never_opens_a_project_for_the_fallback` (`assert ['NGC_7000'] == []`) —
+  its fourth recorded sighting, and the 2026-10-13 watcher-ordering fix had not closed it. It passed 480/480 run
+  alone, including 400 under `-n 8` with eight CPU burners, so it was not load inside the test. **Mechanism:** the
+  test patches `Library.open_target` *process-wide*, and `JobManager.stop()` does not join its worker, so a job an
+  earlier test's app left in flight in the same xdist worker keeps opening **its own** library — `NGC_7000` is
+  the synthetic library's last target, which is why the name never varied. A scratch test with a foreign thread
+  opening another library's `NGC_7000` reproduced the exact failure at line 216; counting only opens whose
+  `Library.root` is this test's library fixes it, and the guard is still armed (making `current_picture_path`
+  always open a project fails it). `test_pipeline_qc_isolation.py::test_refreshed_only_target_is_requeued_for_qc`
+  (`qc_calls == ["M_42"]`) had the same shape and got the same filter. The other two process-wide
+  `open_target` patches can't be fooled this way (`test_plan` raises, `test_cleanup_suggestions` asserts a name no
+  other test uses). Test-only, no version.
+
 ## 2026-10-27 (Scout, branch `claude/beautiful-newton-aovpvx`) — QA rotation sweep (4), the 2026-10-23 sweep's in-flight-job leads reproduced with a held real job: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated, so nothing owed.
