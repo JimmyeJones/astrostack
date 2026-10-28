@@ -82,30 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟡 (Scout 2026-10-28, QA rotation sweep (3)) — a Settings "ASTAP path" that is set but wrong (a stray space, a
-  pasted pair of quotes, the host-side path, `astap_cli`, the install *folder*) silently replaces the bundled ASTAP
-  that works, and the app then tells him to install ASTAP — or to add a star database he already has.**
-  *(Pillar: friendliness / trust — PRIORITY 3; size **S**; severity low-to-moderate — every sub fails to solve, so
-  nothing stacks, and the advice on screen points away from the one-field fix; nothing is lost on disk.
-  Confidence: **reproduced** through the real `find_astap` / `solve_one` / `system._astap_info` with a working stub
-  on `SEESTACK_ASTAP_PATH` (the image's layout), and a `PUT /api/settings` of `" "` stored verbatim; occurrence on
-  his install **unmeasured** — it needs `astap_path` set, which the default leaves blank.)* `find_astap(user_path)`
-  returns `None` whenever the setting is non-empty and does not exist — it never falls back to
-  `SEESTACK_ASTAP_PATH` — and nothing strips the value (Settings' `value || null` keeps `" "`; the field help says
-  "Blank = auto-detect", and a field holding one space looks blank). Measured, 6 values: unset → found, runs, DB
-  found; `"<exe> "`, `'"<exe>"'`, a NAS host-side path (the left half of `docker-compose.yml`'s example mount), `<dir>/astap_cli` → `found: false`, hint "ASTAP
-  binary not found. Set astap_path or SEESTACK_ASTAP_PATH.", every sub `astap.exe not found. Install ASTAP from
-  …`; the folder `/opt/astap` → `found: true`, `runs: false`, `star_db_found: false` (`find_star_db_dir` looks beside a
-  *file*, so a folder looks in its parent) — on v0.503.18 the hint read **"no star database … Add one (e.g. d05) to
-  /opt"**, and since v0.503.19 it reads "can't be started — check the file is executable"; neither says "that is the
-  folder — name the program inside it", and the database he already has is badged missing. Filesystem side effects: **none** — `incoming/` unchanged. Fix shape (additive):
-  strip whitespace and one pair of matching quotes from `astap_path` before use (or on save); when the set path is
-  a directory, look for `astap`/`astap_cli` inside it; when the set path doesn't exist, say so by name in the
-  `/api/system` hint and the solve reason ("the ASTAP path in Settings, `…`, doesn't exist — clear it to use the
-  built-in one"), keeping it a setup reason `classify_solve_setup_error` still maps to `"astap"`. Whether a
-  missing set path should *fall back* to the bundled binary is a behaviour change — say it, don't do it silently.
-  Test: the six values above through `_astap_info` and `solve_one`.
-
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
@@ -2478,6 +2454,32 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-ANSWERED (2026-10-28) — a picture he never edited comes out with a ragged, colour-confetti border,
+  and its "Full-res PNG" takes "a super long time".** He sent two full-res PNGs (an IC 1396 field and a star
+  field, both tall multi-night canvases with stepped, rotated edges): a band of per-pixel colour speckle all
+  round, the low-coverage strip where only a few rotated subs land, and a darker ring just inside it. "About
+  25 % of my images" look like this, and he could not tell whether it was his sensor or the app. **It is the
+  app.** Asked by multiple choice: the download was **one picture's Full-res PNG**, the pictures were **never
+  edited**, and the fix is **"Both"**. The cause: `pipeline.render_run_full_res_png` with no recipe goes to
+  `thumbnail.render_preview_png_full_res`, a plain STF of the whole master with no border trim; and
+  `auto_crop_border` (on) is only read by the editor's Auto. So `_trim_rect_for_run` exists and is never asked
+  for the one picture he actually downloads. **Spec:** (1) **Trim on every surface of an unedited picture.**
+  A run with no saved recipe applies `_trim_rect_for_run` when `Settings.auto_crop_border` is on, through the
+  same rule as the editor's Auto. That covers Full-res PNG, the full-size archive, the share JPEG and the
+  wallpaper. The stored preview / Library tile only gets it if it can be re-rendered additively. Never touch
+  the FITS. A saved recipe's own crop always wins. Honour AGENTS.md §1's "a trim above ~15 % of the canvas is
+  a bug" with a `--mosaic` dogfood measurement in the commit. (2) **Auto-edit, both halves.** New stacks: his
+  "Finish" switch (`auto_edit_on_autostack`) is his to flip, and he has been told where it is. Never flip his
+  stored value. Existing pictures: one plain-language "Finish my unedited pictures" action that runs the
+  existing `pipeline._auto_edit_process_run` path over every current picture with **no saved recipe**. Hand-saved looks are
+  never touched, it is reversible with the editor's Reset, and the UI rule applies, so it goes into an
+  existing grouping with no new banner. (3) **Speed.** Measure `render_run_full_res_png` on a mosaic-sized
+  canvas, then fix the measured cost. Candidates: the PNG `compress_level`, caching the render keyed on
+  run + recipe + trim, and a "Preparing your picture…" state instead of a silent wait. (4) **The dark ring**:
+  check whether Auto's background flatten removes it on `--mosaic`. If not, file it as a measured Bugs entry
+  (likely unflattened Seestar vignetting averaged at the canvas edge). Size **M** for (1), **S** for (2) and
+  (3) each; ship as separate commits.
+
 - ~~**⭐ OWNER-APPROVED (2026-10-14, "Yes go") — the Settings page redesign.**~~ — **✅ ALL FIVE SLICES SHIPPED
   (v0.496.0–v0.500.0).** Spec stays at [`docs/design/settings-redesign.md`](design/settings-redesign.md); each
   slice's record, including every spec-vs-code correction, is in [`SHIPPED.md`](SHIPPED.md). Do not re-pick it.
@@ -3593,7 +3595,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
-- ✅ v0.503.21 **A `NaN`/`Infinity` literal in a request body is rejected with a 422, not a 500** (`main._install_validation_handler`, `_json_safe_input`)
+- ✅ v0.503.22 **A `NaN`/`Infinity` literal in a request body is rejected with a 422, not a 500** (`main._install_validation_handler`, `_json_safe_input`)
+- ✅ v0.503.21 **A Settings "ASTAP path" that is set but wrong no longer reads as "ASTAP isn't installed" — stray spaces/quotes are cleaned, a folder finds the program inside it, and a path that leads nowhere is named (with the built-in ASTAP offered) in the solve reason and the Settings hint** (`astap._clean_user_path`, `astap_path_problem`, `system._astap_info`; Scout sweep (3) entry)
 - ✅ v0.503.20 **The walk-away per-panel readability hold compares each panel with the subs it had when the standing picture was made — an off-line newest night on one panel, or a brand-new off-line panel, no longer holds a stack that would deepen the rest with a false "much thinner / out of the picture"** (`pipeline._subs_on_record_at_picture`, `frames.ingested_at` ≤ the best run's `timestamp_utc`; Scout sweep (2) entry)
 - ✅ v0.503.19 **An ASTAP that is there but can't be started reads as a setup problem — Target banner, Dashboard cue and Settings badge say so, and the solve ladder stops on it** (`ASTAPCannotRunError`, `SOLVE_SETUP_ASTAP_CANNOT_RUN`, `astapReadiness` `runs === false`)
 - ✅ v0.503.18 **A North-up save made before v0.288 on a mosaic canvas is recognised again, so a share render no longer turns it a second time** (`preview_orient.recovered_north_up_deg` asks the WCS at the master's centre, not the preview grid's); Scout's sweep (1), full entry in `SHIPPED.md`

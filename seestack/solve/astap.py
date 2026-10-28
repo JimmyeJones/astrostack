@@ -83,17 +83,48 @@ _DEFAULT_WINDOWS_PATHS = (
 )
 
 
+# What a folder named as the ASTAP path is searched for, in order: the GUI
+# program the Docker image bundles, the command-line build, the Windows name.
+_ASTAP_PROGRAM_NAMES = ("astap", "astap_cli", "astap.exe")
+
+
+def _clean_user_path(user_path: str | os.PathLike[str] | None) -> str | None:
+    """The ASTAP path as typed, minus what a paste adds around it — surrounding
+    whitespace and one pair of matching quotes — or ``None`` when nothing is left.
+
+    The Settings field says "Blank = auto-detect", and a field holding a single
+    space *looks* blank, so it means blank here; a path copied from a file
+    manager often arrives as ``"…"``. Nothing inside the path is touched.
+    """
+    if user_path is None:
+        return None
+    text = str(user_path).strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        text = text[1:-1].strip()
+    return text or None
+
+
 def find_astap(user_path: str | os.PathLike[str] | None = None) -> Path | None:
     """
     Locate astap.exe. Order:
-      1. Explicit user path (e.g. from project settings).
+      1. Explicit user path (e.g. from project settings) — cleaned of stray
+         whitespace / quotes (:func:`_clean_user_path`); a *folder* is searched
+         for the program inside it.
       2. ``SEESTACK_ASTAP_PATH`` environment variable.
       3. ``astap`` on PATH.
       4. Common Windows install directories.
       5. ``%LOCALAPPDATA%\\Programs\\astap\\astap.exe``.
+
+    A set path that doesn't lead to a program returns ``None`` — it does **not**
+    fall back to the others, because the user named it; :func:`astap_path_problem`
+    says why in words.
     """
-    if user_path:
-        p = Path(user_path)
+    cleaned = _clean_user_path(user_path)
+    if cleaned:
+        p = Path(cleaned)
+        if p.is_dir():
+            return next((p / n for n in _ASTAP_PROGRAM_NAMES
+                         if (p / n).is_file()), None)
         return p if p.exists() else None
     env_path = os.environ.get("SEESTACK_ASTAP_PATH")
     if env_path:
@@ -113,6 +144,35 @@ def find_astap(user_path: str | os.PathLike[str] | None = None) -> Path | None:
         if cand.exists():
             return cand
     return None
+
+
+def astap_path_problem(user_path: str | os.PathLike[str] | None) -> str | None:
+    """A plain-language sentence when the ASTAP path set in Settings is the reason
+    ASTAP can't be found, else ``None`` (unset, or it leads to a program).
+
+    Without it a mistyped path read as "ASTAP isn't installed", and the advice on
+    screen — install ASTAP — pointed away from the one-field fix. The sentence
+    names the path, says what is wrong with it, and offers the built-in ASTAP by
+    name when one is there to fall back to (it never falls back on its own).
+    """
+    cleaned = _clean_user_path(user_path)
+    if not cleaned or find_astap(cleaned) is not None:
+        return None
+    p = Path(cleaned)
+    try:
+        is_dir = p.is_dir()
+    except OSError:
+        is_dir = False
+    if is_dir:
+        what = (f"The ASTAP path in Settings, \u201c{cleaned}\u201d, is a folder with no "
+                "ASTAP program in it")
+    else:
+        what = (f"The ASTAP path in Settings, \u201c{cleaned}\u201d, doesn't exist "
+                "inside the app (a NAS path has to be the one the container sees)")
+    builtin = find_astap(None)
+    fix = (f"clear it to use the built-in ASTAP ({builtin})" if builtin is not None
+           else "clear it, or point it at the ASTAP program itself")
+    return f"{what} \u2014 {fix}."
 
 
 def find_star_db_dir(astap_path: str | os.PathLike[str] | None = None) -> Path | None:
@@ -193,6 +253,11 @@ class ASTAPSolver:
     ) -> None:
         path = find_astap(astap_path)
         if path is None:
+            problem = astap_path_problem(astap_path)
+            if problem is not None:
+                # "astap not found" keeps it a setup reason for
+                # classify_solve_setup_error and the frontend signature.
+                raise ASTAPError(f"astap not found: {problem}")
             raise ASTAPError(
                 "astap.exe not found. Install ASTAP from https://www.hnsky.org/astap.htm "
                 "and either add it to PATH or set the path in Settings."

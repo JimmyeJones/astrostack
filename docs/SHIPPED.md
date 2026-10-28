@@ -2,7 +2,7 @@
 
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-m8o5zc`) — a `NaN`/`Infinity` literal in a request body is a 422, not a 500
 
-- **v0.503.21** — 🐛 BUG FIX (robustness, Scout QA rotation sweep (4)). The server's JSON parser accepts the
+- **v0.503.22** — 🐛 BUG FIX (robustness, Scout QA rotation sweep (4)). The server's JSON parser accepts the
   `NaN`/`Infinity`/`-Infinity` literals, and FastAPI's default 422 echoes the offending `input` back; the response
   encoder (`allow_nan=False`) could not write it, so the *rejection* crashed into a 500 with a traceback in the log.
   Measured on a real two-target library with a stack run: one such literal in each numeric field of every
@@ -17,6 +17,47 @@
   nested in a rejected preset body, and an ordinary 422 keeping FastAPI's shape; 4 of 5 fail with the handler
   reverted. No config, schema, default, layout or response-shape change (the browser's `JSON.stringify` never
   sends these literals, so no frontend path changes).
+## 2026-10-28 (Builder, branch `claude/pensive-hawking-9jw3c3`) — a set-but-wrong ASTAP path says what is wrong with it
+
+- **v0.503.21** — 🐛 BUG FIX (friendliness / trust, the Scout's sweep (3) entry below). `find_astap(user_path)`
+  took the Settings value verbatim and returned `None` for anything that didn't exist, so a stray space, pasted
+  quotes, a NAS host-side path or `astap_cli` read everywhere as "ASTAP binary not found" / "Install ASTAP", and the
+  install *folder* was taken as the program (`runs: false`, database badged missing). **Fix:** `_clean_user_path`
+  strips surrounding whitespace and one pair of matching quotes (whitespace-only means blank → auto-detect, as the
+  field's help says); a folder is searched for `astap` / `astap_cli` / `astap.exe`; a path that still leads nowhere
+  returns `None` as before — **no silent fallback** — and the new `astap_path_problem` names it ("doesn't exist
+  inside the app" / "is a folder with no ASTAP program in it") and offers the built-in ASTAP by path when one is
+  found. `ASTAPSolver` raises it as `astap not found: …`, so `classify_solve_setup_error` still maps it to
+  `SOLVE_SETUP_ASTAP_MISSING`; `/api/system` uses it as the hint. The Target banner's "ASTAP wasn't found" text now
+  says to check a set path first (Settings says what's wrong). **Tests:** `tests/webapp/test_astap_set_path.py` — the
+  Scout's values through `find_astap`, `solve_one` (incoming/ untouched) and `/api/system` with a working stub on
+  `SEESTACK_ASTAP_PATH`; all 7 fail before. No config, schema, default or layout change; the stored value is never
+  rewritten.
+
+  *Entry as filed:* **🟡 (Scout 2026-10-28, QA rotation sweep (3)) — a Settings "ASTAP path" that is set but wrong (a stray space, a
+  pasted pair of quotes, the host-side path, `astap_cli`, the install *folder*) silently replaces the bundled ASTAP
+  that works, and the app then tells him to install ASTAP — or to add a star database he already has.**
+  *(Pillar: friendliness / trust — PRIORITY 3; size **S**; severity low-to-moderate — every sub fails to solve, so
+  nothing stacks, and the advice on screen points away from the one-field fix; nothing is lost on disk.
+  Confidence: **reproduced** through the real `find_astap` / `solve_one` / `system._astap_info` with a working stub
+  on `SEESTACK_ASTAP_PATH` (the image's layout), and a `PUT /api/settings` of `" "` stored verbatim; occurrence on
+  his install **unmeasured** — it needs `astap_path` set, which the default leaves blank.)* `find_astap(user_path)`
+  returns `None` whenever the setting is non-empty and does not exist — it never falls back to
+  `SEESTACK_ASTAP_PATH` — and nothing strips the value (Settings' `value || null` keeps `" "`; the field help says
+  "Blank = auto-detect", and a field holding one space looks blank). Measured, 6 values: unset → found, runs, DB
+  found; `"<exe> "`, `'"<exe>"'`, a NAS host-side path (the left half of `docker-compose.yml`'s example mount), `<dir>/astap_cli` → `found: false`, hint "ASTAP
+  binary not found. Set astap_path or SEESTACK_ASTAP_PATH.", every sub `astap.exe not found. Install ASTAP from
+  …`; the folder `/opt/astap` → `found: true`, `runs: false`, `star_db_found: false` (`find_star_db_dir` looks beside a
+  *file*, so a folder looks in its parent) — on v0.503.18 the hint read **"no star database … Add one (e.g. d05) to
+  /opt"**, and since v0.503.19 it reads "can't be started — check the file is executable"; neither says "that is the
+  folder — name the program inside it", and the database he already has is badged missing. Filesystem side effects: **none** — `incoming/` unchanged. Fix shape (additive):
+  strip whitespace and one pair of matching quotes from `astap_path` before use (or on save); when the set path is
+  a directory, look for `astap`/`astap_cli` inside it; when the set path doesn't exist, say so by name in the
+  `/api/system` hint and the solve reason ("the ASTAP path in Settings, `…`, doesn't exist — clear it to use the
+  built-in one"), keeping it a setup reason `classify_solve_setup_error` still maps to `"astap"`. Whether a
+  missing set path should *fall back* to the bundled binary is a behaviour change — say it, don't do it silently.
+  Test: the six values above through `_astap_info` and `solve_one`.
+
 ## 2026-10-28 (Builder, branch `claude/pensive-hawking-9jw3c3`) — the per-panel readability hold asks about the picture standing
 
 - **v0.503.20** — 🐛 BUG FIX (autonomy / trust, the Scout's sweep (2) entry below). `_panels_with_nothing_readable`
