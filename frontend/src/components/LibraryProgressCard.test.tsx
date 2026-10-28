@@ -107,7 +107,7 @@ describe("LibraryProgressCard", () => {
     // words the planner's identical chip uses.
     fireEvent.click(screen.getByText("~1 more night"));
     expect(
-      await screen.findByText(/At your recent pace \(~1h.*per clear night\), that's about 1 more clear night\./),
+      await screen.findByText(/At your recent pace \(~1\.0 h of kept subs per clear night\), that's about 1 more clear night\./),
     ).toBeInTheDocument();
     // The far-off target keeps its bar and says nothing about nights.
     expect(screen.queryByText(/~5 more nights/)).toBeNull();
