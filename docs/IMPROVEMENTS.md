@@ -82,6 +82,30 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 (Scout 2026-10-28, QA rotation sweep (3)) — a Settings "ASTAP path" that is set but wrong (a stray space, a
+  pasted pair of quotes, the host-side path, `astap_cli`, the install *folder*) silently replaces the bundled ASTAP
+  that works, and the app then tells him to install ASTAP — or to add a star database he already has.**
+  *(Pillar: friendliness / trust — PRIORITY 3; size **S**; severity low-to-moderate — every sub fails to solve, so
+  nothing stacks, and the advice on screen points away from the one-field fix; nothing is lost on disk.
+  Confidence: **reproduced** through the real `find_astap` / `solve_one` / `system._astap_info` with a working stub
+  on `SEESTACK_ASTAP_PATH` (the image's layout), and a `PUT /api/settings` of `" "` stored verbatim; occurrence on
+  his install **unmeasured** — it needs `astap_path` set, which the default leaves blank.)* `find_astap(user_path)`
+  returns `None` whenever the setting is non-empty and does not exist — it never falls back to
+  `SEESTACK_ASTAP_PATH` — and nothing strips the value (Settings' `value || null` keeps `" "`; the field help says
+  "Blank = auto-detect", and a field holding one space looks blank). Measured, 6 values: unset → found, runs, DB
+  found; `"<exe> "`, `'"<exe>"'`, a NAS host-side path (the left half of `docker-compose.yml`'s example mount), `<dir>/astap_cli` → `found: false`, hint "ASTAP
+  binary not found. Set astap_path or SEESTACK_ASTAP_PATH.", every sub `astap.exe not found. Install ASTAP from
+  …`; the folder `/opt/astap` → `found: true`, `runs: false`, `star_db_found: false` (`find_star_db_dir` looks beside a
+  *file*, so a folder looks in its parent) — on v0.503.18 the hint read **"no star database … Add one (e.g. d05) to
+  /opt"**, and since v0.503.19 it reads "can't be started — check the file is executable"; neither says "that is the
+  folder — name the program inside it", and the database he already has is badged missing. Filesystem side effects: **none** — `incoming/` unchanged. Fix shape (additive):
+  strip whitespace and one pair of matching quotes from `astap_path` before use (or on save); when the set path is
+  a directory, look for `astap`/`astap_cli` inside it; when the set path doesn't exist, say so by name in the
+  `/api/system` hint and the solve reason ("the ASTAP path in Settings, `…`, doesn't exist — clear it to use the
+  built-in one"), keeping it a setup reason `classify_solve_setup_error` still maps to `"astap"`. Whether a
+  missing set path should *fall back* to the bundled binary is a behaviour change — say it, don't do it silently.
+  Test: the six values above through `_astap_info` and `solve_one`.
+
 - **🟡 (Scout 2026-10-28, QA rotation sweep (2)) — the walk-away per-panel readability hold compares a panel with
   the subs *on record*, not with the picture standing, so an off-line **newest** night on one panel holds a stack
   that would be strictly better, and says the mosaic "would be much thinner / out of the picture this target

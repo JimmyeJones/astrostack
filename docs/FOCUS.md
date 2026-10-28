@@ -7,9 +7,11 @@
 
 ## Front of the queue (2026-10-28)
 
-**One ungated bug is open — the top of Bugs: the walk-away per-panel readability hold compares a panel with the
-subs on record, not the standing picture, so an off-line newest night blocks a better stack with a false reason**
-(sweep (2), reproduced, S). Builder: take it first. Recently closed: an ASTAP that is there but can't be started now reads as a setup
+**Two ungated bugs are open — the top of Bugs: (a) a Settings "ASTAP path" that is set but wrong (a stray space,
+quotes, a host path, the folder) shadows the bundled ASTAP and the app then advises installing ASTAP** (sweep (3),
+reproduced, S); **(b) the walk-away per-panel readability hold compares a panel with the subs on record, not the
+standing picture, so an off-line newest night blocks a better stack with a false reason** (sweep (2), reproduced, S).
+Builder: take (b) first (autonomy outranks friendliness), then (a). Recently closed: an ASTAP that is there but can't be started now reads as a setup
 problem (v0.503.19, Scout sweep (3)); a legacy North-up save on a mosaic is recovered again (v0.503.18, Scout sweep (1)); an upload no longer replaces a sub that reached `incoming/` mid-stream (v0.503.17, Scout sweep (4)); a mosaic panel left a few readable subs vs the walk-away hold (v0.503.16); the deepening reel's shallow night drawn cleaner on a grown mosaic (v0.503.15); one night, one dark window (v0.503.10); the hung ffmpeg decoder vs Cancel (v0.503.8); the walk-away missing-files hold on a mosaic panel (v0.503.5); Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
 progress / Tonight badge); a dogfood pass found and fixed the week plan's same-sky flip (v0.502.41); the Scout's sweep (4) fixed a merge that
 deleted a folder a stack was still writing into (v0.502.42). After that, a Builder with nothing ungated should take a beginner feature from "Features that serve
@@ -23,12 +25,18 @@ and owner-gated, none updated since 2026-10-12 (re-checked 2026-10-28).
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (2), 2026-10-28
-→ next sweep is (3).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (3), 2026-10-28
+→ next sweep is (4).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-10-28 (Scout, branch `claude/blissful-einstein-oxratg`) — **QA rotation sweep (3), new angle: the binary the
+app is *told* to run — a set-but-wrong Settings `astap_path` (space, quotes, host path, `astap_cli`, the folder)
+shadows the working bundled ASTAP (`find_astap` never falls back) and the screens advise installing ASTAP or adding a
+database he has; filed reproduced in Bugs.** Inbox: the same four, owner-gated. Suite 8326 passed / 7 skipped;
+dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: the panel-hold entry, then this one.
+**Rotation: (3) done → next sweep is (4).***
 *2026-10-28 (Builder, branch `claude/pensive-hawking-4fcqpx`) — **v0.503.19: an ASTAP that is there but can't be started is a setup problem** (`ASTAPCannotRunError`, `SOLVE_SETUP_ASTAP_CANNOT_RUN`; Target banner, Dashboard cue via `astapReadiness` `runs === false`, Settings badge). **START HERE NEXT RUN:** Builder: the Scout's walk-away per-panel hold entry (top of Bugs).*
 *2026-10-28 (Scout, branch `claude/blissful-einstein-13a3el`) — **QA rotation sweep (2), new angle: what the per-panel readability hold compares a panel *with* — subs on record, not the standing picture; an off-line newest night on one panel, or a brand-new off-line panel, holds a strictly better stack with "would be much thinner / out of the picture" (`_panels_with_nothing_readable`); filed reproduced in Bugs.** Inbox: the same four, owner-gated. Suite 8323 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). Ran beside #1313's sweep (1). **START HERE NEXT RUN:** Builder: the ASTAP entry, then this one. **Rotation: (2) done → next sweep is (3).***
 *2026-10-28 (Scout, branch `claude/blissful-einstein-dck0um`) — **QA rotation sweep (1), new angle: the legacy North-up recovery asked the master's WCS at the preview grid's centre, so a pre-v0.288 North-up save on a mosaic read as un-rotated (14 of 16 cases); Scout-fixed, v0.503.18** (`recovered_north_up_deg`). `noisedelta` held by reading. Inbox: the same four, owner-gated. Suite 8321 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). Ran beside #1312's sweep (4). **START HERE NEXT RUN:** Builder: the un-startable ASTAP entry (top of Bugs). **Rotation: (1) done → next sweep is (2).***
@@ -38,8 +46,6 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-10-28 (Scout, branch `claude/blissful-einstein-3560ux`) — **QA rotation sweep (2), new angle: v0.503.5's per-panel missing-files hold at a panel left with *a few* readable subs — a panel going 510 → 10 subs passes every gate (`_auto_stack_readability_hold`); filed reproduced in Bugs.** Inbox: the same four, owner-gated. Suite 8313 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: the reel entry, then this one. **Rotation: (2) done → next sweep is (3).***
 *2026-10-28 (Builder, branch `claude/pensive-hawking-uy9mbo`) — **v0.503.14: the Dashboard's "~2 more nights" chip explains itself on tap/hover in the planner's own words** (`libraryProgress.nightsToGoHint`, `LibraryProgressCard` `HintAnchor`), the backlog's XS friendliness entry, taken with no ungated bug unclaimed. Suite 8313 passed / 7 skipped; vitest 4871. **START HERE NEXT RUN:** Builder: the Scout's deepening-reel entry (top of Bugs), else a beginner feature or dogfood (`--restack --dithered`, `--calibration --big`).*
 *2026-10-28 (Scout, branch `claude/blissful-einstein-96mvmu`) — **QA rotation sweep (1), new angle: the deepening reel's placement on a canvas that grew or shrank (`render_deepening_frames` / `_place_on_sky`) — the shallow night renders cleaner and brighter than the deep one (σ 25.3 vs 37.7, sky 73 vs 51; single field 49.3 → 37.7); filed reproduced at the top of Bugs with a measured fix shape.** Inbox: the same four, owner-gated. Suite 8310 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: that entry. **Rotation: (1) done → next sweep is (2).***
-*2026-10-28 (Builder, branch `claude/nice-carson-mxelbj`) — **Dogfood `--incoming-lag --big --mosaic --editor` CLEAN; v0.503.13: the legacy desktop Library dialog's "solved N/M" counts real solves (`_target_summary_line`, `solve_ok`).** All 21 ops on field, 2×2 and full size; trim 7.9 %; scale pair 0 of 16 moved. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--restack --dithered`, `--calibration --big`).*
-*2026-10-28 (Builder, branch `claude/nice-carson-6l8p8e`) — **Dogfood `--empty`, then `--deep --closing --mosaic --editor`, CLEAN; nothing shipped.** All 21 ops re-rendered on field and 2×2, Auto trim 7.9 %, deep table grew 301→601 rows, no overflow, no console errors. The deep sample's "7×7 vs 3×3" panel count is a two-sized-fixture artefact (PROCESS-NOTES). **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--incoming-lag --big`, `--restack --dithered`).*
 
 ## Standing frontier
 
