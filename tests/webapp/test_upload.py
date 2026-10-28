@@ -236,8 +236,10 @@ class _FakeUpload:
 def test_stream_to_disk_concurrent_same_name_never_corrupts(tmp_path) -> None:
     """Regression: two concurrent POSTs of the *same* filename used to stream into
     one shared ``<name>.part`` at once, interleaving into a corrupt file both then
-    renamed into place. With a unique per-request temp file, the winner is a
-    *complete* copy of exactly one upload — never a scrambled mix."""
+    renamed into place. With a unique per-request temp file, the file that lands
+    is a *complete* copy of exactly one upload — never a scrambled mix — and the
+    placement is create-only, so the second to finish is refused rather than
+    replacing the first (AGENTS.md §10)."""
     import asyncio
 
     from webapp.routers.upload import _stream_to_disk
@@ -249,20 +251,23 @@ def test_stream_to_disk_concurrent_same_name_never_corrupts(tmp_path) -> None:
     def _chunks(b: bytes, n: int = 1024) -> list[bytes]:
         return [b[i:i + n] for i in range(0, len(b), n)]
 
-    async def _run() -> list[int]:
+    async def _run() -> list:
         return await asyncio.gather(
             _stream_to_disk(_FakeUpload(_chunks(body_a)), dest),
             _stream_to_disk(_FakeUpload(_chunks(body_b)), dest),
+            return_exceptions=True,
         )
 
-    written = asyncio.run(_run())
+    results = asyncio.run(_run())
 
     final = dest.read_bytes()
-    # The landed file is a whole, uncorrupted copy of one upload (last rename
-    # wins) — not an interleave of the two (which would fail both checks).
+    # The landed file is a whole, uncorrupted copy of one upload — not an
+    # interleave of the two (which would fail both checks).
     assert final in (body_a, body_b)
     assert len(final) == len(body_a)
-    assert sorted(written) == [len(body_a), len(body_b)]
+    # Exactly one placed; the other was refused instead of overwriting it.
+    assert [r for r in results if isinstance(r, int)] == [len(body_a)]
+    assert sum(isinstance(r, FileExistsError) for r in results) == 1
     # Both unique sidecars were renamed/cleaned up — no orphan left behind.
     assert list(tmp_path.glob("*.part")) == []
 
@@ -281,6 +286,7 @@ def test_stream_to_disk_cleans_up_the_temp_when_the_rename_fails(tmp_path, monke
         raise OSError("rename failed")
 
     monkeypatch.setattr(upload_mod.os, "replace", _boom)
+    monkeypatch.setattr(upload_mod.os, "link", _boom)
 
     with pytest.raises(OSError):
         asyncio.run(upload_mod._stream_to_disk(_FakeUpload([b"AAAA" * 256]), dest))
@@ -325,6 +331,103 @@ def test_stream_to_disk_cleans_up_the_temp_when_the_final_flush_fails(tmp_path, 
     # rather than left as an orphaned .part (fails-before: it stayed).
     assert not dest.exists()
     assert list(tmp_path.glob("*.part")) == []
+
+
+def test_stream_to_disk_never_replaces_a_sub_that_landed_mid_stream(tmp_path) -> None:
+    """Regression (AGENTS.md §10, incoming/ is create-new only): the callers'
+    ``dest.exists()`` check runs before a stream that can take minutes. A sub the
+    NAS copy puts at the same name meanwhile used to be silently replaced by the
+    final ``os.replace`` — the owner's only copy of it."""
+    import asyncio
+
+    dest = tmp_path / "Light_001.fit"
+    raw = b"RAW-ONLY-COPY" * 100
+
+    class _DropMidStream(_FakeUpload):
+        async def read(self, n: int) -> bytes:
+            if self._i == 1:
+                dest.write_bytes(raw)  # the NAS drop lands mid-upload
+            return await super().read(n)
+
+    with pytest.raises(FileExistsError):
+        asyncio.run(upload_mod._stream_to_disk(
+            _DropMidStream([b"U" * 1024, b"U" * 1024]), dest))
+    assert dest.read_bytes() == raw
+    assert list(tmp_path.glob("*.part")) == []
+
+
+@pytest.mark.parametrize("present", [False, True])
+def test_place_new_without_hard_links_still_refuses_a_present_file(
+    tmp_path, monkeypatch, present: bool,
+) -> None:
+    """A filesystem that refuses hard links (some SMB/FUSE mounts) falls back to
+    a last-moment existence check — it still places a new file, and still never
+    replaces one that is there."""
+    import errno
+
+    def _no_links(_src, _dst) -> None:
+        raise OSError(errno.EOPNOTSUPP, "Operation not supported")
+
+    monkeypatch.setattr(upload_mod.os, "link", _no_links)
+    tmp = tmp_path / "x.fit.abc.part"
+    tmp.write_bytes(b"NEW")
+    dest = tmp_path / "x.fit"
+    if present:
+        dest.write_bytes(b"RAW")
+        with pytest.raises(FileExistsError):
+            upload_mod._place_new(tmp, dest)
+        assert dest.read_bytes() == b"RAW"
+    else:
+        upload_mod._place_new(tmp, dest)
+        assert dest.read_bytes() == b"NEW"
+        assert not tmp.exists()
+
+
+def test_upload_skips_a_sub_that_landed_while_it_streamed(
+    client, data_root, tmp_path, monkeypatch,
+) -> None:
+    """End to end: the sub that appeared mid-upload is kept byte-for-byte and the
+    answer reports it skipped, not saved (so no scan is kicked for nothing)."""
+    raw = b"RAW-ONLY-COPY" * 100
+    real = upload_mod._stream_to_disk
+
+    async def _landing(upload, dest):
+        dest.write_bytes(raw)
+        return await real(upload, dest)
+
+    monkeypatch.setattr(upload_mod, "_stream_to_disk", _landing)
+    r = client.post(
+        "/api/upload",
+        files=[("files", ("Light_001.fit", _fits_bytes(tmp_path), "application/octet-stream"))],
+    )
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert payload["saved"] == [] and payload["rejected"] == []
+    assert payload["skipped"] == [{"name": "Light_001.fit", "bytes": len(raw)}]
+    assert payload["job_id"] is None
+    inc = data_root / "incoming"
+    assert (inc / "Light_001.fit").read_bytes() == raw
+    assert list(inc.glob("**/*.part")) == []
+
+
+def test_zip_member_that_landed_while_unpacking_is_kept(
+    client, data_root, tmp_path, monkeypatch,
+) -> None:
+    raw = b"RAW-ONLY-COPY" * 100
+    real = upload_mod._extract_member
+
+    def _landing(zf, info, dest):
+        dest.write_bytes(raw)
+        return real(zf, info, dest)
+
+    monkeypatch.setattr(upload_mod, "_extract_member", _landing)
+    blob = _zip_bytes({"M 31_sub/Light_0001.fit": _fits_bytes(tmp_path)})
+    r = client.post("/api/upload", files=[("files", ("subs.zip", blob, "application/zip"))])
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert payload["saved"] == []
+    assert [f["name"] for f in payload["skipped"]] == ["M 31_sub/Light_0001.fit"]
+    assert (data_root / "incoming" / "M 31_sub" / "Light_0001.fit").read_bytes() == raw
 
 
 def test_upload_closes_every_part_on_all_paths(client, data_root, tmp_path, monkeypatch) -> None:

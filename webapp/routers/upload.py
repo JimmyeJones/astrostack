@@ -30,10 +30,14 @@ Guardrails (this is a file-writing endpoint on a live NAS):
 * **Resilient** — each file streams to a ``.part`` sidecar and is atomically
   renamed into place only once fully written, so a dropped connection can never
   leave a half-written FITS for the watcher to ingest.
+* **Create-new only** — the final placement never replaces a file that is already
+  in ``incoming/``, even one that landed while the upload was still streaming
+  (AGENTS.md §10). See :func:`_place_new`.
 """
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import tempfile
@@ -303,6 +307,47 @@ def upload_destinations(request: Request) -> UploadDestinations:
     return UploadDestinations(destinations=rows)
 
 
+# Errors meaning "this filesystem has no hard links" (some SMB / FUSE mounts),
+# as opposed to a real failure that must surface.
+_NO_HARDLINK_ERRNOS = frozenset(
+    e for e in (getattr(errno, n, None)
+                for n in ("EPERM", "EOPNOTSUPP", "ENOTSUP", "EMLINK", "ENOSYS"))
+    if e is not None)
+
+
+def _place_new(tmp: Path, dest: Path) -> None:
+    """Move the finished temp ``tmp`` to ``dest`` **only if ``dest`` is still free**.
+
+    ``incoming/`` is create-new only (AGENTS.md §10): the owner's raws exist there
+    and nowhere else. The callers' ``dest.exists()`` check runs *before* a stream
+    that can take minutes, so a sub the NAS copy (or a second POST of the same
+    name) puts there meanwhile used to be silently replaced by ``os.replace``.
+    ``os.link`` refuses an existing name atomically (``FileExistsError``); the
+    temp is then dropped — it is our own ``.part`` file, never anything of the
+    owner's. On a filesystem without hard links this falls back to a last-moment
+    existence check before ``os.replace``, which only narrows the window.
+    """
+    try:
+        os.link(tmp, dest)
+    except FileExistsError:
+        raise
+    except OSError as e:
+        if e.errno not in _NO_HARDLINK_ERRNOS:
+            raise
+        if os.path.lexists(dest):
+            raise FileExistsError(errno.EEXIST, "already present", str(dest)) from e
+        os.replace(tmp, dest)
+        return
+    tmp.unlink(missing_ok=True)
+
+
+def _existing_size(dest: Path) -> int:
+    try:
+        return dest.stat().st_size
+    except OSError:
+        return 0
+
+
 async def _stream_to_disk(upload: UploadFile, dest: Path) -> int:
     """Stream an upload to ``dest`` via a ``.part`` sidecar, atomically renamed.
 
@@ -314,9 +359,10 @@ async def _stream_to_disk(upload: UploadFile, dest: Path) -> int:
     ``<name>.part``: two concurrent POSTs of the *same* filename (a double-submit,
     a retried request) would otherwise stream into one shared ``.part`` at once —
     interleaving their bytes into a corrupt file that both then rename into place.
-    A per-request temp file makes each write independent; the final ``os.replace``
-    is atomic, so the loser is simply overwritten by a *complete* file (and the
-    duplicate is dropped by the pipeline's content dedup) — never a scrambled sub.
+    A per-request temp file makes each write independent; the final placement
+    (:func:`_place_new`) is create-only, so the second to finish raises
+    ``FileExistsError`` and the first complete file stays — never a scrambled sub,
+    and never a file already in ``incoming/`` replaced.
     The ``.part`` suffix keeps the sidecar out of the scanner's FITS glob, so even
     an orphan from a hard crash is never ingested.
     """
@@ -344,7 +390,7 @@ async def _stream_to_disk(upload: UploadFile, dest: Path) -> int:
         await run_in_threadpool(tmp.unlink, True)  # missing_ok
         raise
     try:
-        await run_in_threadpool(os.replace, tmp, dest)
+        await run_in_threadpool(_place_new, tmp, dest)
     except BaseException:
         # The rename itself can fail (a cross-device dest, a permission or NAS
         # blip) *after* a complete temp is on disk. Clean up the fully-written
@@ -405,7 +451,7 @@ def _extract_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo, dest: Path) -> i
         tmp.unlink(missing_ok=True)
         raise
     try:
-        os.replace(tmp, dest)
+        _place_new(tmp, dest)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -502,6 +548,10 @@ def extract_zip_to(zip_path: Path, dest_root: Path, *, archive_name: str) -> Zip
                 continue
             try:
                 n = _extract_member(zf, info, dest)
+            except FileExistsError:
+                # Landed in incoming/ while this member was unpacking — keep it.
+                skipped.append(UploadedFile(name=rel, bytes=_existing_size(dest)))
+                continue
             except OSError as e:
                 reason = ("not enough disk space" if getattr(e, "errno", None) == 28
                           else f"could not be saved ({e})")
@@ -717,6 +767,10 @@ async def upload_files(
 
             try:
                 n = await _stream_to_disk(upload, dest)
+            except FileExistsError:
+                # Landed in incoming/ while this upload was streaming — keep it.
+                skipped.append(UploadedFile(name=base, bytes=_existing_size(dest)))
+                continue
             except OSError as e:
                 reason = ("not enough disk space" if getattr(e, "errno", None) == 28
                           else f"could not be saved ({e})")
