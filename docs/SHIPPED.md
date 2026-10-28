@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-10-28 (Builder, branch `claude/pensive-hawking-uy9mbo`) — the Dashboard's nights chip says what it counts
+
+- **v0.503.14** — ✨ POLISH (friendliness, the backlog entry below, taken with no ungated bug open).
+  `rankLibraryProgress` now keeps the sentence `clearNightsFromPace` already returned (`RankedProgress.nightsText`)
+  instead of discarding it, and a new `nightsToGoHint(r)` builds `"<verdict> <pace sentence>"` — the same two
+  sentences, in the same order, as the planner's `readinessRowBadge` tooltip. `LibraryProgressCard` wraps the chip in
+  `HintAnchor` (tap on a phone, hover on a mouse; the badge keeps its own markup, so no row moves). The hint is null
+  exactly when the chip is. **Tests (+4):** three in `libraryProgress.test.ts` (verdict + pace sentence; identical
+  label *and* tooltip to the planner's chip for the same target; absent past the cap, with no pace and at plenty) and
+  one tap in `LibraryProgressCard.test.tsx`. Frontend only; no config, schema, endpoint or response-shape change.
+  *The entry as filed:*
+
+- **NEW IDEA (Builder 2026-08-13, the sibling of the tooltip shipped in v0.254.0) — the Dashboard's "~2 more
+  nights" badge has no hover explanation, unlike the planner's now does.** *(Friendliness — PRIORITY 3; size XS;
+  frontend-only.)* `LibraryProgressCard`'s `ProgressRow` renders `nightsToGoLabel(r)` as a bare chip. The planner's
+  equivalent now explains itself on hover (the readiness verdict plus the sentence naming the measured pace it
+  divided by), and the same two sentences are already computable here — `r.readiness.verdict` is in hand and
+  `clearNightsFromPace` returns the `text` alongside the count that `rankLibraryProgress` currently discards.
+  **Lower value than it was on the planner, which is why it wasn't done in the same pass:** this card already prints
+  "2.0 h of ~6h" inline on the row *and* the `finishFirstHint` sentence above it, so the chip is far better
+  contextualised than a lone chip in a dense plan table. Worth one line if someone is in the file; not worth a trip.
+
 ## 2026-10-28 (Builder, branch `claude/nice-carson-mxelbj`) — the desktop dialog's "solved N/M" counts real solves
 
 - **v0.503.13** — 🐛 BUG FIX (deprioritised desktop GUI, an outright wrong figure — the backlog entry below, taken

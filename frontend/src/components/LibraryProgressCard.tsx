@@ -3,10 +3,12 @@ import { IconTargetArrow } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
+import { HintAnchor } from "./HintAnchor";
 import { formatIntegration } from "../format";
 import {
   describeLibraryProgress,
   finishFirstHint,
+  nightsToGoHint,
   nightsToGoLabel,
   objectTypeLabel,
   rankLibraryProgress,
@@ -28,6 +30,9 @@ function ProgressRow({ r }: { r: RankedProgress }) {
   // "~2 more nights" — the one thing the integration figure and the bar can't
   // say. Absent unless this target is genuinely close at its own recent pace.
   const nights = nightsToGoLabel(r);
+  // …and why: the verdict plus the measured pace it divided by, on tap or
+  // hover, exactly as the planner's same chip explains itself.
+  const nightsHint = nightsToGoHint(r);
   return (
     <div>
       <Group gap="xs" justify="space-between" wrap="nowrap" mb={2}>
@@ -40,9 +45,13 @@ function ProgressRow({ r }: { r: RankedProgress }) {
             {typeLabel ? `${typeLabel} · ` : ""}
             {formatIntegration(row.total_exposure_s)} of ~{readiness.goalHours}h
           </Text>
-          {nights && (
+          {nights && (nightsHint ? (
+            <HintAnchor label={nightsHint} multiline w={260} withArrow>
+              <Badge variant="light" color={color} size="xs">{nights}</Badge>
+            </HintAnchor>
+          ) : (
             <Badge variant="light" color={color} size="xs">{nights}</Badge>
-          )}
+          ))}
           {readiness.level === "plenty" && (
             <Badge variant="light" color={color} size="xs">plenty</Badge>
           )}

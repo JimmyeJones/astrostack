@@ -3275,16 +3275,6 @@ uncached path costs every time (a cold one pays both, 1,116 ms), the 129 ms bein
   machinery than three copies of six lines justify today. **Revisit if a fifth cache appears, or if one of the
   existing ones grows an invalidation rule** (the shared helper's `invalidate_registry_cache` is where that belongs).
 
-- **NEW IDEA (Builder 2026-08-13, the sibling of the tooltip shipped in v0.254.0) — the Dashboard's "~2 more
-  nights" badge has no hover explanation, unlike the planner's now does.** *(Friendliness — PRIORITY 3; size XS;
-  frontend-only.)* `LibraryProgressCard`'s `ProgressRow` renders `nightsToGoLabel(r)` as a bare chip. The planner's
-  equivalent now explains itself on hover (the readiness verdict plus the sentence naming the measured pace it
-  divided by), and the same two sentences are already computable here — `r.readiness.verdict` is in hand and
-  `clearNightsFromPace` returns the `text` alongside the count that `rankLibraryProgress` currently discards.
-  **Lower value than it was on the planner, which is why it wasn't done in the same pass:** this card already prints
-  "2.0 h of ~6h" inline on the row *and* the `finishFirstHint` sentence above it, so the chip is far better
-  contextualised than a lone chip in a dense plan table. Worth one line if someone is in the file; not worth a trip.
-
 - **NEW (Scout 2026-07-23) — remove or parity-pin the caller-less non-windowed `reproject_rgb` in `align.py` (latent
   CPU/GPU `cval` divergence).** *(Maintainability / latent-correctness; size S; from this run's align audit.)* The
   2026-07-23 adversarial align audit re-confirmed that the production stack uses only the **windowed** reproject path,
@@ -3628,6 +3618,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.14 **The Dashboard's "~2 more nights" chip explains itself on tap or hover — the readiness verdict plus the measured pace it divided by, in the planner's own words** (`libraryProgress.nightsToGoHint`, `RankedProgress.nightsText`, `LibraryProgressCard` `HintAnchor`); entry in `SHIPPED.md`
 - ✅ v0.503.13 **The legacy desktop Library dialog's per-target line says how many subs were actually located (`solve_ok`), not how many solves were attempted — no more "solved 40/40" on a field where nothing located** (`seestack/gui/library_dialog.py::_target_summary_line`); entry in `SHIPPED.md`
 - ✅ v0.503.12 **A mosaic target nobody has stacked yet is no longer told "Needs 3×3 mosaic" about itself on Tonight / Plan my week** (`plan._annotate_library_targets` `canvas_is_mosaic` now also honours `is_mosaic_target_name`); dogfood find, entry in `SHIPPED.md`
 - ✅ v0.503.11 **History's Noise trend quotes the two σ at the precision that tells them apart — no more "Cleaner … (σ 0.001 vs 0.001)"** (`History.tsx::noiseTrendSummary`); dogfood find, entry in `SHIPPED.md`.

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { TargetProgress } from "./api/client";
+import { readinessRowBadge } from "./readiness";
 import {
   FINISH_FIRST_MAX_NIGHTS,
   describeLibraryProgress,
   finishFirstHint,
+  nightsToGoHint,
   nightsToGoLabel,
   objectTypeLabel,
   rankLibraryProgress,
@@ -342,5 +344,49 @@ describe("nightsToGoLabel", () => {
       row({ safe: "B", object_type: "galaxy", total_exposure_s: 4 * H }),
     ]);
     expect(nightsToGoLabel(none)).toBeNull();
+  });
+});
+
+describe("nightsToGoHint", () => {
+  it("explains the chip with the verdict and the pace it divided by", () => {
+    const [r] = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy",
+        total_exposure_s: 4 * H, recent_pace_s: 1 * H,
+      }),
+    ]);
+    const hint = nightsToGoHint(r) as string;
+    expect(hint.startsWith(r.readiness.verdict)).toBe(true);
+    expect(hint).toMatch(/At your recent pace .* about 2 more clear nights\.$/);
+  });
+
+  it("reads exactly as the planner's same chip does for the same target", () => {
+    const [r] = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy",
+        total_exposure_s: 5.5 * H, recent_pace_s: 1 * H,
+      }),
+    ]);
+    const planner = readinessRowBadge(5.5 * H, "galaxy", null, 1 * H);
+    expect(planner?.label).toBe(nightsToGoLabel(r));
+    expect(nightsToGoHint(r)).toBe(planner?.tooltip);
+  });
+
+  it("is absent whenever the chip is", () => {
+    const [far, none, done] = rankLibraryProgress([
+      row({
+        safe: "A", object_type: "galaxy",
+        total_exposure_s: 1 * H, recent_pace_s: 1 * H, // 5 nights
+      }),
+      row({ safe: "B", object_type: "galaxy", total_exposure_s: 4 * H }),
+      row({
+        safe: "C", object_type: "cluster",
+        total_exposure_s: 9 * H, recent_pace_s: 1 * H,
+      }),
+    ]);
+    for (const r of [far, none, done]) {
+      expect(nightsToGoLabel(r)).toBeNull();
+      expect(nightsToGoHint(r)).toBeNull();
+    }
   });
 });
