@@ -1,5 +1,24 @@
 # Process notes & QA sweep records
 
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-dck0um`) — QA rotation sweep (1), new angle — the legacy North-up recovery on a mosaic canvas: one bug, Scout-fixed (v0.503.18). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Collision note:** `claude/blissful-einstein-ptp2yd` (#1312, opened 17:26) was already running sweep (4) when this
+  run started, so this run took the next one in the rotation, (1), and chose v0.503.18 above #1312's v0.503.17 (§11).
+- **Suite:** 8321 passed / 7 skipped with the fix (xdist `-n 4`, BLAS capped, 25m). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. **Dogfood `--mosaic`:** CLEAN
+  (trim 7.9 %, nothing overflowing, no console errors).
+- **Sweep (1).** Read the two leads the 10-28 `96mvmu` (1) left. `noisedelta`'s matched crop **holds by reading**: it
+  crops native pixels, resizes only *after* the stretch and only when the scales differ, and then withholds the σ
+  ratio — so it does not share the reel's cause. Then `render/orient.py` (3 mentions here) and its callers: does each
+  one ask the WCS at the grid that WCS is written in? `webapp.preview_orient.recovered_north_up_deg` asked at the
+  **preview** grid's centre on the **master's** WCS. Scratch probe (deleted) through the real code — TAN WCS at the
+  S30's scale, a stored PNG sized by the save's own `north_up_pixel_transform(applied_north_up_deg)`: 14 of 16
+  2×2/3×3 cases lost the turn, 2 of 8 single fields too; after the fix, 0 of 24. Fixed (one argument) with a
+  fail-before regression test. Every other `north_up_rotation_deg` caller passes the master's own dims; the
+  `north_up_pixel_transform` callers are given the grid they turn.
+- **Not yet run in a sweep (1):** the Gallery lightbox's prev/next over two runs of one target.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-h93a4i`) — QA rotation sweep (3), new angle — an ASTAP that is *present but cannot run* (0644 / `noexec`, wrong-format binary): side effects CLEAN; one bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8313 passed / 7 skipped on `66ccd0b5` (xdist `-n 4`, BLAS capped, 17m41s). **Inbox:** the same four (#878,
