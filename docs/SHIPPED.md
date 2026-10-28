@@ -1,5 +1,23 @@
 # Shipped — the record
 
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-m8o5zc`) — a `NaN`/`Infinity` literal in a request body is a 422, not a 500
+
+- **v0.503.20** — 🐛 BUG FIX (robustness, Scout QA rotation sweep (4)). The server's JSON parser accepts the
+  `NaN`/`Infinity`/`-Infinity` literals, and FastAPI's default 422 echoes the offending `input` back; the response
+  encoder (`allow_nan=False`) could not write it, so the *rejection* crashed into a 500 with a traceback in the log.
+  Measured on a real two-target library with a stack run: one such literal in each numeric field of every
+  mutating route's body schema, every float setting and every editor-op param (269 requests) gave **86 × 500**
+  (cover, frames bulk, stack-runs prune, Adaptive-Auto feedback, video stack/sharpen, every user-preset save).
+  **Nothing was ever persisted** — recipes and the default recipe normalise the param to its default, settings and
+  stack defaults 422, `config.json` and every DB held no non-finite value, and the app rebooted clean — so this was
+  log noise and a wrong status, not data damage. **Fix:** `main._install_validation_handler` registers a
+  `RequestValidationError` handler with FastAPI's own status and `{"detail": [...]}` shape, spelling non-finite
+  floats inside each error as `"NaN"`/`"Infinity"` (`_json_safe_input`). Re-probe: 269 requests, **zero 5xx**
+  (124 × 422, 145 × 200). **Tests:** `tests/webapp/test_nonfinite_json_body.py` — a typed body (×3 literals), a NaN
+  nested in a rejected preset body, and an ordinary 422 keeping FastAPI's shape; 4 of 5 fail with the handler
+  reverted. No config, schema, default, layout or response-shape change (the browser's `JSON.stringify` never
+  sends these literals, so no frontend path changes).
+
 ## 2026-10-28 (Builder, branch `claude/pensive-hawking-4fcqpx`) — an ASTAP that is there but can't be started is a setup problem
 
 - **v0.503.19** — 🐛 BUG FIX (friendliness / trust, the Scout's sweep (3) entry below). `ASTAPSolver._run_astap`

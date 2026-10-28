@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 import multiprocessing
 import os
 from contextlib import asynccontextmanager
@@ -169,9 +170,42 @@ def create_app() -> FastAPI:
     ):
         app.include_router(r)
 
+    _install_validation_handler(app)
     _install_auth_gate(app)
     _mount_spa(app)
     return app
+
+
+def _json_safe_input(value):  # noqa: ANN001, ANN202 — mirrors arbitrary JSON
+    """``value`` with every non-finite float spelled as its JSON-literal name.
+
+    The server's JSON parser accepts ``NaN``/``Infinity``/``-Infinity`` literals,
+    and a 422 echoes the offending ``input`` back — which the response encoder
+    (``allow_nan=False``) cannot write, so the rejection itself crashed into a 500
+    with a traceback in the log."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return "NaN" if value != value else ("Infinity" if value > 0 else "-Infinity")
+    if isinstance(value, dict):
+        return {k: _json_safe_input(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_input(v) for v in value]
+    return value
+
+
+def _install_validation_handler(app: FastAPI) -> None:
+    """Answer a body with a ``NaN``/``Infinity`` literal with the 422 it earns.
+
+    Same status and ``{"detail": [...]}`` shape as FastAPI's own handler — only
+    the non-finite numbers inside each error are spelled as strings."""
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.exceptions import RequestValidationError
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(_request, exc: RequestValidationError) -> JSONResponse:  # noqa: ANN001
+        return JSONResponse(
+            status_code=422,
+            content={"detail": jsonable_encoder(_json_safe_input(list(exc.errors())))},
+        )
 
 
 # Paths reachable without auth even when a password is set. The Docker
