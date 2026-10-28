@@ -1908,6 +1908,130 @@ def test_a_mosaic_panel_keeping_half_its_subs_is_not_held(
         lib.close()
 
 
+def _stamp_ingested(proj, frame_ids: list[int], iso: str) -> None:
+    """Say when the app first saw these rows (``frames.ingested_at``), around the
+    ``2026-05-01`` picture :func:`_record_run` records."""
+    from datetime import datetime
+
+    when = datetime.fromisoformat(iso).timestamp()
+    for fid in frame_ids:
+        proj._conn.execute(  # noqa: SLF001 — reaching for the stored fact
+            "UPDATE frames SET ingested_at = ? WHERE id = ?", (when, fid))
+    proj._conn.commit()  # noqa: SLF001
+
+
+_BEFORE_PICTURE = "2026-04-30T00:00:00+00:00"
+_AFTER_PICTURE = "2026-05-02T00:00:00+00:00"
+
+
+def _stacks_without_a_hold(solved_library, monkeypatch, n_a, n_b, shape) -> None:
+    _patch_run_stack(monkeypatch)
+    settings = _settings(solved_library).model_copy(
+        update={"auto_stack_min_frames": 2})
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            a, b = _panel_rows(solved_library, proj, n_a, n_b)
+            shape(proj, a, b)
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        held = [h for h in summary.get("auto_stack_held_unreadable") or []
+                if h["target"] == safe]
+        assert not held, f"held for a picture it would not make worse: {held}"
+        assert safe in summary["auto_stacked"]
+    finally:
+        lib.close()
+
+
+def test_an_off_line_newest_night_on_one_panel_does_not_hold_a_deeper_stack(
+    solved_library, monkeypatch,
+):
+    """Scout 2026-10-28, sweep 2, repro A. The picture used A 4 + B 6 = 10; since
+    then A gained 6 (newest night, off-line) and B 3 (readable). A still has the
+    4 the picture had and B goes 6 → 9 — strictly better — but counted against
+    every sub on record A read as "under half readable" and the stack was held
+    with "much thinner than in the picture this target already has"."""
+    def shape(proj, a, b):
+        _stamp_ingested(proj, a[:4] + b[:6], _BEFORE_PICTURE)
+        _record_run(proj, n_frames_used=10)
+        _stamp_ingested(proj, a[4:] + b[6:], _AFTER_PICTURE)
+        _unread(proj, a[4:])
+    _stacks_without_a_hold(solved_library, monkeypatch, 10, 9, shape)
+
+
+def test_a_brand_new_off_line_panel_is_not_missing_from_the_picture(
+    solved_library, monkeypatch,
+):
+    """Sweep 2, repro B: the picture used 10 on A; since then a brand-new panel B
+    of 4 subs (all off-line) and +2 on A. B was never in the picture, so it can't
+    be "out of the picture this target already has"."""
+    def shape(proj, a, b):
+        _stamp_ingested(proj, a[:10], _BEFORE_PICTURE)
+        _record_run(proj, n_frames_used=10)
+        _stamp_ingested(proj, a[10:] + b, _AFTER_PICTURE)
+        _unread(proj, b)
+    _stacks_without_a_hold(solved_library, monkeypatch, 12, 4, shape)
+
+
+def test_a_panel_losing_the_subs_the_picture_had_still_holds_with_stamps(
+    solved_library, monkeypatch,
+):
+    """With honest stamps the hold still asks the v0.503.16 question: A had 6 at
+    the picture and 5 of those are off-line, so it keeps 2 readable (1 old, 1
+    newer) of 6 and is held — the newer sub does not make up the loss."""
+    _patch_run_stack(monkeypatch)
+    settings = _settings(solved_library).model_copy(
+        update={"auto_stack_min_frames": 2})
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            a, b = _panel_rows(solved_library, proj, 7, 7)
+            _stamp_ingested(proj, a[:6] + b[:4], _BEFORE_PICTURE)
+            _record_run(proj, n_frames_used=10)
+            _stamp_ingested(proj, a[6:] + b[4:], _AFTER_PICTURE)
+            _unread(proj, a[1:6])                # A: 1 old + 1 new readable of 6
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe not in summary["auto_stacked"]
+        held = summary.get("auto_stack_held_unreadable") or []
+        entry = next((h for h in held if h["target"] == safe), None)
+        assert entry is not None and entry["panels_thinned"] == 1
+    finally:
+        lib.close()
+
+
+def test_subs_on_record_at_picture_falls_back_when_the_stamps_cannot_say():
+    """Unstamped rows count as on record; a picture said to combine more subs than
+    existed at its own timestamp (a moved clock, rows written again) and a run
+    with no readable timestamp both give ``None`` — every sub counts, as before."""
+    run = StackRunRow(
+        id=None, timestamp_utc="2026-05-01T00:00:00Z", output_basename="m",
+        fits_path=None, tiff_path=None, preview_path=None, n_frames_used=3,
+        canvas_h=1, canvas_w=1, coverage_min=1, coverage_max=3, options_json="{}")
+    from datetime import datetime
+    before = datetime.fromisoformat(_BEFORE_PICTURE).timestamp()
+    after = datetime.fromisoformat(_AFTER_PICTURE).timestamp()
+    got = pipeline._subs_on_record_at_picture(
+        [run], 3, [before, None, before, after])
+    assert got == [True, True, True, False]
+    assert pipeline._subs_on_record_at_picture([run], 3, [before, after, after]) is None
+    from dataclasses import replace
+    bad = replace(run, timestamp_utc="not a time")
+    assert pipeline._subs_on_record_at_picture([bad], 3, [before] * 4) is None
+
+
 def test_panels_with_nothing_readable_counts_a_panel_left_a_few_subs():
     """The Scout's owner-scale shape through the per-panel question itself: an S30
     2x2, panel D 510 deep of which 10 are readable, A-C fully readable."""

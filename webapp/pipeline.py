@@ -3692,6 +3692,13 @@ def _auto_stack_readability_hold(
     — 510 subs down to 10 is a part of the picture several times grainier than
     the one standing — so a panel keeping under half of its solved subs holds
     too, reported as ``panels_thinned`` (Scout 2026-10-28).
+
+    Both panel questions are asked of the subs each panel had **when the picture
+    standing was made** (:func:`_subs_on_record_at_picture`), not of every sub it
+    has now: a newest night that is off-line on one panel, or a brand-new panel
+    whose files are all away, takes nothing out of that picture, and holding a
+    stack that would deepen the rest of the mosaic for it was a false reason
+    (Scout 2026-10-28, sweep 2).
     """
     proj = lib.open_target(safe)
     try:
@@ -3699,17 +3706,20 @@ def _auto_stack_readability_hold(
         readable_radecs: list[tuple[float | None, float | None]] = []
         solved_radecs: list[tuple[float | None, float | None]] = []
         solved_readable: list[bool] = []
-        # Five columns, not frames: this runs per target per scan for every
+        solved_ingested: list[float | None] = []
+        # Six columns, not frames: this runs per target per scan for every
         # target that is otherwise about to stack, and a `FrameRow` would carry
         # each sub's plate-solve header along to answer "is there one?".
-        for cached, source, wcs, ra, dec in proj.iter_frame_columns(
+        for cached, source, wcs, ra, dec, ingested in proj.iter_frame_columns(
                 "cached_path", "source_path", "wcs_json",
-                "ra_center_deg", "dec_center_deg", accepted_only=True):
+                "ra_center_deg", "dec_center_deg", "ingested_at",
+                accepted_only=True):
             if not wcs:
                 continue
             ok = first_existing_frame_path(cached, source) is not None
             solved_radecs.append((ra, dec))
             solved_readable.append(ok)
+            solved_ingested.append(ingested)
             if not ok:
                 unreadable += 1
             else:
@@ -3717,10 +3727,12 @@ def _auto_stack_readability_hold(
         if unreadable <= 0:
             return None
         readable = max(0, offered - unreadable)
-        prior_max = max(
-            (r.n_frames_used for r in proj.iter_stack_runs()), default=None)
+        runs = list(proj.iter_stack_runs())
+        prior_max = max((r.n_frames_used for r in runs), default=None)
     finally:
         proj.close()
+    on_record = (_subs_on_record_at_picture(runs, prior_max, solved_ingested)
+                 if prior_max is not None else None)
     depth: dict[str, int] | None = None
     if min_frames > 1:
         from seestack.stack.stacker import panel_frame_counts, typical_panel_depth
@@ -3730,7 +3742,7 @@ def _auto_stack_readability_hold(
         if readable_depth is not None and readable_depth < min_frames:
             depth = {"depth": int(readable_depth), "panels": len(counts)}
     missing = (_panels_with_nothing_readable(
-        solved_radecs, solved_readable, min_frames)
+        solved_radecs, solved_readable, min_frames, on_record)
         if prior_max is not None else None)
     if readable < min_frames:
         reason = "too few of its subs are readable right now"
@@ -3761,9 +3773,48 @@ def _auto_stack_readability_hold(
     return out
 
 
+def _subs_on_record_at_picture(
+        runs: list[Any], prior_max: int,
+        ingested: list[float | None]) -> list[bool] | None:
+    """Which solved subs already existed when the target's best picture was made,
+    or ``None`` when the stamps can't say — and every sub then counts, exactly as
+    before the question was asked.
+
+    "The best picture" is the run :func:`_auto_stack_readability_hold` compares
+    with (the largest ``n_frames_used``; the newest of a tie), and "existed" is
+    ``frames.ingested_at`` at or before that run's ``timestamp_utc``. A sub with
+    no ``ingested_at`` (a row older than the column) counts as on record, so a
+    library without the stamps holds exactly what it held before — this can only
+    release a hold, never add one.
+
+    It gives up (``None``) when fewer subs are on record than that picture
+    combined: the picture cannot have used subs that did not exist yet, so the
+    stamps are not telling the truth about it — a clock that moved, or rows
+    written again after the run (a rebuilt or re-registered target) — and the
+    cautious answer is the one the hold gave before.
+    """
+    best = None
+    for r in runs:
+        if r.n_frames_used != prior_max:
+            continue
+        if best is None or (r.timestamp_utc or "") > (best.timestamp_utc or ""):
+            best = r
+    from seestack.session_recap import parse_capture_time
+
+    when = parse_capture_time(best.timestamp_utc if best is not None else None)
+    if when is None:
+        return None
+    cutoff = when.timestamp()
+    out = [t is None or t <= cutoff for t in ingested]
+    if sum(out) < prior_max:
+        return None
+    return out
+
+
 def _panels_with_nothing_readable(
         radecs: list[tuple[float | None, float | None]],
-        readable: list[bool], min_frames: int) -> dict[str, int] | None:
+        readable: list[bool], min_frames: int,
+        on_record: list[bool] | None = None) -> dict[str, int] | None:
     """``{"missing", "thinned", "panels"}`` when some mosaic panel has subs but
     none of them readable (``missing``), or keeps fewer than half of them
     readable (``thinned``), else ``None``.
@@ -3789,6 +3840,12 @@ def _panels_with_nothing_readable(
     keeping **under half** of its solved subs counts as ``thinned``: σ at least
     √2 worse there than the files on record would give, the same "thinner than
     before" the count rule means on a single field, asked per panel.
+
+    ``on_record`` (one flag per sub, :func:`_subs_on_record_at_picture`) narrows
+    "its solved subs" to the ones the standing picture could have had: a panel's
+    readable subs — old or new — are compared with *those*, so an off-line
+    newest night is not a loss, and a panel with none on record was never in the
+    picture to go missing from it. ``None`` counts every sub, as before.
     """
     from seestack.stack.pointings import pointing_groups
 
@@ -3797,12 +3854,14 @@ def _panels_with_nothing_readable(
         return None
     totals: dict[int, int] = {}
     kept: dict[int, int] = {}
-    for label, ok in zip(labels, readable, strict=True):
+    if on_record is None:
+        on_record = [True] * len(labels)
+    for label, ok, then in zip(labels, readable, on_record, strict=True):
         if label < 0:
             continue
-        totals[label] = totals.get(label, 0) + 1
+        totals[label] = totals.get(label, 0) + (1 if then else 0)
         kept[label] = kept.get(label, 0) + (1 if ok else 0)
-    missing = sum(1 for lab in totals if kept[lab] == 0)
+    missing = sum(1 for lab, n in totals.items() if n > 0 and kept[lab] == 0)
     thinned = sum(1 for lab, n in totals.items() if 0 < kept[lab] and 2 * kept[lab] < n)
     if missing <= 0 and thinned <= 0:
         return None
