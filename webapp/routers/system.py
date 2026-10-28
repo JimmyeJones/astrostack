@@ -83,14 +83,15 @@ def _astap_info(settings) -> dict:  # noqa: ANN001
     try:
         import subprocess
 
-        from seestack.solve.astap import find_astap, find_star_db_dir
+        from seestack.solve.astap import astap_path_problem, find_astap, find_star_db_dir
 
         path = find_astap(settings.astap_path)
         if path is None:
             return {
                 "found": False, "path": None, "star_db_found": False,
                 "star_db_dir": None, "star_db_count": 0,
-                "hint": "ASTAP binary not found. Set astap_path or SEESTACK_ASTAP_PATH.",
+                "hint": (astap_path_problem(settings.astap_path)
+                         or "ASTAP binary not found. Set astap_path or SEESTACK_ASTAP_PATH."),
             }
 
         db_dir = find_star_db_dir(path)
