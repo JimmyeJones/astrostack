@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-h93a4i`) — QA rotation sweep (3), new angle — an ASTAP that is *present but cannot run* (0644 / `noexec`, wrong-format binary): side effects CLEAN; one bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8313 passed / 7 skipped on `66ccd0b5` (xdist `-n 4`, BLAS capped, 17m41s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the known non-findings only —
+  the field's "shoot it in mosaic mode", the Dashboard's ASTAP note in a dogfood without ASTAP).
+- **Sweep (3).** Every earlier (3) sweep had a binary that *ran* and then misbehaved (wrote, littered, hung, died,
+  was killed, was fed something odd); none asked about one that cannot be *started* — what a TrueNAS owner gets by
+  mounting his own ASTAP over `/opt/astap` from a dataset without exec, or a build for the wrong CPU. Scratch probe
+  (deleted): a sub in `incoming/M_42_mosaic_sub/`, `runner.solve_one` with `astap_path` → (a) a 0644 script, (b) a
+  `+x` file of garbage ELF bytes. Both return `solved=False` with `PermissionError: [Errno 13] …` / `OSError: [Errno
+  8] Exec format error: …`; `classify_solve_setup_error` → `None` for both. **Side effects: none** — `incoming/`
+  sha256-identical, no `astrostack-solve-*` dir left (the `TemporaryDirectory` unwinds on the raise). The miss is
+  in what the app *says*: no setup banner, an exception string as every sub's reason, and `/api/system`'s measured
+  `runs: false` read by no screen. Filed in Bugs (🟡, S) with the fix shape. ffmpeg's equivalent was read, not driven:
+  on `PATH`, `ffmpeg_path()` is `shutil.which`, which requires `X_OK` (a 0644 ffmpeg reads as "not installed", the
+  honest answer); the `SEESTACK_FFMPEG_PATH` override checks only `exists()` — same shape, noted in the entry. **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-3560ux`) — QA rotation sweep (2), new angle — v0.503.5's per-panel missing-files hold at a panel that kept *a few* readable subs: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8313 passed / 7 skipped on `84d328d7` (xdist `-n 4`, BLAS capped, 17m36s). **Inbox:** the same four

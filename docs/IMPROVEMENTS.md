@@ -131,6 +131,29 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   hold; the zero-readable case must keep `panels_missing`, and a single field must keep today's count rule byte for
   byte. Don't use the whole-target ratio instead — it is what lets this through.
 
+- **🟡 (Scout 2026-10-28, QA rotation sweep (3)) — an ASTAP that is *present but cannot run* (lost its execute bit,
+  sits on a `noexec` mount, or is built for the wrong CPU) is reported everywhere as "ASTAP found", and every sub is
+  then stamped an ordinary per-frame "plate-solve failed" with a Python exception as its reason.** *(Pillar:
+  friendliness / trust — PRIORITY 3; size **S**; severity low-to-moderate — nothing stacks and no screen names the
+  one-time fix; nothing is lost on disk. Confidence: **reproduced** through the real `solve_one` with a stub binary;
+  occurrence on his install **unmeasured** — the bundled `/opt/astap/astap` runs, so it bites only when he mounts his
+  own ASTAP over it, as `docker-compose.yml` invites, from a dataset without exec or of the wrong architecture.)*
+  `ASTAPSolver._run_astap` catches only `subprocess.TimeoutExpired`; the `OSError` from `subprocess.run` escapes the
+  ladder and `runner.solve_one` stores `PermissionError: [Errno 13] Permission denied: '<path>/astap'` (mode 0644)
+  or `OSError: [Errno 8] Exec format error: …` (a wrong-format `+x` file). `classify_solve_setup_error` matches
+  neither, so `apply_solve_result_to_db` keeps the raw text, `frames._solve_setup_problem` never raises the Target
+  page's "install ASTAP" banner, and the sibling-hint retry re-runs each one. `/api/system` already *measures* it —
+  its `-h` probe returns `runs: false` with the error — but no frontend reads `runs`/`error`: `astapReadiness` and
+  the Settings badge look only at `found`/`star_db_found` (teal "ASTAP found"). Filesystem side effects: **none** —
+  `incoming/` byte-identical, no `astrostack-solve-*` dir left. Fix shape: in `_run_astap` turn an `OSError` from
+  `subprocess.run` into a canonical setup reason (e.g. `astap cannot run`, `_is_fatal_solve_error` so the ladder
+  stops) that `classify_solve_setup_error` maps to the `"astap"` kind with its own sentence ("ASTAP is there but
+  can't be started — check it is executable and built for this machine"); let `astapReadiness` treat
+  `runs === false` as not ready (additive; an older backend omits `runs`). Test: a 0644 stub and a garbage `+x` stub
+  through `solve_one` → `apply_solve_result_to_db` → `reject-summary.solve_setup_problem.kind == "astap"`; vitest
+  for `astapReadiness({found: true, star_db_found: true, runs: false})`. Same shape, not driven: `ffmpeg_path()`'s
+  `SEESTACK_FFMPEG_PATH` override checks only `exists()` (its `PATH` lookup, `shutil.which`, already needs `X_OK`).
+
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
