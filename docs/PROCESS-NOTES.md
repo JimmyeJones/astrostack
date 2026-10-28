@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-10-28 (Scout, branch `claude/blissful-einstein-ptp2yd`) — QA rotation sweep (4), new angle — the one router that *writes into `incoming/`* (`upload`) against §10's create-new-only rule: one bug, Scout-fixed (v0.503.16). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-ptp2yd`) — QA rotation sweep (4), new angle — the one router that *writes into `incoming/`* (`upload`) against §10's create-new-only rule: one bug, Scout-fixed (v0.503.17). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
   No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the

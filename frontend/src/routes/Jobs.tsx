@@ -1061,6 +1061,8 @@ export interface HeldForFiles {
    * of the picture would have gone missing. 0 on a single field, on the other
    * hold reasons, and on a scan recorded before it was measured. */
   panelsMissing?: number;
+  /** Panels keeping fewer than half of their subs readable (`panels_thinned`). */
+  panelsThinned?: number;
 }
 
 /** The per-target sentence under "some of your subs aren't on disk right now".
@@ -1076,6 +1078,11 @@ export function heldForFilesLine(h: HeldForFiles): string {
     return `${head}, and none of the subs on ${h.panelsMissing} of its ${h.panels} `
       + "panels can be read — that part of the mosaic would have been missing "
       + "from the picture.";
+  }
+  if (h.panelsThinned && h.panelsThinned > 0 && h.panels && h.panels > 1) {
+    return `${head}, and fewer than half of the subs on ${h.panelsThinned} of its `
+      + `${h.panels} panels can be read — that part of the mosaic would have been `
+      + "much grainier than in the picture.";
   }
   if (h.panelDepth && h.panelDepth > 0) {
     const panels = h.panels && h.panels > 1 ? `${h.panels} panels` : "panels";
@@ -1178,6 +1185,7 @@ export function pipelineSummary(r: Record<string, unknown>): {
           panelDepth: Number(o.panel_depth ?? 0) || 0,
           panels: Number(o.panels ?? 0) || 0,
           panelsMissing: Number(o.panels_missing ?? 0) || 0,
+          panelsThinned: Number(o.panels_thinned ?? 0) || 0,
         }))
     : [];
   const heldSettling: HeldSettling[] = Array.isArray(r.auto_stack_held_settling)

@@ -82,29 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟡 (Scout 2026-10-28, QA rotation sweep (2)) — the walk-away readability hold lets a mosaic panel that lost
-  *almost* all of its files through: v0.503.5 catches a panel with *no* readable sub, but a panel left with a
-  handful is published at a fraction of its depth.** *(Pillar: autonomy / trust — PRIORITY 2; size **S**;
-  severity low-to-moderate — the walk-away chain replaces his newest picture with one whose panel is several times
-  grainier, and says nothing; nothing is lost on disk, the next scan after the files return re-stacks it, and his
-  install runs with `auto_stack` off, so today it bites only once he turns it on. Confidence: **reproduced**
-  through the real `webapp/pipeline._auto_stack_readability_hold` with only the project I/O stubbed; occurrence on
-  his library **unmeasured**.)*
-  Shape (S30 2×2, panels 0.96°/1.70° apart): night 1 shot panel D deep (500) and A–C lightly (50 each); night 2
-  A–C 250 each, D 10; the standing picture is nights 1–2 (1,410 subs). Night 3 adds 300 to each of A–C; then
-  night 1's folder goes off-line. Offered 2,310, readable 1,660 > prior 1,410 → the count rule passes; panel
-  depths A–C 550, D 10 → the frame-weighted typical depth is 550 ≥ `min_frames`; D still has 10 readable →
-  `_panels_with_nothing_readable` → `None`. **`hold: None`** — D goes from 510 subs to 10 (σ ×7). The whole-target
-  count is the single field's rule ("thinner than before" = any loss); on a mosaic the same rule has to be asked
-  per panel, and v0.503.5 asked it only at zero. Fix shape: widen `_panels_with_nothing_readable` (same
-  `pointing_groups` split, same `prior_max is not None` gate) to "some panel keeps under half of its solved subs"
-  (σ ≥ √2 worse than the files on record would give), carried as an **additive** `AutoStackHoldOut` field beside
-  `panels_missing` so the existing sentence and API shape stay; a single field never splits, so it is unchanged.
-  Test: the shape above through `_pipeline_body` on the `solved_library` fixture (beside
-  `tests/webapp/test_auto_stack_pipeline.py::test_a_mosaic_panel_with_no_readable_sub_holds_the_walk_away_stack`) must
-  hold; the zero-readable case must keep `panels_missing`, and a single field must keep today's count rule byte for
-  byte. Don't use the whole-target ratio instead — it is what lets this through.
-
 - **🟡 (Scout 2026-10-28, QA rotation sweep (3)) — an ASTAP that is *present but cannot run* (lost its execute bit,
   sits on a `noexec` mount, or is built for the wrong CPU) is reported everywhere as "ASTAP found", and every sub is
   then stamped an ordinary per-frame "plate-solve failed" with a Python exception as its reason.** *(Pillar:
@@ -3615,7 +3592,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
-- ✅ v0.503.16 **An upload never replaces a sub that reached `incoming/` while it was still streaming — the final placement is create-only and the file is reported skipped** (`upload._place_new`, `os.link` instead of `os.replace`; Scout sweep (4), AGENTS.md §10)
+- ✅ v0.503.17 **An upload never replaces a sub that reached `incoming/` while it was still streaming — the final placement is create-only and the file is reported skipped** (`upload._place_new`, `os.link` instead of `os.replace`; Scout sweep (4), AGENTS.md §10)
+- ✅ v0.503.16 **The walk-away readability hold now also holds a mosaic panel left with only a few of its files (under half) — 510 → 10 subs on one panel no longer publishes that part ~7× grainier** (`pipeline._panels_with_nothing_readable` `thinned`, `AutoStackHoldOut.panels_thinned`, `holdReasonSentence`, `heldForFilesLine`); Scout's sweep (2) entry, full entry in `SHIPPED.md`
 - ✅ v0.503.15 **The "night after night" reel no longer draws a shallow earlier night cleaner and brighter than the deep newest one on a mosaic whose canvas grew or shrank** (`deepening._sky_scale_width`, `_place_on_sky` now linear-domain + nearest, before the shared stretch); Scout's sweep (1) entry, full entry in `SHIPPED.md`
 - ✅ v0.503.14 **The Dashboard's "~2 more nights" chip explains itself on tap or hover — the readiness verdict plus the measured pace it divided by, in the planner's own words** (`libraryProgress.nightsToGoHint`, `RankedProgress.nightsText`, `LibraryProgressCard` `HintAnchor`); entry in `SHIPPED.md`
 - ✅ v0.503.13 **The legacy desktop Library dialog's per-target line says how many subs were actually located (`solve_ok`), not how many solves were attempted — no more "solved 40/40" on a field where nothing located** (`seestack/gui/library_dialog.py::_target_summary_line`); entry in `SHIPPED.md`

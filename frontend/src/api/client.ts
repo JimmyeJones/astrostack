@@ -751,6 +751,11 @@ export interface AutoStackHold {
    * target already has (`panels` is then the mosaic's panel count). 0 on a
    * single field, on the other reasons, and against an older backend. */
   panels_missing?: number;
+  /** The same case short of zero: this many panels keep **fewer than half** of
+   * their subs readable, so that part of the picture would be much grainier than
+   * in the one standing. 0 wherever `panels_missing` is, and against an older
+   * backend. */
+  panels_thinned?: number;
   when_utc?: string | null;
 }
 

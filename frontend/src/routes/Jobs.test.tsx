@@ -673,6 +673,29 @@ describe("pipelineSummary", () => {
     expect(heldFiles[0]).toMatchObject({ panelsMissing: 1, panels: 4, panelDepth: 0 });
   });
 
+  it("says a mosaic panel left with a few readable subs would have been grainier", () => {
+    expect(heldForFilesLine({
+      target: "M 31", offered: 2310, readable: 1660, unreadable: 650,
+      panels: 4, panelsThinned: 1,
+    })).toBe(
+      ": 650 of 2310 subs couldn't be read (1660 still readable), and fewer than "
+      + "half of the subs on 1 of its 4 panels can be read — that part of the "
+      + "mosaic would have been much grainier than in the picture.",
+    );
+    // A missing panel is the stronger fact and keeps its own sentence.
+    expect(heldForFilesLine({
+      target: "M 31", offered: 550, readable: 450, unreadable: 100,
+      panels: 4, panelsMissing: 1, panelsThinned: 1,
+    })).toContain("would have been missing");
+    const { heldFiles } = pipelineSummary({
+      auto_stack_held_unreadable: [
+        { target: "M 31", offered: 2310, readable: 1660, unreadable: 650,
+          prior_best: 1410, panels_missing: 0, panels_thinned: 1, panels: 4 },
+      ],
+    });
+    expect(heldFiles[0]).toMatchObject({ panelsThinned: 1, panelsMissing: 0, panels: 4 });
+  });
+
   it("words a missing-files hold about the panels when the mosaic is the reason", () => {
     // The readable count can clear every floor in the chain while those subs lie
     // one deep across the panels — so on a mosaic the count is not the story.
@@ -718,7 +741,7 @@ describe("pipelineSummary", () => {
     expect(line).toBe("No new frames · held 1 — some subs aren't on disk.");
     expect(heldFiles).toEqual([
       { target: "M 42", offered: 787, readable: 271, unreadable: 516,
-        panelDepth: 0, panels: 0, panelsMissing: 0 },
+        panelDepth: 0, panels: 0, panelsMissing: 0, panelsThinned: 0 },
     ]);
   });
 
@@ -728,7 +751,7 @@ describe("pipelineSummary", () => {
     });
     expect(heldFiles).toEqual([
       { target: "X", offered: 0, readable: 0, unreadable: 0,
-        panelDepth: 0, panels: 0, panelsMissing: 0 },
+        panelDepth: 0, panels: 0, panelsMissing: 0, panelsThinned: 0 },
     ]);
   });
 

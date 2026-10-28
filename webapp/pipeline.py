@@ -3687,7 +3687,11 @@ def _auto_stack_readability_hold(
     Neither the count nor the typical depth notices a mosaic panel whose subs are
     *all* off-line while newer subs on the other panels make up the number, so
     when a picture already stands and some panel has subs but none readable, the
-    stack is held with ``panels_missing`` beside the readable count.
+    stack is held with ``panels_missing`` beside the readable count. A panel left
+    with only a **few** of its files is the same question one step short of zero
+    — 510 subs down to 10 is a part of the picture several times grainier than
+    the one standing — so a panel keeping under half of its solved subs holds
+    too, reported as ``panels_thinned`` (Scout 2026-10-28).
     """
     proj = lib.open_target(safe)
     try:
@@ -3733,9 +3737,12 @@ def _auto_stack_readability_hold(
     elif depth is not None:
         reason = ("too few of its readable subs land on each panel of the "
                   "mosaic right now")
-    elif missing is not None:
+    elif missing is not None and missing["missing"] > 0:
         reason = ("that would leave part of the mosaic out of the picture "
                   "this target already has")
+    elif missing is not None:
+        reason = ("that would leave part of the mosaic much thinner than in "
+                  "the picture this target already has")
     elif prior_max is not None and readable < prior_max:
         reason = "that would be a thinner stack than this target already has"
     else:
@@ -3749,6 +3756,7 @@ def _auto_stack_readability_hold(
         out["panels"] = depth["panels"]
     elif missing is not None:
         out["panels_missing"] = missing["missing"]
+        out["panels_thinned"] = missing["thinned"]
         out["panels"] = missing["panels"]
     return out
 
@@ -3756,8 +3764,9 @@ def _auto_stack_readability_hold(
 def _panels_with_nothing_readable(
         radecs: list[tuple[float | None, float | None]],
         readable: list[bool], min_frames: int) -> dict[str, int] | None:
-    """``{"missing", "panels"}`` when some mosaic panel has subs but none of
-    them readable, else ``None``.
+    """``{"missing", "thinned", "panels"}`` when some mosaic panel has subs but
+    none of them readable (``missing``), or keeps fewer than half of them
+    readable (``thinned``), else ``None``.
 
     The two count questions in :func:`_auto_stack_readability_hold` are about
     the whole target (``readable < prior_max``) or the *typical* panel, and
@@ -3771,21 +3780,33 @@ def _panels_with_nothing_readable(
     (readable or not), with a panel needing ``max(2, min_frames)`` of them to
     count — the floor that would make it a picture on its own. A single field
     never splits, so this is ``None`` there and the count rule holds unchanged.
+
+    **Zero is only the far end of it.** v0.503.5 asked only "is anything on this
+    panel readable?", so a panel shot 510 deep whose older night went off-line,
+    leaving 10, passed every gate — the whole-target count is made up by the
+    other panels, and the frame-weighted typical depth is theirs too — and the
+    walk-away stack published that part of the mosaic ~7× noisier. So a panel
+    keeping **under half** of its solved subs counts as ``thinned``: σ at least
+    √2 worse there than the files on record would give, the same "thinner than
+    before" the count rule means on a single field, asked per panel.
     """
     from seestack.stack.pointings import pointing_groups
 
     labels = pointing_groups(radecs, min_members=max(2, int(min_frames)))
     if labels is None:
         return None
-    panels: dict[int, bool] = {}
+    totals: dict[int, int] = {}
+    kept: dict[int, int] = {}
     for label, ok in zip(labels, readable, strict=True):
         if label < 0:
             continue
-        panels[label] = panels.get(label, False) or ok
-    missing = sum(1 for any_ok in panels.values() if not any_ok)
-    if missing <= 0:
+        totals[label] = totals.get(label, 0) + 1
+        kept[label] = kept.get(label, 0) + (1 if ok else 0)
+    missing = sum(1 for lab in totals if kept[lab] == 0)
+    thinned = sum(1 for lab, n in totals.items() if 0 < kept[lab] and 2 * kept[lab] < n)
+    if missing <= 0 and thinned <= 0:
         return None
-    return {"missing": missing, "panels": len(panels)}
+    return {"missing": missing, "thinned": thinned, "panels": len(totals)}
 
 
 # How long a target must go without a new sub before the hands-off chain will
