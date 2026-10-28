@@ -1027,7 +1027,8 @@ export function TargetView() {
                   ? `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
                     + "plate-solved because ASTAP (the plate-solver) wasn't found. Frames need "
                     + "sky coordinates before they can be stacked, so this blocks the whole "
-                    + "target. Install ASTAP and set its path in Settings, then re-run solving."
+                    + "target. If an ASTAP path is set in Settings, check it (Settings says "
+                    + "what's wrong with it); otherwise install ASTAP. Then re-run solving."
                   : `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
                     + "plate-solved because ASTAP couldn't find a star database to match against. "
                     + "Download an ASTAP star database (e.g. the D50/H17/H18 catalog) into ASTAP's "
