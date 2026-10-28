@@ -142,10 +142,8 @@ class _ScanWorker(QThread):
                 finally:
                     proj.close()
                 lib.refresh_target_stats(entry.safe_name)
-                msg = f"  ✓ {entry.name}: QC {summary['qc_done']}/{summary['qc_total']}"
-                if self._run_solve:
-                    msg += f", solved {summary['solve_done']}/{summary['solve_total']}"
-                self.log_line.emit(msg)
+                self.log_line.emit(
+                    _target_summary_line(entry.name, summary, self._run_solve))
 
             self.finished_ok.emit({
                 "n_targets": scan_result.n_targets,
@@ -156,6 +154,20 @@ class _ScanWorker(QThread):
             self.error.emit(f"{type(exc).__name__}: {exc}")
         finally:
             lib.close()
+
+
+def _target_summary_line(name: str, summary: dict, run_solve: bool) -> str:
+    """One log line for a target's QC + solve pass.
+
+    ``solve_done`` is ``run_qc_and_solve``'s progress counter — frames
+    *attempted* — so it reaches ``solve_total`` even when every solve failed.
+    The "solved" figure is ``solve_ok`` (frames that came back with a usable
+    WCS); without it the clause is left out rather than claim a perfect solve.
+    """
+    msg = f"  ✓ {name}: QC {summary['qc_done']}/{summary['qc_total']}"
+    if run_solve and summary.get("solve_ok") is not None:
+        msg += f", solved {summary['solve_ok']}/{summary['solve_total']}"
+    return msg
 
 
 # ---- main dialog ---------------------------------------------------------
