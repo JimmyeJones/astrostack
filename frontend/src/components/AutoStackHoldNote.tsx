@@ -15,17 +15,27 @@ import { api, type AutoStackHold } from "../api/client";
  * you already have" of a target that has no picture yet would be a claim about
  * something that does not exist. The third shape is a **missing panel**: every
  * count is healthy, but one part of the mosaic has nothing readable at all, so
- * the picture would have lost that part. Pure. */
+ * the picture would have lost that part. The fourth is a **thinned panel**:
+ * something on it is readable, but under half of its subs, so that part of the
+ * picture would have come out much grainier. Pure. */
 export function holdReasonSentence(h: AutoStackHold): string {
   const depth = h.panel_depth ?? 0;
   const panels = h.panels ?? 0;
   const missing = h.panels_missing ?? 0;
+  const thinned = h.panels_thinned ?? 0;
   if (missing > 0 && panels > 1) {
     return (
       `None of the subs on ${missing} of this mosaic's ${panels} panels can be read `
       + `right now: stacking without ${missing === 1 ? "it" : "them"} would have left `
       + "that part of the mosaic out of the picture you already have, so it was "
       + "left alone."
+    );
+  }
+  if (thinned > 0 && panels > 1) {
+    return (
+      `Fewer than half of the subs on ${thinned} of this mosaic's ${panels} panels can `
+      + "be read right now: stacking now would have made that part of the mosaic much "
+      + "grainier than in the picture you already have, so it was left alone."
     );
   }
   if (depth > 0 && panels > 1) {
@@ -51,11 +61,16 @@ export function setAsideOutcomeSentence(h: AutoStackHold): string {
   const depth = h.panel_depth ?? 0;
   const panels = h.panels ?? 0;
   const missing = h.panels_missing ?? 0;
+  const thinned = h.panels_thinned ?? 0;
   const head = `Set them aside and stacking carries on with the ${h.readable} you still have`;
   if (missing > 0 && panels > 1) {
     return `${head} — though the picture will then be missing `
       + `${missing === 1 ? "that part" : "those parts"} of the mosaic until you shoot `
       + `${missing === 1 ? "it" : "them"} again.`;
+  }
+  if (thinned > 0 && panels > 1) {
+    return `${head} — though ${thinned === 1 ? "that part" : "those parts"} of the `
+      + "mosaic will be grainier until you shoot more of it.";
   }
   if (depth > 0 && panels > 1) {
     return `${head} — though a mosaic this thin waits until its panels have more subs.`;
