@@ -194,3 +194,54 @@ def test_the_sky_map_places_a_legacy_north_up_run_on_its_rotated_grid(
     # than up. The 90° save swapped the picture's axes, and the tile's reported
     # extent has to swap with them — it didn't before the recovery.
     assert img["height_deg"] > img["width_deg"]
+
+
+def _legacy_run_on_a_solved_canvas(tmp_path, width: int, height: int,
+                                   dec: float, rot_deg: float):  # noqa: ANN202
+    """A run row as a pre-v0.288 save left it — a stored PNG the size the save's
+    turn produced, no recorded angle — on a TAN-solved canvas at the S30's scale.
+
+    Sized from the very helper the save path records (``applied_north_up_deg``),
+    so the test asks only whether recovery reaches the angle the save applied."""
+    from types import SimpleNamespace
+
+    from astropy.io import fits
+
+    from seestack.render.orient import north_up_pixel_transform
+    from seestack.render.thumbnail import applied_north_up_deg, preview_grid_size
+
+    scale = 2.1 / 1920                       # deg/px — a Seestar S30 frame
+    cos_r, sin_r = np.cos(np.radians(rot_deg)), np.sin(np.radians(rot_deg))
+    hdr = fits.Header()
+    hdr["CTYPE1"], hdr["CTYPE2"] = "RA---TAN", "DEC--TAN"
+    hdr["CRPIX1"], hdr["CRPIX2"] = (width + 1) / 2, (height + 1) / 2
+    hdr["CRVAL1"], hdr["CRVAL2"] = 150.0, dec
+    hdr["CD1_1"], hdr["CD1_2"] = -scale * cos_r, scale * sin_r
+    hdr["CD2_1"], hdr["CD2_2"] = scale * sin_r, scale * cos_r
+    fits_path = tmp_path / "master.fits"
+    fits.PrimaryHDU(data=np.zeros((height, width), np.uint8),
+                    header=hdr).writeto(fits_path)
+
+    saved = applied_north_up_deg(fits_path)
+    flat = preview_grid_size(width, height)
+    _m, _t, new_w, new_h = north_up_pixel_transform(flat[0], flat[1], saved)
+    preview_path = tmp_path / "preview.png"
+    Image.new("RGB", (new_w, new_h)).save(preview_path)
+    run = SimpleNamespace(id=1, fits_path=str(fits_path),
+                          preview_path=str(preview_path),
+                          canvas_w=width, canvas_h=height,
+                          preview_crop_json=None, preview_north_up_deg=None)
+    return run, saved
+
+
+@pytest.mark.parametrize("dec, rot_deg", [(45.0, 30.0), (60.0, 85.0), (75.0, 30.0)])
+def test_a_legacy_north_up_save_on_a_mosaic_canvas_is_still_recovered(
+        tmp_path, dec, rot_deg):
+    """The WCS is in master pixels, so the angle has to be asked at the master's
+    centre, as the save asked it. Asked at the 1024-wide preview grid's centre —
+    a point a quarter of the way into a 2×2 mosaic — North sits a degree or more
+    away, the turned size no longer matches, and the turn reads as never made
+    (a share render then turns the picture a second time)."""
+    run, saved = _legacy_run_on_a_solved_canvas(tmp_path, 2000, 3600, dec, rot_deg)
+    assert abs(saved) >= 2.0                 # a real, offered turn
+    assert recovered_north_up_deg(run) == pytest.approx(saved, abs=1e-6)

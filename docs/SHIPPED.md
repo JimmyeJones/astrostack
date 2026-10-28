@@ -2,7 +2,7 @@
 
 ## 2026-10-28 (Builder, branch `claude/pensive-hawking-4fcqpx`) — an ASTAP that is there but can't be started is a setup problem
 
-- **v0.503.18** — 🐛 BUG FIX (friendliness / trust, the Scout's sweep (3) entry below). `ASTAPSolver._run_astap`
+- **v0.503.19** — 🐛 BUG FIX (friendliness / trust, the Scout's sweep (3) entry below). `ASTAPSolver._run_astap`
   caught only `TimeoutExpired`, so a binary without an execute bit / on a `noexec` mount / built for another CPU
   escaped as a raw `PermissionError`/`OSError` string: every sub read as an ordinary "plate-solve failed", no banner
   named the fix, the sibling-hint retry re-ran each one, and Settings/Dashboard still said "ASTAP found". **Fix:**
@@ -41,6 +41,24 @@
   through `solve_one` → `apply_solve_result_to_db` → `reject-summary.solve_setup_problem.kind == "astap"`; vitest
   for `astapReadiness({found: true, star_db_found: true, runs: false})`. Same shape, not driven: `ffmpeg_path()`'s
   `SEESTACK_FFMPEG_PATH` override checks only `exists()` (its `PATH` lookup, `shutil.which`, already needs `X_OK`).
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-dck0um`) — a legacy North-up save on a mosaic is recovered again
+
+- **v0.503.18** — 🐛 BUG FIX (trust, Scout-fixed in QA rotation sweep (1), scale-dependent parity). A run saved
+  "Adjust → North up → Save" before v0.288 carries a turned preview with no recorded angle, and
+  `webapp.preview_orient.recovered_north_up_deg` recovers it by checking that the stored PNG is exactly the size the
+  save's turn produces. It asked the master's WCS (full-canvas pixels) for North at the **preview grid's** centre
+  (`north_up_rotation_deg(wcs, flat_w, flat_h)`), not the master's, as the save does (`applied_north_up_deg`). On a
+  canvas wider than the 1024-px preview that is a point a quarter of the way in, where North points differently by
+  the meridians' convergence; any difference changes the turned size by a pixel or more, so the turn read as never
+  made. A History share or `?north_up=true` render then turns the picture a **second** time, and the Sky map tile,
+  pins and scale bar are placed on the wrong grid. **Measured** through the real code (TAN WCS at the S30's
+  scale, PNG sized by the save's own transform): of 2×2 and 3×3 canvases at Dec 20°–75° and rotations 30°/85°,
+  **14 of 16 lost the turn**, and 2 of 8 single fields (Dec ≥ 45°, 85°) lost it to rounding; after the fix,
+  **0 of 24**. Fix: one argument — ask at the master's own `NAXIS1`/`NAXIS2`. **Tests:** +3 (parametrised
+  `test_a_legacy_north_up_save_on_a_mosaic_canvas_is_still_recovered`, 2000×3600 at three Dec/rotations), all fail
+  with the fix reverted. Recovery still accepts only an exact size match, so an ordinary run stays untouched. Affects
+  legacy runs only (pre-v0.288 saves never re-saved); how many the owner has is unknown. No config, schema, on-disk,
+  API or default change.
 
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-ptp2yd`) — an upload never replaces a sub that reached `incoming/` while it streamed
 
