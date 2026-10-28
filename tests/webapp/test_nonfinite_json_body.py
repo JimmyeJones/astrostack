@@ -15,7 +15,7 @@ _H = {"content-type": "application/json"}
 
 @pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
 def test_a_non_finite_literal_in_a_typed_body_is_a_422(client, built_library, literal):
-    r = client.put("/api/targets/M_42/cover", content='{"run_id": %s}' % literal, headers=_H)
+    r = client.put("/api/targets/M_42/cover", content=f'{{"run_id": {literal}}}', headers=_H)
     assert r.status_code == 422, r.text
     detail = r.json()["detail"]
     assert isinstance(detail, list) and detail

@@ -2,9 +2,10 @@
 
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-m8o5zc`) — QA rotation sweep (4), new angle — non-finite JSON literals in every mutating route's body: one bug Scout-fixed (v0.503.20), persistence CLEAN
 
-- **Suite:** see the PR. **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+- **Suite:** 8338 passed / 7 skipped on `44217d7f` + this fix (xdist `-n 4`, BLAS capped, 20m33s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
   owner-gated — nothing owed. **Open PR at start:** #1317 (owner-answers docs, a ⭐ Full-res PNG entry, pushed
-  ~7 min before) — a live run, left alone. **Dogfood `--mosaic`:** see FOCUS's run-log line.
+  ~7 min before) — a live run, left alone. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no
+  console errors).
 - **Sweep (4).** The 2026-10-17 route crash-fuzz sent `"nan"`/`"inf"` *strings*; nothing had sent the bare
   `NaN`/`Infinity` *literals* Python's JSON parser accepts, nor asked whether one reaches disk. Scratch probe
   (deleted): real two-target library + a stack run, `create_app()` under `TestClient`; from `/openapi.json`, every

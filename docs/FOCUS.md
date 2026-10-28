@@ -32,7 +32,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
-*2026-10-28 (Scout, branch `claude/blissful-einstein-m8o5zc`) — **QA rotation sweep (4), new angle: bare `NaN`/`Infinity` JSON literals into every mutating route's body — nothing reaches disk, but 86 of 269 rejections crashed into 500s (FastAPI's 422 echoing the input through an `allow_nan=False` encoder); Scout-fixed, v0.503.20** (`main._install_validation_handler`). Inbox: the same four, owner-gated. Dogfood `--mosaic` CLEAN (trim 7.9 %). Ran beside #1317 (owner answers, docs). **START HERE NEXT RUN:** Builder: #1317's ⭐ if merged, else the panel-hold entry, then the `astap_path` one. **Rotation: (4) done → next sweep is (1).***
+*2026-10-28 (Scout, branch `claude/blissful-einstein-m8o5zc`) — **QA rotation sweep (4), new angle: bare `NaN`/`Infinity` JSON literals into every mutating route's body — nothing reaches disk, but 86 of 269 rejections crashed into 500s (FastAPI's 422 echoing the input through an `allow_nan=False` encoder); Scout-fixed, v0.503.20** (`main._install_validation_handler`). Inbox: the same four, owner-gated. Suite 8338 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). Ran beside #1317 (owner answers, docs). **START HERE NEXT RUN:** Builder: #1317's ⭐ if merged, else the panel-hold entry, then the `astap_path` one. **Rotation: (4) done → next sweep is (1).***
 *2026-10-28 (Scout, branch `claude/blissful-einstein-oxratg`) — **QA rotation sweep (3), new angle: the binary the
 app is *told* to run — a set-but-wrong Settings `astap_path` (space, quotes, host path, `astap_cli`, the folder)
 shadows the working bundled ASTAP (`find_astap` never falls back) and the screens advise installing ASTAP or adding a
