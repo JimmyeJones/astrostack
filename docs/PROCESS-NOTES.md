@@ -1,5 +1,26 @@
 # Process notes & QA sweep records
 
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-96mvmu`) — QA rotation sweep (1), new angle — the deepening reel's frame placement on a canvas that grew or shrank: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8310 passed / 7 skipped on `0fe0b9a7` (xdist `-n 4`, BLAS capped, 17m30s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors). The setup's `pip install`
+  took ~15 min this run (PyPI reachable, just slow) — not a broken checkout.
+- **Sweep (1).** Took the lead the 10-24 `mkp0sh` (1) left: "the deepening reel's frame placement on a canvas that
+  *shrank*". Read the geometry (v0.502.23) first and it holds — the star lands where it should in both directions.
+  The defect is in the *pixels*: scratch probe through the real `render_deepening_frames` at the owner's scale (S30
+  panel 1080×1920 vs its 2×2, solved TAN WCS, flat sky), measuring sky σ / median in the panel's footprint. Equal
+  depths come out 21.4 vs 37.7 (sky 67 vs 51); a shallower panel night under a deeper mosaic 25.3 vs 37.7 (sky 73 vs
+  51) where the same-grid single field gives the truth, 49.3 → 37.7 (51 → 51). Decomposed by patching one stage at
+  a time: own-factor decimation, resampling *after* the stretch's black-point clip, and the bilinear sub-pixel
+  smoothing each contribute; removing all three gives 49.5 / 51. Filed at the top of Bugs with the fix shape — an
+  S–M with a careful test, the Builder's.
+- **Read and holds:** the reel's geometry (star position both directions), `deepening_series`' ordering of a
+  shrunk restack (a shallower run on the same window end sorts first, so the shrink-last case needs a genuinely
+  newer smaller run). Not yet run in a sweep (1): the Gallery lightbox's prev/next over two runs of one target, and
+  whether `noisedelta`'s matched crop shares cause (b)/(c) (it compares two masters' pixels across a canvas change).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-28 (Builder, branch `claude/nice-carson-6l8p8e`) — dogfood `--empty`, then `--deep --closing --mosaic --editor`: CLEAN, nothing shipped
 
 - **Start:** no open PRs, no ungated bug (FOCUS). Dogfood first (it rebuilds `webapp/static/`), suite after.
