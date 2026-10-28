@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-10-28 (Builder, branch `claude/nice-carson-6l8p8e`) — dogfood `--empty`, then `--deep --closing --mosaic --editor`: CLEAN, nothing shipped
+
+- **Start:** no open PRs, no ungated bug (FOCUS). Dogfood first (it rebuilds `webapp/static/`), suite after.
+- **`--empty`:** EXIT 0, nothing overflowing, no console errors; tallest `[phone] /life-list [Still to shoot]`
+  14,604 px (the documented non-bug). The site-less Tonight picker is still a blank `mm/dd/yyyy` — that is
+  v0.503.9's deliberate "no site: nothing to name, so no guess", not a regression.
+- **`--deep --closing --mosaic --editor`:** EXIT 0. Both editor drives re-rendered all 21 ops; Auto trim 7.9 %
+  with the highlight-hold offer; taste chips 10 live / 2 at-limit; deep table 301 → 601 rows on scroll, no console
+  errors; the Target / Dashboard / Tonight paragraphs read consistently (closing-season and Plan my week agree).
+- **Chased and stood down — do not re-chase:** the unstacked deep target's object card says "About a **7×7**
+  mosaic (49 panels)" while Tonight badges the same target "NEEDS **3×3** MOSAIC". A fixture artefact, not a bug:
+  the synthetic samples come from two "telescopes" (`solved_frame_geometry` → 5.0″/px on 160×120 for the deep and
+  closing samples, 13.3′ field; 480×320 for the field and mosaic samples, 40′). The card asks
+  `target_frame_field` (this target's own frames), Tonight the library-wide `install_frame_field`, cached for
+  the process from whichever probe ran first — `consensus_field`'s docstring accepts exactly this divergence for
+  a mixed-optics library, and the owner's is one S30.
+- **Suite:** 8310 passed / 7 skipped (`-n 4 --dist worksteal`, 18 min). No code change, no version.
+
 ## 2026-10-28 (Builder, branch `claude/nice-carson-rgalhh`) — dogfood `--combine --calibration --editor --dithered`: one trust fix (v0.503.12)
 
 - **Start:** no open PRs, no ungated bug, `main` CI green. Dogfood first (it rebuilds `webapp/static/`), suite after.
