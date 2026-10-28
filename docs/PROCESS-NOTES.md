@@ -1,5 +1,34 @@
 # Process notes & QA sweep records
 
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-4u2f5p`) — QA rotation sweep (1), new angle — every picture download measured against the stored preview, end to end over HTTP, on the decimated `--big` mosaic: CLEAN. Inbox unchanged. Dogfood `--mosaic --big` CLEAN.
+
+- **Collision note:** #1320 (`claude/blissful-einstein-m8o5zc`, a live Scout run, opened minutes before this one
+  started) holds sweep (4) and moves the rotation to (1), so this run took (1) (AGENTS §11); #1320 merged mid-run as v0.503.22. Nothing filed, so no
+  version is taken.
+- **Suite:** 8344 passed / 7 skipped on `9b7a8a11` (xdist `-n 4`, BLAS capped, 11m31s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+  owner-gated — nothing owed. **Dogfood `--mosaic --big`:** CLEAN (trim 7.9 %, nothing overflowing, no console
+  errors; the scale pair's `trim_fraction` 0.079 → 0.067 is its documented not-comparable case).
+- **Sweep (1).** The lead the `dck0um` (1) left — "the Gallery lightbox's prev/next over two runs of one target" —
+  **does not exist to sweep**: `ImageLightbox` has no prev/next (one picture per open, `Gallery.tsx` `viewing`);
+  lead closed. Instead, the question no earlier (1) asked *end to end*: does each file a beginner downloads from
+  the lightbox look like the picture he was shown? Scratch probe (deleted) against a real app booted on the
+  dogfood library — every run of all three samples; stored preview vs `full-res-png`, `jpeg`, both again with
+  `?north_up=true` against `preview?north_up=true`, plus the phone `wallpaper`; each download BOX-resized onto the
+  preview grid. Canvas ≤ 1024 (field, 2×2 mosaic): full-res PNG **bit-identical** to the preview, JPEG 5.7/255
+  (encoding). The `--big` mosaic (1693 px canvas, preview decimated ×2, auto-edited, crop recorded): raw
+  mean-abs 23/255 — but signed mean +0.6, a 3 px Gaussian brings it to **1.38/255**, and side by side the two are
+  the same picture: the residual is star dots under a half-pixel offset (1645 ≠ 2 × 823 after the crop rounds),
+  not tone. Turned pair: 0.00 / 1.38 / 1.54. Only 180° is reachable on the samples, so the non-trivial angle
+  **holds by reading**: the preview turn (`orient_preview_north_up`) and both full-res turns (`_apply_north_up`)
+  call the same `rotate_image_north_up` (bicubic, `expand=True`), which commutes with a uniform rescale.
+- **Read, not filed:** `fullResPngLabel` decides "native size" vs "up to 8000 px" on the *canvas* dims, while the
+  render caps the *rendered* rectangle (after the trim and any turn) — so a canvas just under 8000 px turned by a
+  non-trivial angle would be capped under a "native size" label. Unreachable at his ~3,500 px canvases; noted,
+  not worth its code.
+- **Not yet run in a sweep (1):** a non-trivial North-up angle *driven* (a sample with a rotated CD matrix) through
+  the share JPEG's `_native_picture_source` decline path.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-m8o5zc`) — QA rotation sweep (4), new angle — non-finite JSON literals in every mutating route's body: one bug Scout-fixed (v0.503.22), persistence CLEAN
 
 - **Suite:** 8342 passed / 7 skipped on `41007acd` + this fix (xdist `-n 4`, BLAS capped, 19m23s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
