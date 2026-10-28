@@ -2526,6 +2526,32 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-ANSWERED (2026-10-28) — a picture he never edited comes out with a ragged, colour-confetti border,
+  and its "Full-res PNG" takes "a super long time".** He sent two full-res PNGs (an IC 1396 field and a star
+  field, both tall multi-night canvases with stepped, rotated edges): a band of per-pixel colour speckle all
+  round, the low-coverage strip where only a few rotated subs land, and a darker ring just inside it. "About
+  25 % of my images" look like this, and he could not tell whether it was his sensor or the app. **It is the
+  app.** Asked by multiple choice: the download was **one picture's Full-res PNG**, the pictures were **never
+  edited**, and the fix is **"Both"**. The cause: `pipeline.render_run_full_res_png` with no recipe goes to
+  `thumbnail.render_preview_png_full_res`, a plain STF of the whole master with no border trim; and
+  `auto_crop_border` (on) is only read by the editor's Auto. So `_trim_rect_for_run` exists and is never asked
+  for the one picture he actually downloads. **Spec:** (1) **Trim on every surface of an unedited picture.**
+  A run with no saved recipe applies `_trim_rect_for_run` when `Settings.auto_crop_border` is on, through the
+  same rule as the editor's Auto. That covers Full-res PNG, the full-size archive, the share JPEG and the
+  wallpaper. The stored preview / Library tile only gets it if it can be re-rendered additively. Never touch
+  the FITS. A saved recipe's own crop always wins. Honour AGENTS.md §1's "a trim above ~15 % of the canvas is
+  a bug" with a `--mosaic` dogfood measurement in the commit. (2) **Auto-edit, both halves.** New stacks: his
+  "Finish" switch (`auto_edit_on_autostack`) is his to flip, and he has been told where it is. Never flip his
+  stored value. Existing pictures: one plain-language "Finish my unedited pictures" action that runs the
+  existing `_auto_edit_run` path over every current picture with **no saved recipe**. Hand-saved looks are
+  never touched, it is reversible with the editor's Reset, and the UI rule applies, so it goes into an
+  existing grouping with no new banner. (3) **Speed.** Measure `render_run_full_res_png` on a mosaic-sized
+  canvas, then fix the measured cost. Candidates: the PNG `compress_level`, caching the render keyed on
+  run + recipe + trim, and a "Preparing your picture…" state instead of a silent wait. (4) **The dark ring**:
+  check whether Auto's background flatten removes it on `--mosaic`. If not, file it as a measured Bugs entry
+  (likely unflattened Seestar vignetting averaged at the canvas edge). Size **M** for (1), **S** for (2) and
+  (3) each; ship as separate commits.
+
 - ~~**⭐ OWNER-APPROVED (2026-10-14, "Yes go") — the Settings page redesign.**~~ — **✅ ALL FIVE SLICES SHIPPED
   (v0.496.0–v0.500.0).** Spec stays at [`docs/design/settings-redesign.md`](design/settings-redesign.md); each
   slice's record, including every spec-vs-code correction, is in [`SHIPPED.md`](SHIPPED.md). Do not re-pick it.
