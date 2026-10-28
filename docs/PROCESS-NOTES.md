@@ -1,5 +1,25 @@
 # Process notes & QA sweep records
 
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-13a3el`) — QA rotation sweep (2), new angle — what v0.503.5/16's per-panel readability hold compares a panel *with*: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8323 passed / 7 skipped on `5c713038` (xdist `-n 4`, BLAS capped, 21m). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. **Open PR at start:** #1313, a
+  live Scout run (`dck0um`, head pushed ~20 min earlier) holding sweep (1) — so this run took (2) instead of
+  colliding (AGENTS §11). **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the
+  known non-finding only — the Dashboard's ASTAP note in a dogfood without ASTAP).
+- **Sweep (2).** Per-panel code since the last (2) (`3560ux`): v0.503.16 (`thinned`, that sweep's own fix). Its
+  boundaries in subs held (half kept → not held; 1 of 4 → held). The question neither earlier (2) asked: *against
+  what* is a panel "thinner"? Against every accepted solved sub on record now — no time — while the reason text
+  says "than in the picture this target already has". Two shapes through the real `_pipeline_body` (only
+  `run_stack` stubbed, scratch test deleted): an off-line newest night on one panel (A keeps exactly the 4 the
+  picture used) → held `panels_thinned: 1`; a brand-new panel, all off-line → held `panels_missing: 1`. Both
+  stacks would have been strictly better than the standing picture. Filed in Bugs (🟡, S) with the
+  `ingested_at` ≤ best-run fix shape.
+- **Read and holds:** `_auto_stack_degraded_heal` is whole-target (`newest_n` vs `best_n`), but a mosaic panel left
+  thin by an outage is retried by `_readability_recovered`'s marker, so only a pre-marker run could sit thin — not
+  filed. The Dashboard's nights-to-go chip divides a goal already scaled by `depth_fulls`/`field_fulls`.
+- **Rotation: (2) done → next sweep is (3)** (sweep (1) was run concurrently by `dck0um`, PR #1313).
+
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-ptp2yd`) — QA rotation sweep (4), new angle — the one router that *writes into `incoming/`* (`upload`) against §10's create-new-only rule: one bug, Scout-fixed (v0.503.17). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
