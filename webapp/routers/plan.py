@@ -256,6 +256,7 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
     ``night_of`` buckets the recent pace by observing night, so the row's "~1 more
     clear night finishes this" is the same figure the Target page and the
     Dashboard quote (see :func:`webapp.routers.stats._collect_progress`)."""
+    from seestack.io.scanner import is_mosaic_target_name
     from seestack.objectinfo import identify_object
     from seestack.session_recap import recent_night_pace_s
     from webapp.field_fulls import target_depth_fulls, target_field_fulls
@@ -324,7 +325,14 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
             # `None` for a single field and for a target with no stack yet —
             # both of which still want the verdict — and >1 exactly when the
             # newest *stacking* run's canvas spans more sky than one frame.
-            canvas_is_mosaic=(field_fulls or 1.0) > _MOSAIC_CANVAS_FIELD_FULLS,
+            # A target the convention *named* a mosaic (the Seestar's own
+            # `<T>_mosaic_sub/` folder) has answered it before its first stack
+            # too — with `auto_stack` off that is every freshly shot mosaic, and
+            # it was being told "Needs 3×3 mosaic" about itself.
+            canvas_is_mosaic=(
+                (field_fulls or 1.0) > _MOSAIC_CANVAS_FIELD_FULLS
+                or is_mosaic_target_name(t.name)
+            ),
             # …and when it is a single field, whether the library already has
             # the mosaic of it — so "Needs 3×3 mosaic" can point at the picture
             # he is building instead of prescribing it from scratch. Registry

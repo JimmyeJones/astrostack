@@ -1545,6 +1545,34 @@ def test_tonight_and_the_week_name_the_mosaic_a_single_field_already_has(
         assert pick["mosaic_companion"] == rows[pick["safe"]]["mosaic_companion"]
 
 
+def test_an_unstacked_mosaic_target_is_not_told_it_needs_a_mosaic(
+        client, solved_library):
+    """Dogfood 2026-10-28: "Plan my week" badged a 2×2 mosaic target "Needs 3×3
+    mosaic" — about itself. The stand-down was keyed on the newest stack's
+    canvas alone, and a mosaic nobody has stacked yet has none; with
+    `auto_stack` off that is every mosaic the owner has just shot. The Seestar's
+    own ``<T>_mosaic_sub/`` folder names it a mosaic before any stack does, so
+    both planner cards stand the verdict down on the name too — while the
+    single field of the same object keeps it, pointing at this mosaic."""
+    mosaic_safe = _add_mosaic_of_m42(solved_library)
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    rows = {t["target_safe"]: t for t in body["targets"] if t["already_targeted"]}
+    mosaic_row = rows[mosaic_safe]
+    assert mosaic_row["framing"] is None and mosaic_row["mosaic"] is None
+    assert mosaic_row["size_arcmin"] is None
+    # The single field is still told, and told which mosaic it has.
+    assert rows["M_42"]["framing"]["level"] == "mosaic"
+    assert rows["M_42"]["mosaic_companion"] == "M 42 (mosaic)"
+
+    week = client.get("/api/plan/week", params={"when": JAN_EVENING}).json()
+    picks = [n["best"] for n in week["nights"]
+             if n["best"] is not None and n["best"]["safe"] == mosaic_safe]
+    assert picks, "the fixture's week should pick the mosaic on some night"
+    assert all(p["framing"] is None and p["mosaic"] is None for p in picks)
+
+
 def test_planner_rows_carry_no_mosaic_companion_without_one(client, solved_library):
     """No mosaic of this object (or only another object's) → ``None``, so the
     badge is exactly what it was."""

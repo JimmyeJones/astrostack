@@ -1347,7 +1347,9 @@ class LibraryTarget:
     # the way through it is the misreading ``mosaicDepthText``'s
     # ``alreadyAMosaic`` clause exists for, which this row has no picture to
     # anchor. So the verdict stands down there, which is the caution the
-    # original "library rows carry no framing" comment was written for.
+    # original "library rows carry no framing" comment was written for. The
+    # webapp also sets it for a target named a mosaic by the convention, so one
+    # that has not been stacked yet is not told to become what it already is.
     canvas_is_mosaic: bool = False
     # The display name of a *separate* mosaic target of the same object, when
     # this one is a single field (:func:`webapp.mosaic_companion.find_mosaic_companion`

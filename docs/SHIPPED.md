@@ -1,5 +1,25 @@
 # Shipped — the record
 
+## 2026-10-28 (Builder, branch `claude/nice-carson-rgalhh`) — an unstacked mosaic is not told it needs a mosaic
+
+- **v0.503.12** — 🐛 BUG FIX (PRIORITY 3, trust — the Tonight page), read off the `--combine --calibration --editor
+  --dithered` dogfood's "what the TONIGHT page SAYS" block: **"Plan my week" named the 2×2 mosaic target as
+  tonight's best pick and badged it "NEEDS 3×3 MOSAIC"** — advice to become what it already is.
+  **Cause:** the planner's framing stand-down (`LibraryTarget.canvas_is_mosaic`) was keyed only on the newest
+  stacking run's canvas (`target_field_fulls` > 1.3), and a target with no stack yet has no canvas. With
+  `auto_stack` off on the owner's install, that is every mosaic he has just shot until he stacks it.
+  **Fix:** `_annotate_library_targets` also sets the flag for a target the naming convention calls a mosaic
+  (`is_mosaic_target_name`, the Seestar's own `<T>_mosaic_sub/` folder → `"<T> (mosaic)"`), the same test
+  `find_mosaic_companion` already uses. Tonight's rows and the week's picks both read the flag, so both cards
+  change together; the single field of the same object keeps its verdict and still points at the mosaic
+  ("Mosaic started", v0.503.6). A drifted single field is unaffected (its name carries no suffix).
+  **Test (+1, `tests/webapp/test_plan.py::test_an_unstacked_mosaic_target_is_not_told_it_needs_a_mosaic`, shown
+  failing with the fix stashed):** an unstacked `"M 42 (mosaic)"` carries no framing/mosaic/size on tonight's row
+  or on the week's picks of it, while `M 42` keeps its verdict and its companion. Backend-only; no config, schema,
+  on-disk, default, endpoint or response-shape change. **Left as is, judged:** the dogfood's sample mosaic is
+  named without the convention suffix, so on that synthetic target the badge stays until it is stacked — the
+  app has no other way to know, and the owner's mosaics all carry the suffix.
+
 ## 2026-10-27 (Builder, branch `claude/nice-carson-3du8rr`) — the Noise trend's two σ can be told apart
 
 - **v0.503.11** — 🐛 POLISH FIX (PRIORITY 3, trust — the Stack history page), read off the `--restack --big --mosaic
