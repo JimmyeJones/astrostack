@@ -955,18 +955,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   surfaces this entry lists alongside them — `oneFrameVsStack` / `StackNoiseBadge`'s "stacking cut your noise
   ~N×" — answer *"what did stacking already buy me?"*, which the entry's own Care note fences off as a
   genuinely different question. So there is nothing left that is both in scope and worth doing.
-- **NEW (Builder 2026-07-30, found while shipping the Check & locate outcome line v0.222.2) — the legacy desktop
-  dialog reports "solved N/M" from a *progress counter*, so it claims a perfect solve on a field where nothing
-  located.** *(Correctness of a user-facing figure — but in the **deprioritised** desktop GUI, so low priority;
-  size XS.)* `seestack/gui/library_dialog.py:147` prints
-  `f", solved {summary['solve_done']}/{summary['solve_total']}"`. `solve_done` is `_map_jobs`' progress counter —
-  frames *attempted* — so it reaches `solve_total` even when every solve failed; the line reads "solved 40/40" on a
-  star-poor field that located nothing. This is the exact defect the web Jobs page just avoided: `run_qc_and_solve`
-  now also returns an honest **`solve_ok`** (results that came back with a usable WCS), so the fix is to read that
-  instead and fall back to omitting the clause if it's absent. Left unfixed here deliberately — the desktop GUI is
-  historical (`PLAN.md`-era) and its only tests are the three Qt ones, so a drive-by change at merge time wasn't
-  worth it; take it if you're already in that file. Confidence: traced (the counter semantics are proven by
-  `tests/test_solve_runner.py::test_run_qc_and_solve_reports_the_frames_it_actually_located`).
 - **If a same-sky-area auto-merge is ever wired up, gate it on same-framing.**
   *(S, correctness — PRIORITY 2; latent, no live caller today.)* `library.
   find_target_within()` exists but is currently unused, so nothing folds a mosaic
@@ -3591,6 +3579,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.13 **The legacy desktop Library dialog's per-target line says how many subs were actually located (`solve_ok`), not how many solves were attempted — no more "solved 40/40" on a field where nothing located** (`seestack/gui/library_dialog.py::_target_summary_line`); entry in `SHIPPED.md`
 - ✅ v0.503.12 **A mosaic target nobody has stacked yet is no longer told "Needs 3×3 mosaic" about itself on Tonight / Plan my week** (`plan._annotate_library_targets` `canvas_is_mosaic` now also honours `is_mosaic_target_name`); dogfood find, entry in `SHIPPED.md`
 - ✅ v0.503.11 **History's Noise trend quotes the two σ at the precision that tells them apart — no more "Cleaner … (σ 0.001 vs 0.001)"** (`History.tsx::noiseTrendSummary`); dogfood find, entry in `SHIPPED.md`.
 - ✅ v0.503.10 **One night has one dark window, whenever it is asked about — Tonight's header and Plan my week no longer print two different ends of the same night** (`nightplan._local_noon_near`, `_find_dark_window`); dogfood find, entry in `SHIPPED.md`.
