@@ -20,6 +20,11 @@ export interface RankedProgress {
   // pace, or null when the goal is already met or there's no usable pace. See
   // ``clearNightsFromPace`` — same arithmetic and wording as the Target page.
   nightsToGo: number | null;
+  // The sentence that number came from ("At your recent pace (~1h 0m of kept
+  // subs per clear night), that's about 2 more clear nights."), or null exactly
+  // when ``nightsToGo`` is — so the row's chip can explain itself on tap/hover
+  // in the planner's words instead of being a bare figure.
+  nightsText: string | null;
 }
 
 // Only targets this close to done are named as "finish this one first" — the
@@ -80,7 +85,11 @@ export function rankLibraryProgress(rows: TargetProgress[]): RankedProgress[] {
       readiness.level === "plenty"
         ? null
         : clearNightsFromPace(gapSeconds, row.recent_pace_s);
-    ranked.push({ row, readiness, nightsToGo: est ? est.nights : null });
+    ranked.push({
+      row, readiness,
+      nightsToGo: est ? est.nights : null,
+      nightsText: est ? est.text : null,
+    });
   }
   ranked.sort((a, b) => {
     const aDone = a.readiness.level === "plenty";
@@ -161,4 +170,16 @@ export function nightsToGoLabel(r: RankedProgress): string | null {
   if (r.readiness.level === "plenty") return null;
   if (r.nightsToGo === null || r.nightsToGo > FINISH_FIRST_MAX_NIGHTS) return null;
   return `~${r.nightsToGo} more ${nightWord(r.nightsToGo)}`;
+}
+
+/**
+ * What the "~2 more nights" chip means, for its tap/hover hint: the readiness
+ * verdict, then the sentence naming the measured pace it divided by. The same
+ * two sentences, in the same order, as the planner's identical chip
+ * (``readinessRowBadge``), so one target's ETA reads the same on both screens.
+ * Null whenever ``nightsToGoLabel`` is, so a hint never outlives its chip.
+ */
+export function nightsToGoHint(r: RankedProgress): string | null {
+  if (nightsToGoLabel(r) === null || !r.nightsText) return null;
+  return `${r.readiness.verdict} ${r.nightsText}`;
 }

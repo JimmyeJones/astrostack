@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProgressCard } from "./LibraryProgressCard";
@@ -103,6 +103,12 @@ describe("LibraryProgressCard", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("~1 more night")).toBeInTheDocument();
+    // A tap on the chip says what it is counting and at what pace — the same
+    // words the planner's identical chip uses.
+    fireEvent.click(screen.getByText("~1 more night"));
+    expect(
+      await screen.findByText(/At your recent pace \(~1h.*per clear night\), that's about 1 more clear night\./),
+    ).toBeInTheDocument();
     // The far-off target keeps its bar and says nothing about nights.
     expect(screen.queryByText(/~5 more nights/)).toBeNull();
   });
