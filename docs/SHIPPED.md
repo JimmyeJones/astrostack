@@ -1,5 +1,31 @@
 # Shipped — the record
 
+## 2026-10-28 (Builder, branch `claude/nice-carson-mxelbj`) — the desktop dialog's "solved N/M" counts real solves
+
+- **v0.503.13** — 🐛 BUG FIX (deprioritised desktop GUI, an outright wrong figure — the backlog entry below, taken
+  after a CLEAN dogfood left no ungated bug). `seestack/gui/library_dialog.py` printed `solve_done/solve_total`,
+  and `solve_done` is `_map_jobs`' progress counter, so a field where nothing located read "solved 40/40". The
+  line is now built by a pure `_target_summary_line(name, summary, run_solve)` that reads `solve_ok` (frames that
+  came back with a usable WCS, the figure the web Jobs page already uses) and omits the clause when that count
+  is absent. **Tests (+3, `tests/test_library_dialog_summary.py`, skipped without PySide6):** nothing located →
+  `solved 0/40`; a partial solve reports the located count; the clause is omitted with no `solve_ok` or with
+  solving off. Shown failing (2 of 3) with the helper put back on `solve_done`. No config, schema, on-disk,
+  default, endpoint or response-shape change.
+  *The entry as filed:*
+
+- **NEW (Builder 2026-07-30, found while shipping the Check & locate outcome line v0.222.2) — the legacy desktop
+  dialog reports "solved N/M" from a *progress counter*, so it claims a perfect solve on a field where nothing
+  located.** *(Correctness of a user-facing figure — but in the **deprioritised** desktop GUI, so low priority;
+  size XS.)* `seestack/gui/library_dialog.py:147` prints
+  `f", solved {summary['solve_done']}/{summary['solve_total']}"`. `solve_done` is `_map_jobs`' progress counter —
+  frames *attempted* — so it reaches `solve_total` even when every solve failed; the line reads "solved 40/40" on a
+  star-poor field that located nothing. This is the exact defect the web Jobs page just avoided: `run_qc_and_solve`
+  now also returns an honest **`solve_ok`** (results that came back with a usable WCS), so the fix is to read that
+  instead and fall back to omitting the clause if it's absent. Left unfixed here deliberately — the desktop GUI is
+  historical (`PLAN.md`-era) and its only tests are the three Qt ones, so a drive-by change at merge time wasn't
+  worth it; take it if you're already in that file. Confidence: traced (the counter semantics are proven by
+  `tests/test_solve_runner.py::test_run_qc_and_solve_reports_the_frames_it_actually_located`).
+
 ## 2026-10-28 (Builder, branch `claude/nice-carson-rgalhh`) — an unstacked mosaic is not told it needs a mosaic
 
 - **v0.503.12** — 🐛 BUG FIX (PRIORITY 3, trust — the Tonight page), read off the `--combine --calibration --editor

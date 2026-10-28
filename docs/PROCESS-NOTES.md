@@ -21,6 +21,19 @@
   whether `noisedelta`'s matched crop shares cause (b)/(c) (it compares two masters' pixels across a canvas change).
 - **Rotation: (1) done → next sweep is (2).**
 
+## 2026-10-28 (Builder, branch `claude/nice-carson-mxelbj`) — dogfood `--incoming-lag --big --mosaic --editor`: CLEAN; one XS legacy fix (v0.503.13)
+
+- Baseline suite 8310 passed / 7 skipped (28:55 at `-n 4`).
+- Dogfood `--incoming-lag --big --mosaic --editor`: all three editor drives (field, 2×2, full size) re-rendered
+  all 21 ops; the full-size loupe followed the navigator and its box hugged the window; Auto trim 7.9 %; scale
+  pair 0 of 16 moved; nothing overflowing, no console errors. Read as paragraphs: the Dashboard tiles add up
+  (6+21+21 = 48 frames; 60+210+210 s = 8 min); the incoming-lag note named all 8 waiting subs and the 1
+  unreadable one, and by the third probe the watcher had imported the 7 readable ones and the note had narrowed
+  to "A sub … can't be read" — honest, not a finding. The mosaic's framing clause ("About a 3×3 … about 18 h")
+  is the gated 2026-09-14 LEAD, unchanged; not re-litigated.
+- With no ungated bug left, took the XS backlog bug in the deprioritised desktop dialog ("solved N/M" from a
+  progress counter) → v0.503.13.
+
 ## 2026-10-28 (Builder, branch `claude/nice-carson-6l8p8e`) — dogfood `--empty`, then `--deep --closing --mosaic --editor`: CLEAN, nothing shipped
 
 - **Start:** no open PRs, no ungated bug (FOCUS). Dogfood first (it rebuilds `webapp/static/`), suite after.
