@@ -1,5 +1,21 @@
 # Shipped — the record
 
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-ptp2yd`) — an upload never replaces a sub that reached `incoming/` while it streamed
+
+- **v0.503.15** — 🔒 BUG FIX (AGENTS.md §10, Scout sweep (4), found and fixed in the same run). `POST /api/upload`
+  checks `dest.exists()` *before* a stream that can take minutes, then placed the finished `.part` with an
+  unconditional `os.replace` — whose docstring even said "the loser is simply overwritten". A sub that the NAS copy
+  (or a second POST of the same name, or a second tab) put at that name meanwhile was silently replaced and the answer
+  said `saved`; the `.zip` path (`_extract_member`) had the same shape. Reproduced through the real
+  `_stream_to_disk`: a 1,300-byte raw written mid-stream was gone afterwards. **Fix:** new `upload._place_new` places
+  by `os.link` (refuses an existing name atomically, `FileExistsError`), then drops its own temp; a filesystem
+  without hard links (EPERM/EOPNOTSUPP/ENOTSUP/EMLINK/ENOSYS) falls back to a last-moment `lexists` check before
+  `os.replace`. Both endpoints report such a file under `skipped` with its on-disk size, so no scan is kicked for it.
+  **Tests (+5, all fail-before by reverting `upload.py` alone):** mid-stream landing at the helper, the endpoint and
+  the zip member; the no-hard-link fallback both ways. Two existing tests updated for the create-only contract (the
+  concurrent same-name test now asserts exactly one placed and one refused; the rename-failure test also fails the
+  link). No config, schema, endpoint, response-shape or default change.
+
 ## 2026-10-28 (Builder, branch `claude/pensive-hawking-uy9mbo`) — the Dashboard's nights chip says what it counts
 
 - **v0.503.14** — ✨ POLISH (friendliness, the backlog entry below, taken with no ungated bug open).

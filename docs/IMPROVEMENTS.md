@@ -3641,6 +3641,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.15 **An upload never replaces a sub that reached `incoming/` while it was still streaming — the final placement is create-only and the file is reported skipped** (`upload._place_new`, `os.link` instead of `os.replace`; Scout sweep (4), AGENTS.md §10)
 - ✅ v0.503.14 **The Dashboard's "~2 more nights" chip explains itself on tap or hover — the readiness verdict plus the measured pace it divided by, in the planner's own words** (`libraryProgress.nightsToGoHint`, `RankedProgress.nightsText`, `LibraryProgressCard` `HintAnchor`); entry in `SHIPPED.md`
 - ✅ v0.503.13 **The legacy desktop Library dialog's per-target line says how many subs were actually located (`solve_ok`), not how many solves were attempted — no more "solved 40/40" on a field where nothing located** (`seestack/gui/library_dialog.py::_target_summary_line`); entry in `SHIPPED.md`
 - ✅ v0.503.12 **A mosaic target nobody has stacked yet is no longer told "Needs 3×3 mosaic" about itself on Tonight / Plan my week** (`plan._annotate_library_targets` `canvas_is_mosaic` now also honours `is_mosaic_target_name`); dogfood find, entry in `SHIPPED.md`
