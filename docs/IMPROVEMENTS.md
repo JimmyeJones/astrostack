@@ -108,6 +108,29 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   (built like `tests/test_deepening_reel.py::_grown_mosaic`) must order σ shallow > deep and keep sky medians equal;
   it fails today with 25.3 < 37.7.
 
+- **🟡 (Scout 2026-10-28, QA rotation sweep (2)) — the walk-away readability hold lets a mosaic panel that lost
+  *almost* all of its files through: v0.503.5 catches a panel with *no* readable sub, but a panel left with a
+  handful is published at a fraction of its depth.** *(Pillar: autonomy / trust — PRIORITY 2; size **S**;
+  severity low-to-moderate — the walk-away chain replaces his newest picture with one whose panel is several times
+  grainier, and says nothing; nothing is lost on disk, the next scan after the files return re-stacks it, and his
+  install runs with `auto_stack` off, so today it bites only once he turns it on. Confidence: **reproduced**
+  through the real `webapp/pipeline._auto_stack_readability_hold` with only the project I/O stubbed; occurrence on
+  his library **unmeasured**.)*
+  Shape (S30 2×2, panels 0.96°/1.70° apart): night 1 shot panel D deep (500) and A–C lightly (50 each); night 2
+  A–C 250 each, D 10; the standing picture is nights 1–2 (1,410 subs). Night 3 adds 300 to each of A–C; then
+  night 1's folder goes off-line. Offered 2,310, readable 1,660 > prior 1,410 → the count rule passes; panel
+  depths A–C 550, D 10 → the frame-weighted typical depth is 550 ≥ `min_frames`; D still has 10 readable →
+  `_panels_with_nothing_readable` → `None`. **`hold: None`** — D goes from 510 subs to 10 (σ ×7). The whole-target
+  count is the single field's rule ("thinner than before" = any loss); on a mosaic the same rule has to be asked
+  per panel, and v0.503.5 asked it only at zero. Fix shape: widen `_panels_with_nothing_readable` (same
+  `pointing_groups` split, same `prior_max is not None` gate) to "some panel keeps under half of its solved subs"
+  (σ ≥ √2 worse than the files on record would give), carried as an **additive** `AutoStackHoldOut` field beside
+  `panels_missing` so the existing sentence and API shape stay; a single field never splits, so it is unchanged.
+  Test: the shape above through `_pipeline_body` on the `solved_library` fixture (beside
+  `tests/webapp/test_auto_stack_pipeline.py::test_a_mosaic_panel_with_no_readable_sub_holds_the_walk_away_stack`) must
+  hold; the zero-readable case must keep `panels_missing`, and a single field must keep today's count rule byte for
+  byte. Don't use the whole-target ratio instead — it is what lets this through.
+
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
