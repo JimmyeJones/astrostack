@@ -1,5 +1,41 @@
 # Shipped — the record
 
+## 2026-10-28 (Builder, branch `claude/pensive-hawking-9jw3c3`) — the per-panel readability hold asks about the picture standing
+
+- **v0.503.20** — 🐛 BUG FIX (autonomy / trust, the Scout's sweep (2) entry below). `_panels_with_nothing_readable`
+  counted each panel's readable subs against every accepted solved sub it has *now*, so subs that arrived after the
+  standing picture — and were off-line — read as a loss from it. **Fix:** `_auto_stack_readability_hold` reads
+  `frames.ingested_at` beside the five columns it already reads, and the new `_subs_on_record_at_picture` marks the
+  subs that existed at the best run's `timestamp_utc` (largest `n_frames_used`, newest of a tie); each panel's
+  readable subs (old or new) are compared with *those*, and a panel with none on record is never "missing". A `NULL`
+  `ingested_at` counts as on record, and the stamps are ignored (today's count) when fewer subs are on record than
+  the picture combined (a moved clock, rows rewritten after the run) or the run's timestamp doesn't parse — so it can
+  only release a hold, never add one. The whole-target count rule, the floor and the typical-depth rule are
+  unchanged. **Tests:** the Scout's repro A (A 4 + B 6 picture, +6 off-line on A, +3 readable on B) and repro B
+  (brand-new all-off-line panel) now stack — both failed before with the exact false reasons; a stamped panel that
+  lost 5 of the 6 subs the picture had still holds (`panels_thinned`); the fallback cases unit-tested; the v0.503.5 /
+  v0.503.16 regression tests unchanged and green. No config, schema, default, API-shape or layout change.
+
+  *Entry as filed:* **🟡 (Scout 2026-10-28, QA rotation sweep (2)) — the walk-away per-panel readability hold compares a panel with
+  the subs *on record*, not with the picture standing, so an off-line **newest** night on one panel holds a stack
+  that would be strictly better, and says the mosaic "would be much thinner / out of the picture this target
+  already has" when it would not.** *(Pillar: autonomy / trust — PRIORITY 2; size **S**; severity low-to-moderate
+  — a blocked improvement and a false reason while the newest folder is away, held until he clicks "set aside";
+  nothing published is worse, nothing lost on disk. Confidence: **reproduced** through the real `_pipeline_body` /
+  `_auto_stack_readability_hold`, `run_stack` stubbed; occurrence on his install **unmeasured**.)*
+  `_panels_with_nothing_readable` (v0.503.5 `missing`, v0.503.16 `thinned`) counts each panel's readable subs
+  against every accepted solved sub it has *now*, with no time; the whole-target rule beside it compares with
+  `prior_max`. Repro A (deepening one panel): picture used A 4 + B 6 = 10; since then +6 on A (newest night,
+  off-line) and +3 on B (readable) → `readable` 13 ≥ 10, A keeps exactly the 4 the picture had, yet
+  `panels_thinned: 1`, held "much thinner than in the picture this target already has" — the stack would have
+  deepened B 6 → 9 and left A as it was. Repro B (growing into a mosaic): picture used 10 on A; since then a
+  brand-new panel B of 4 subs, all off-line, and +2 on A → `panels_missing: 1`, held "out of the picture this
+  target already has" — B was never in it. Pre-v0.503.16, Repro A stacked. Fix shape: count each panel's
+  "on record" subs only among those that existed at the standing picture — `frames.ingested_at` ≤ the best
+  genuine run's `timestamp_utc` (a `NULL` `ingested_at`, pre-fingerprint rows, keeps today's count, so it can only
+  release a hold, never add one) — keeping both regression tests from v0.503.5/16 green. Test: the two repros
+  above (stamp `ingested_at` before / after a run timestamp) stack; the existing `thinned` test still holds.
+
 ## 2026-10-28 (Builder, branch `claude/pensive-hawking-4fcqpx`) — an ASTAP that is there but can't be started is a setup problem
 
 - **v0.503.19** — 🐛 BUG FIX (friendliness / trust, the Scout's sweep (3) entry below). `ASTAPSolver._run_astap`
