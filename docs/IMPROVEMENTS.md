@@ -82,6 +82,26 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 (Scout 2026-10-28, QA rotation sweep (2)) — the walk-away per-panel readability hold compares a panel with
+  the subs *on record*, not with the picture standing, so an off-line **newest** night on one panel holds a stack
+  that would be strictly better, and says the mosaic "would be much thinner / out of the picture this target
+  already has" when it would not.** *(Pillar: autonomy / trust — PRIORITY 2; size **S**; severity low-to-moderate
+  — a blocked improvement and a false reason while the newest folder is away, held until he clicks "set aside";
+  nothing published is worse, nothing lost on disk. Confidence: **reproduced** through the real `_pipeline_body` /
+  `_auto_stack_readability_hold`, `run_stack` stubbed; occurrence on his install **unmeasured**.)*
+  `_panels_with_nothing_readable` (v0.503.5 `missing`, v0.503.16 `thinned`) counts each panel's readable subs
+  against every accepted solved sub it has *now*, with no time; the whole-target rule beside it compares with
+  `prior_max`. Repro A (deepening one panel): picture used A 4 + B 6 = 10; since then +6 on A (newest night,
+  off-line) and +3 on B (readable) → `readable` 13 ≥ 10, A keeps exactly the 4 the picture had, yet
+  `panels_thinned: 1`, held "much thinner than in the picture this target already has" — the stack would have
+  deepened B 6 → 9 and left A as it was. Repro B (growing into a mosaic): picture used 10 on A; since then a
+  brand-new panel B of 4 subs, all off-line, and +2 on A → `panels_missing: 1`, held "out of the picture this
+  target already has" — B was never in it. Pre-v0.503.16, Repro A stacked. Fix shape: count each panel's
+  "on record" subs only among those that existed at the standing picture — `frames.ingested_at` ≤ the best
+  genuine run's `timestamp_utc` (a `NULL` `ingested_at`, pre-fingerprint rows, keeps today's count, so it can only
+  release a hold, never add one) — keeping both regression tests from v0.503.5/16 green. Test: the two repros
+  above (stamp `ingested_at` before / after a run timestamp) stack; the existing `thinned` test still holds.
+
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
