@@ -616,3 +616,69 @@ def test_a_frame_of_other_sky_falls_back_rather_than_going_black(tmp_path):
         [_write_solved(tmp_path / "a.fits", a, there), _write_solved(tmp_path / "b.fits", b, here)],
         max_width=128)
     assert np.asarray(frames[0]).max() > 0
+
+
+# ── Depth on a grown or shrunk canvas ────────────────────────────────────────
+#
+# Regression (Scout 2026-10-28, sweep 1): each master was decimated by its *own*
+# factor, then the earlier one was resampled bilinearly as stretched u8 — so on a
+# mosaic whose canvas changed, the shallow night came out ~a third *quieter* and
+# visibly brighter than the deep newest one (σ 25.3 vs 37.7, sky 73 vs 51), the
+# reverse of the reel's whole story.
+
+def _flat_field(width: int, height: int, *, noise: float, seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    plane = (0.10 + noise * rng.standard_normal((height, width))).astype(np.float32)
+    return np.stack([plane, plane, plane])
+
+
+def _depth_pair(tmp_path, *, shrink: bool):
+    """A panel and the 2×2 mosaic it sits in, at a shallow and a deep noise. Grown:
+    the panel is the shallow first night and the mosaic the deep newest one.
+    Shrunk: the mosaic is the shallow first night and the panel the deep newest."""
+    overlap = 20
+    mw, mh = 2 * _PANEL_W - overlap, 2 * _PANEL_H - overlap
+    mosaic = _tan_wcs(mw, mh, 180.0, 30.0)
+    p_ra, p_dec = mosaic.all_pix2world([[(_PANEL_W - 1) / 2.0, (_PANEL_H - 1) / 2.0]], 0)[0]
+    panel = _tan_wcs(_PANEL_W, _PANEL_H, float(p_ra), float(p_dec))
+    shallow, deep = 0.00566, 0.004
+    if shrink:
+        first = _write_solved(tmp_path / "first.fits",
+                              _flat_field(mw, mh, noise=shallow, seed=61), mosaic)
+        newest = _write_solved(tmp_path / "newest.fits",
+                               _flat_field(_PANEL_W, _PANEL_H, noise=deep, seed=62), panel)
+    else:
+        first = _write_solved(tmp_path / "first.fits",
+                              _flat_field(_PANEL_W, _PANEL_H, noise=shallow, seed=61), panel)
+        newest = _write_solved(tmp_path / "newest.fits",
+                               _flat_field(mw, mh, noise=deep, seed=62), mosaic)
+    return first, newest
+
+
+def _panel_footprint_stats(frames) -> list[tuple[float, float]]:
+    """(σ, median) of the green channel inside the panel's footprint on the newest
+    reel frame, inset so a placement edge never counts."""
+    out = []
+    newest = np.asarray(frames[-1])[..., 1].astype(np.float64)
+    lit = newest > 0
+    for frame in frames:
+        g = np.asarray(frame)[..., 1].astype(np.float64)
+        both = lit & (g > 0)
+        ys, xs = np.nonzero(both)
+        y0, y1 = ys.min() + 4, ys.max() - 4
+        x0, x1 = xs.min() + 4, xs.max() - 4
+        patch = g[y0:y1, x0:x1]
+        out.append((float(patch.std()), float(np.median(patch))))
+    return out
+
+
+@pytest.mark.parametrize("shrink", [False, True], ids=["grown", "shrunk"])
+def test_a_shallow_night_on_a_changed_canvas_is_not_drawn_cleaner(tmp_path, shrink):
+    first, newest = _depth_pair(tmp_path, shrink=shrink)
+    frames = render_deepening_frames([first, newest], max_width=256)
+    (sd_first, med_first), (sd_new, med_new) = _panel_footprint_stats(frames)
+    # Fail-before (grown): 25.3-ish vs 37.7-ish in the owner-scale probe — the
+    # shallow night read *quieter*. It must read noisier, by roughly its depth.
+    assert sd_first > sd_new * 1.2
+    # One shared stretch: the sky is not lifted on the placed night.
+    assert abs(med_first - med_new) <= 3.0

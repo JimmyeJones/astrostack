@@ -7,12 +7,10 @@
 
 ## Front of the queue (2026-10-28)
 
-**Three ungated bugs are open — the top of Bugs: (1) the deepening reel draws an earlier, shallower night cleaner and
-brighter than the newest on a mosaic whose canvas grew or shrank** (Scout sweep (1), reproduced, fix shape measured;
-size S–M); **(2) the walk-away readability hold lets a mosaic panel that kept only a few of its files through**
-(sweep (2), reproduced, size S — v0.503.5 caught only zero); **(3) an ASTAP that is present but cannot run is
+**Two ungated bugs are open — the top of Bugs: (1) the walk-away readability hold lets a mosaic panel that kept only
+a few of its files through** (sweep (2), reproduced, size S — v0.503.5 caught only zero); **(2) an ASTAP that is present but cannot run is
 reported as "found" and every sub as an ordinary solve failure** (sweep (3), reproduced, size S). Builder: take
-them first, in that order. Recently closed: one night, one dark window (v0.503.10); the hung ffmpeg decoder vs Cancel (v0.503.8); the walk-away missing-files hold on a mosaic panel (v0.503.5); Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
+them first, in that order. Recently closed: the deepening reel's shallow night drawn cleaner on a grown mosaic (v0.503.15); one night, one dark window (v0.503.10); the hung ffmpeg decoder vs Cancel (v0.503.8); the walk-away missing-files hold on a mosaic panel (v0.503.5); Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
 progress / Tonight badge); a dogfood pass found and fixed the week plan's same-sky flip (v0.502.41); the Scout's sweep (4) fixed a merge that
 deleted a folder a stack was still writing into (v0.502.42). After that, a Builder with nothing ungated should take a beginner feature from "Features that serve
 real workflows" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), or dogfood (`--mosaic --editor`) and file what it finds.
@@ -31,6 +29,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-28 (Builder, branch `claude/pensive-hawking-3f01rd`) — **v0.503.15: the deepening reel's shallow night no longer reads cleaner and brighter on a grown/shrunk mosaic canvas** (`render_deepening_frames` loads each night at the newest frame's sky scale and places it linear + nearest before the stretch; grown 26.1 → 49.3 vs deep 37.7). Suite 8315 passed / 7 skipped. **START HERE NEXT RUN:** Builder: the walk-away panel-hold entry (now top of Bugs), then the un-startable ASTAP entry.*
 *2026-10-28 (Scout, branch `claude/blissful-einstein-h93a4i`) — **QA rotation sweep (3), new angle: an ASTAP that is present but cannot be started (0644 / `noexec`, wrong-format binary) — no filesystem side effect, but it reads "ASTAP found" everywhere and every sub gets an exception string as an ordinary solve failure (`_run_astap` catches only `TimeoutExpired`; `classify_solve_setup_error` misses it); filed reproduced in Bugs.** Inbox: the same four, owner-gated. Suite 8313 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: the reel entry, the panel-hold entry, then this one. **Rotation: (3) done → next sweep is (4).***
 *2026-10-28 (Scout, branch `claude/blissful-einstein-3560ux`) — **QA rotation sweep (2), new angle: v0.503.5's per-panel missing-files hold at a panel left with *a few* readable subs — a panel going 510 → 10 subs passes every gate (`_auto_stack_readability_hold`); filed reproduced in Bugs.** Inbox: the same four, owner-gated. Suite 8313 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: the reel entry, then this one. **Rotation: (2) done → next sweep is (3).***
 *2026-10-28 (Builder, branch `claude/pensive-hawking-uy9mbo`) — **v0.503.14: the Dashboard's "~2 more nights" chip explains itself on tap/hover in the planner's own words** (`libraryProgress.nightsToGoHint`, `LibraryProgressCard` `HintAnchor`), the backlog's XS friendliness entry, taken with no ungated bug unclaimed. Suite 8313 passed / 7 skipped; vitest 4871. **START HERE NEXT RUN:** Builder: the Scout's deepening-reel entry (top of Bugs), else a beginner feature or dogfood (`--restack --dithered`, `--calibration --big`).*
