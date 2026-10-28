@@ -1,5 +1,24 @@
 # Process notes & QA sweep records
 
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-oxratg`) — QA rotation sweep (3), new angle — the binary the app is *told* to run (a set-but-wrong Settings `astap_path`): side effects CLEAN; one bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8326 passed / 7 skipped on `32eca5d4` (xdist `-n 4`, BLAS capped, 16m42s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. **Open PR at start:**
+  #1314 (Builder, the cannot-run ASTAP fix, head pushed ~17 min before) — left alone; it merged mid-run as
+  v0.503.19 and the finding below was re-measured on top of it. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing
+  overflowing, no console errors; the known non-finding only — the Dashboard's ASTAP note in a dogfood without ASTAP).
+- **Sweep (3).** Every earlier (3) sweep varied what the binary does or whether it can start; none asked which
+  binary the app *resolves* from the one ASTAP setting a non-technical owner types. Scratch probe (deleted): a
+  working stub on `SEESTACK_ASTAP_PATH` (the image's layout) with a `.1476` beside it, then six `astap_path` values
+  through the real `find_astap`, `system._astap_info` and `solve_one`; plus `PUT /api/settings {"astap_path": " "}`
+  → 200, stored verbatim. Any set value that does not exist (space, quotes, host path, `astap_cli`) shadows the
+  working binary — `find_astap` never falls back — and every sub reads "astap.exe not found. Install ASTAP"; the
+  folder resolves as the "binary", runs false, and the database beside it is badged missing. Filed in Bugs (🟡, S).
+  **Side effects:** none — `incoming/` unchanged. Not driven: ffmpeg's `SEESTACK_FFMPEG_PATH` (env only, not a
+  Settings field — the image does not set it). Read, not filed: `iter_frames` passes `-i <path>` with no forced
+  demuxer, but ffmpeg's `file:` protocol's default whitelist (`file,crypto,data`) keeps a playlist-shaped capture
+  from reaching the network. **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-13a3el`) — QA rotation sweep (2), new angle — what v0.503.5/16's per-panel readability hold compares a panel *with*: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8323 passed / 7 skipped on `5c713038` (xdist `-n 4`, BLAS capped, 21m). **Inbox:** the same four (#878,
