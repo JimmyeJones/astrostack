@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-ptp2yd`) — QA rotation sweep (4), new angle — the one router that *writes into `incoming/`* (`upload`) against §10's create-new-only rule: one bug, Scout-fixed (v0.503.17). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+  No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the
+  known non-finding only — the Dashboard's ASTAP note in a dogfood without ASTAP).
+- **Sweep (4).** `upload` was the least-named router in this file (3 mentions), and the only one that writes under
+  `Settings.resolved_incoming_dir` (grep of every router: `storage`, `calibration`, `incominglag`, `video`,
+  `system`, `stack`, `pipeline` only read or pass the path). Asked: can any upload path replace a file already in
+  `incoming/`? The sequential case is guarded (`dest.exists()` → `skipped`); the *concurrent* one was not — the check
+  precedes the stream, and the placement was `os.replace`. Scratch repro through the real `_stream_to_disk` with a
+  sub written at `dest` between chunks: the sub was replaced, the call returned normally. Same shape in the zip
+  extractor. Fixed with a create-only placement (`_place_new`, `os.link` + fallback). Also read and held:
+  traversal (`safe_relpath`/`confined_dest`), the zip bomb cap, temp cleanup on every failure path.
+- **Not filed:** an `incoming/` on an SMB/FUSE mount without hard links keeps a (much narrower) check-then-replace
+  window in the fallback; Linux has no portable no-replace rename in the stdlib. Measure only if the owner's
+  incoming is ever such a mount (his is a local dataset bind-mounted into Docker).
+
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-h93a4i`) — QA rotation sweep (3), new angle — an ASTAP that is *present but cannot run* (0644 / `noexec`, wrong-format binary): side effects CLEAN; one bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8313 passed / 7 skipped on `66ccd0b5` (xdist `-n 4`, BLAS capped, 17m41s). **Inbox:** the same four (#878,
