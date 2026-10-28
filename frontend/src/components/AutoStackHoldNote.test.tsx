@@ -177,6 +177,18 @@ describe("holdReasonSentence / setAsideOutcomeSentence", () => {
     expect(holdReasonSentence({ ...h, panels: 0 })).toContain("thinner, noisier picture");
   });
 
+  it("says a mosaic panel left with a few readable subs would have been grainier", () => {
+    const h = { offered: 2310, readable: 1660, unreadable: 650, panels: 4,
+      panels_missing: 0, panels_thinned: 1 };
+    expect(holdReasonSentence(h)).toContain("Fewer than half of the subs on 1 of this mosaic's 4 panels");
+    expect(holdReasonSentence(h)).toContain("much grainier");
+    expect(setAsideOutcomeSentence(h)).toContain("that part of the mosaic will be grainier");
+    expect(setAsideOutcomeSentence({ ...h, panels_thinned: 2 })).toContain("those parts");
+    // A missing panel outranks it; an untrusted panel count leaves the plain one.
+    expect(holdReasonSentence({ ...h, panels_missing: 1 })).toContain("None of the subs");
+    expect(holdReasonSentence({ ...h, panels: 0 })).toContain("thinner, noisier picture");
+  });
+
   it("names the subs that survive, in both shapes", () => {
     expect(setAsideOutcomeSentence(base)).toContain("carries on with the 4");
     expect(setAsideOutcomeSentence({ ...base, panel_depth: 1, panels: 3 }))

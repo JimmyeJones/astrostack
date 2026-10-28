@@ -1,5 +1,44 @@
 # Shipped — the record
 
+## 2026-10-28 (Builder, branch `claude/pensive-hawking-3f01rd`) — a mosaic panel left a few readable subs holds the walk-away stack
+
+- **v0.503.16** — 🐛 BUG FIX (autonomy / trust, the Scout's sweep (2) entry below). `_panels_with_nothing_readable`
+  keeps its `pointing_groups` split and `prior_max is not None` gate and now also counts a panel that keeps **under
+  half** of its solved subs readable (`thinned`; σ ≥ √2 worse there than the files on record give). The hold reports
+  it as an **additive** `panels_thinned` beside `panels_missing` (pipeline summary, `AutoStackHoldOut`,
+  `/autostack-hold`), with its own reason ("…much thinner than in the picture this target already has"); a missing
+  panel still outranks it. Frontend: `holdReasonSentence`, `setAsideOutcomeSentence` and the Jobs page's
+  `heldForFilesLine`/`pipelineSummary` gain the thinned sentence; an older backend omits the field (0) and reads as
+  before. A single field never splits, so its count rule is byte-for-byte. **Tests:** +3 Python —
+  `test_a_mosaic_panel_left_with_a_few_readable_subs_holds_the_walk_away_stack` through `_pipeline_body` (4+6 subs,
+  A keeps 1; held, then stacks once the files return), `test_a_mosaic_panel_keeping_half_its_subs_is_not_held`
+  (the line is *under* half), and the Scout's owner-scale 2×2 (D 510 → 10) through the function itself — the first
+  and last fail on `origin/main`; +2 vitest (and two exact-shape `pipelineSummary` expectations extended with the
+  new field). No config, schema, on-disk or default change; one additive response field. *The entry as filed:*
+
+- **🟡 (Scout 2026-10-28, QA rotation sweep (2)) — the walk-away readability hold lets a mosaic panel that lost
+  *almost* all of its files through: v0.503.5 catches a panel with *no* readable sub, but a panel left with a
+  handful is published at a fraction of its depth.** *(Pillar: autonomy / trust — PRIORITY 2; size **S**;
+  severity low-to-moderate — the walk-away chain replaces his newest picture with one whose panel is several times
+  grainier, and says nothing; nothing is lost on disk, the next scan after the files return re-stacks it, and his
+  install runs with `auto_stack` off, so today it bites only once he turns it on. Confidence: **reproduced**
+  through the real `webapp/pipeline._auto_stack_readability_hold` with only the project I/O stubbed; occurrence on
+  his library **unmeasured**.)*
+  Shape (S30 2×2, panels 0.96°/1.70° apart): night 1 shot panel D deep (500) and A–C lightly (50 each); night 2
+  A–C 250 each, D 10; the standing picture is nights 1–2 (1,410 subs). Night 3 adds 300 to each of A–C; then
+  night 1's folder goes off-line. Offered 2,310, readable 1,660 > prior 1,410 → the count rule passes; panel
+  depths A–C 550, D 10 → the frame-weighted typical depth is 550 ≥ `min_frames`; D still has 10 readable →
+  `_panels_with_nothing_readable` → `None`. **`hold: None`** — D goes from 510 subs to 10 (σ ×7). The whole-target
+  count is the single field's rule ("thinner than before" = any loss); on a mosaic the same rule has to be asked
+  per panel, and v0.503.5 asked it only at zero. Fix shape: widen `_panels_with_nothing_readable` (same
+  `pointing_groups` split, same `prior_max is not None` gate) to "some panel keeps under half of its solved subs"
+  (σ ≥ √2 worse than the files on record would give), carried as an **additive** `AutoStackHoldOut` field beside
+  `panels_missing` so the existing sentence and API shape stay; a single field never splits, so it is unchanged.
+  Test: the shape above through `_pipeline_body` on the `solved_library` fixture (beside
+  `tests/webapp/test_auto_stack_pipeline.py::test_a_mosaic_panel_with_no_readable_sub_holds_the_walk_away_stack`) must
+  hold; the zero-readable case must keep `panels_missing`, and a single field must keep today's count rule byte for
+  byte. Don't use the whole-target ratio instead — it is what lets this through.
+
 ## 2026-10-28 (Builder, branch `claude/pensive-hawking-3f01rd`) — the deepening reel's shallow night reads shallow on a grown mosaic
 
 - **v0.503.15** — 🐛 BUG FIX (trust / enjoy-share, the Scout's sweep (1) entry below, top of Bugs). All three measured

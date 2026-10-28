@@ -320,6 +320,10 @@ class AutoStackHoldOut(BaseModel):
     **none** readable, so the stack would have left part of the mosaic out of the
     picture the target already has (``panels`` is then the mosaic's panel count).
     ``0`` on a single field, on the other reasons, and on an older scan record.
+
+    ``panels_thinned`` is the same case short of zero: that many panels keep
+    fewer than half of their subs readable, so that part of the picture would be
+    much grainier than in the one standing. ``0`` wherever ``panels_missing`` is.
     """
 
     offered: int
@@ -329,6 +333,7 @@ class AutoStackHoldOut(BaseModel):
     panel_depth: int = 0
     panels: int = 0
     panels_missing: int = 0
+    panels_thinned: int = 0
     when_utc: str | None = None
 
 

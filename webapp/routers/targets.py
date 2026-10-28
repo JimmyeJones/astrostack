@@ -643,6 +643,7 @@ def target_autostack_hold(safe: str, request: Request) -> AutoStackHoldOut | Non
                     panel_depth=int(entry.get("panel_depth") or 0),
                     panels=int(entry.get("panels") or 0),
                     panels_missing=int(entry.get("panels_missing") or 0),
+                    panels_thinned=int(entry.get("panels_thinned") or 0),
                     when_utc=job.finished_utc,
                 )
         return None
