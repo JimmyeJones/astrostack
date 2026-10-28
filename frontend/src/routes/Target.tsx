@@ -1011,11 +1011,19 @@ export function TargetView() {
             node: <StackFailedNote safe={safe} /> },
           { key: "solve-setup", priority: NOTICE_PRIORITY.blocking, node: solveSetup ? (
             <Alert color="orange" icon={<IconAlertTriangle size={18} />}
-              title={solveSetup.kind === "astap"
+              title={solveSetup.kind === "astap" && solveSetup.cannot_run
+                ? "Plate-solving isn't working — ASTAP can't be started"
+                : solveSetup.kind === "astap"
                 ? "Plate-solving isn't set up — ASTAP wasn't found"
                 : "Plate-solving needs a star database"}>
               <Text size="sm">
-                {solveSetup.kind === "astap"
+                {solveSetup.kind === "astap" && solveSetup.cannot_run
+                  ? `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
+                    + "plate-solved because ASTAP (the plate-solver) is there but can't be "
+                    + "started. Frames need sky coordinates before they can be stacked, so this "
+                    + "blocks the whole target. Check it is executable and built for this "
+                    + "machine (Settings shows what's wrong), then re-run solving."
+                  : solveSetup.kind === "astap"
                   ? `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
                     + "plate-solved because ASTAP (the plate-solver) wasn't found. Frames need "
                     + "sky coordinates before they can be stacked, so this blocks the whole "

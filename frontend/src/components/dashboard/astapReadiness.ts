@@ -9,12 +9,16 @@ import type { SystemInfo } from "../../api/client";
 // Settings page already reads, so the Dashboard cue stays consistent with them.
 export type AstapReadiness =
   | { ready: true }
-  | { ready: false; kind: "astap" | "database" };
+  | { ready: false; kind: "astap" | "database"; cannotRun?: boolean };
 
 export function astapReadiness(astap: SystemInfo["astap"] | undefined): AstapReadiness {
   // System info not loaded yet (or an old backend without the field) → don't nag.
   if (!astap) return { ready: true };
   if (!astap.found) return { ready: false, kind: "astap" };
+  // Found but the `-h` self-test couldn't start it (no execute bit, a `noexec`
+  // mount, built for another CPU). `runs` is absent on older backends, so only a
+  // definite false counts.
+  if (astap.runs === false) return { ready: false, kind: "astap", cannotRun: true };
   // `star_db_found` is optional on older backends; only flag a *definite* false so
   // a backend that doesn't report it never shows a spurious "database missing".
   if (astap.star_db_found === false) return { ready: false, kind: "database" };
@@ -26,5 +30,6 @@ export function astapReadiness(astap: SystemInfo["astap"] | undefined): AstapRea
 // shouldn't suppress a later *different* problem ("database missing", or a
 // problem that returns after ASTAP had been working and broke again).
 export function astapReadinessSignature(r: AstapReadiness): string | null {
-  return r.ready ? null : r.kind;
+  if (r.ready) return null;
+  return r.kind === "astap" && r.cannotRun ? "astap-cannot-run" : r.kind;
 }

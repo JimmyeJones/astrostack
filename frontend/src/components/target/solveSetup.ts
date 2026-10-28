@@ -17,7 +17,13 @@
  * can be a single corrupt frame), so this never nags about setup when the real
  * issue is one bad file. Returns `null` when there's no detectable setup
  * problem, so the UI simply shows nothing (today's behaviour). */
-export type SolveSetup = { kind: "astap" | "database"; frames: number };
+// `cannotRun` (server: `cannot_run`) marks the "astap" kind whose binary is there
+// but won't start — a different one-time fix from "install it".
+export type SolveSetup = {
+  kind: "astap" | "database";
+  frames: number;
+  cannot_run?: boolean;
+};
 
 // The plate-solver binary itself wasn't found — the most fundamental problem
 // (nothing can be solved). Deterministic short message, so reliably detectable
@@ -26,6 +32,8 @@ const ASTAP_MISSING = ["astap.exe not found", "astap not found"];
 // ASTAP ran but couldn't find a star database to match against. Best-effort:
 // this phrase may fall outside the truncated reason window, in which case the
 // banner simply doesn't fire (graceful — no regression, no false positive).
+// ASTAP is there but the OS refused to start it (`SOLVE_SETUP_ASTAP_CANNOT_RUN`).
+const ASTAP_CANNOT_RUN = ["astap cannot run"];
 const DB_MISSING = ["no star database", "star database not found", "star database"];
 
 export function detectSolveSetupProblem(
@@ -33,16 +41,19 @@ export function detectSolveSetupProblem(
 ): SolveSetup | null {
   if (!counts) return null;
   let astapFrames = 0;
+  let cannotRunFrames = 0;
   let dbFrames = 0;
   for (const [reason, n] of Object.entries(counts)) {
     if (!reason.startsWith("solve_failed")) continue;
     const low = reason.toLowerCase();
     if (ASTAP_MISSING.some((s) => low.includes(s))) astapFrames += n;
+    else if (ASTAP_CANNOT_RUN.some((s) => low.includes(s))) cannotRunFrames += n;
     else if (DB_MISSING.some((s) => low.includes(s))) dbFrames += n;
   }
   // ASTAP-missing is the more fundamental problem (the solver never even ran, so
   // a "no database" message can't also be present); report it first.
   if (astapFrames > 0) return { kind: "astap", frames: astapFrames };
+  if (cannotRunFrames > 0) return { kind: "astap", frames: cannotRunFrames, cannot_run: true };
   if (dbFrames > 0) return { kind: "database", frames: dbFrames };
   return null;
 }

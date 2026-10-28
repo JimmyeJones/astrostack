@@ -79,7 +79,9 @@ export function firstImageSteps(
   // The star database is optional on some ASTAP builds, so only a *false*
   // `star_db_found` counts against it — same one-sided rule the readiness
   // banner uses, so the two can never disagree about whether solving is ready.
-  const solveReady = !!astap?.found && astap?.star_db_found !== false;
+  // A definite `runs: false` (found, but it won't start) is not ready either.
+  const solveReady = !!astap?.found && astap?.star_db_found !== false
+    && astap?.runs !== false;
   return [
     {
       key: "frames",

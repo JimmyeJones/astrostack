@@ -3930,7 +3930,7 @@ export const api = {
       // Server-side plate-solve *setup* classification (v0.84.1+). Reliable for
       // the star-database case too; older backends omit it and the frontend
       // falls back to detecting it from `counts`.
-      solve_setup_problem?: { kind: "astap" | "database"; frames: number } | null;
+      solve_setup_problem?: { kind: "astap" | "database"; frames: number; cannot_run?: boolean } | null;
       // Plain-language grouped "why were some frames left out?" breakdown
       // (v0.159.2+). Older backends omit it, so it's optional.
       summary?: RejectionSummary;

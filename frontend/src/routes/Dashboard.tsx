@@ -216,11 +216,17 @@ export function Dashboard() {
                 onClose={() => {
                   if (astapSig) { setAstapDismissedSig(astapSig); saveDismissedSig(ASTAP_DISMISS_KEY, astapSig); }
                 }}
-                title={solve.kind === "astap"
+                title={solve.kind === "astap" && solve.cannotRun
+                  ? "ASTAP is there but can't be started"
+                  : solve.kind === "astap"
                   ? "Plate-solving isn't set up yet"
                   : "Plate-solving needs a star database"}>
                 <Text size="sm">
-                  {solve.kind === "astap"
+                  {solve.kind === "astap" && solve.cannotRun
+                    ? "Solving gives every frame sky coordinates, and it's required before you "
+                      + "can stack anything. ASTAP (the plate-solver) was found, but it won't "
+                      + "start — check the file is executable and built for this machine."
+                    : solve.kind === "astap"
                     ? "Solving gives every frame sky coordinates, and it's required before you "
                       + "can stack anything. ASTAP (the plate-solver) wasn't found, so set it up "
                       + "before you drop in frames."

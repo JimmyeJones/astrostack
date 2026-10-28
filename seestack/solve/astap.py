@@ -24,6 +24,7 @@ Parallel running and progress reporting live in ``solve.runner``.
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import shutil
@@ -37,6 +38,16 @@ log = logging.getLogger(__name__)
 
 class ASTAPError(RuntimeError):
     """Raised when ASTAP fails to solve or its output cannot be parsed."""
+
+
+class ASTAPCannotRunError(ASTAPError):
+    """Raised when the ASTAP binary is there but the OS refuses to start it.
+
+    A file that lost its execute bit, sits on a ``noexec`` mount, or is built for
+    another CPU fails every frame identically — a one-time setup problem, not a
+    per-frame solve failure — so the solve ladder stops on it and the message
+    leads with :data:`SOLVE_SETUP_ASTAP_CANNOT_RUN` for the classifier to find.
+    """
 
 
 @dataclass
@@ -227,6 +238,10 @@ class ASTAPSolver:
                     dec_hint_deg=dec_hint_deg,
                     radius_deg=radius_deg,
                 )
+            except ASTAPCannotRunError:
+                # The binary can't be started at all: every rung would fail the
+                # same way, so don't try the other two.
+                raise
             except ASTAPError as exc:
                 # A per-rung failure — most often a *timeout* on the slow full-res
                 # first rung — must not abort the ladder. The coarser downsampled
@@ -356,6 +371,16 @@ class ASTAPSolver:
             )
         except subprocess.TimeoutExpired as exc:
             raise ASTAPError(f"ASTAP timed out after {self.timeout_s}s on {fits_path}") from exc
+        except OSError as exc:
+            # The OS refused to start the binary: no execute permission (or a
+            # ``noexec`` mount), not an executable for this machine, or a script
+            # whose interpreter is missing. Any other OSError (out of memory, too
+            # many processes) may be transient and stays an ordinary rung failure.
+            if exc.errno in _CANNOT_RUN_ERRNOS:
+                raise ASTAPCannotRunError(
+                    f"{SOLVE_SETUP_ASTAP_CANNOT_RUN}: {self.astap_path}: {exc.strerror or exc}"
+                ) from exc
+            raise ASTAPError(f"ASTAP could not be started on {fits_path}: {exc}") from exc
 
         # ASTAP names its messages after the path we handed it; put the source
         # path back so a failure a user reads names their frame, not a scratch dir.
@@ -459,6 +484,10 @@ def _is_fatal_solve_error(log_tail: str) -> bool:
 # raw ASTAP "no star database" line can otherwise land past the stored window).
 SOLVE_SETUP_ASTAP_MISSING = "astap not found"
 SOLVE_SETUP_NO_DATABASE = "no star database"
+#: ASTAP is present but the OS won't start it (see :class:`ASTAPCannotRunError`).
+SOLVE_SETUP_ASTAP_CANNOT_RUN = "astap cannot run"
+# ``subprocess`` errnos that mean "this file can't be executed here", every time.
+_CANNOT_RUN_ERRNOS = frozenset({errno.EACCES, errno.EPERM, errno.ENOEXEC, errno.ENOENT})
 
 #: Canonical short reason for the *other* fixable plate-solve failure: every rung
 #: of the ladder ran out of time. Unlike a setup problem this is per-frame (a
@@ -472,8 +501,9 @@ SOLVE_FAILED_TIMEOUT = "solve timed out"
 def classify_solve_setup_error(error_text: str | None) -> str | None:
     """Classify a plate-solve failure message as a *setup* problem, or ``None``.
 
-    Returns :data:`SOLVE_SETUP_ASTAP_MISSING` / :data:`SOLVE_SETUP_NO_DATABASE`
-    when the full failure text shows ASTAP or its star database isn't available —
+    Returns :data:`SOLVE_SETUP_ASTAP_MISSING` / :data:`SOLVE_SETUP_ASTAP_CANNOT_RUN`
+    / :data:`SOLVE_SETUP_NO_DATABASE` when the full failure text shows ASTAP or its
+    star database isn't available (or ASTAP can't be started) —
     a problem that fails every frame the same way and is fixed once, not per
     frame. Returns ``None`` for an ordinary per-frame failure (no catalog match, a
     single unreadable file, …), so those are never misreported as a setup problem.
@@ -490,6 +520,9 @@ def classify_solve_setup_error(error_text: str | None) -> str | None:
     # ran, so a database message can't also be present. Check it first.
     if "astap.exe not found" in low or "astap not found" in low:
         return SOLVE_SETUP_ASTAP_MISSING
+    # Present but un-startable — also before the database check: it never ran.
+    if SOLVE_SETUP_ASTAP_CANNOT_RUN in low:
+        return SOLVE_SETUP_ASTAP_CANNOT_RUN
     if "no star database" in low or "star database not found" in low:
         return SOLVE_SETUP_NO_DATABASE
     return None
