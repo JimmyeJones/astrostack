@@ -3591,6 +3591,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.12 **A mosaic target nobody has stacked yet is no longer told "Needs 3×3 mosaic" about itself on Tonight / Plan my week** (`plan._annotate_library_targets` `canvas_is_mosaic` now also honours `is_mosaic_target_name`); dogfood find, entry in `SHIPPED.md`
 - ✅ v0.503.11 **History's Noise trend quotes the two σ at the precision that tells them apart — no more "Cleaner … (σ 0.001 vs 0.001)"** (`History.tsx::noiseTrendSummary`); dogfood find, entry in `SHIPPED.md`.
 - ✅ v0.503.10 **One night has one dark window, whenever it is asked about — Tonight's header and Plan my week no longer print two different ends of the same night** (`nightplan._local_noon_near`, `_find_dark_window`); dogfood find, entry in `SHIPPED.md`.
 - ✅ v0.503.9 **Tonight's Night picker shows the night it is planning (the date the dark window opens on) instead of a blank `mm/dd/yyyy`** (`tonight.ts::shownNightDate`); dogfood find, entry in `SHIPPED.md`.
