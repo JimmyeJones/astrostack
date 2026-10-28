@@ -90,7 +90,6 @@ def test_a_transient_oserror_stays_an_ordinary_rung_failure(tmp_path, monkeypatc
     frame = _frame(tmp_path)
     stub = tmp_path / "astap"
     stub.write_text("")
-    solver = ASTAPSolver(astap_path=stub, timeout_s=5.0)
 
     def boom(cmd, **kw):
         raise OSError(errno.ENOMEM, "Cannot allocate memory")
