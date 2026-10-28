@@ -1,5 +1,15 @@
 # Process notes & QA sweep records
 
+## 2026-10-28 (Builder, branch `claude/nice-carson-rgalhh`) — dogfood `--combine --calibration --editor --dithered`: one trust fix (v0.503.12)
+
+- **Start:** no open PRs, no ungated bug, `main` CI green. Dogfood first (it rebuilds `webapp/static/`), suite after.
+- **Find:** the "what the TONIGHT page SAYS" block had Plan my week's pick — the dithered 2×2 mosaic — badged
+  "NEEDS 3×3 MOSAIC". That sample target had no stack in the `--combine` data root, so `target_field_fulls` was
+  `None` and the stand-down never fired. Fixed for convention-named mosaics (v0.503.12); the synthetic sample's
+  name has no `(mosaic)` suffix, so it keeps the badge until stacked — expected, not a second bug.
+- **Rest of the pass CLEAN:** editor drive re-rendered every op, taste chips behaved, no overflow, no console errors.
+- **Suite:** 8310 passed / 7 skipped (`-n 4 --dist worksteal`, 18 min).
+
 ## 2026-10-27 (Builder, branch `claude/nice-carson-3du8rr`) — dogfood `--restack --big --mosaic --editor`: one polish fix (v0.503.11)
 
 - **Start:** no open PRs, no ungated bug; baseline suite 8308 passed / 1 failed (the flake below) / 7 skipped;
