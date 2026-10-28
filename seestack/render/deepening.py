@@ -474,33 +474,46 @@ def _sky_affine(src_fits: str | Path, src_size: tuple[int, int],
     return coeffs
 
 
-def _place_on_sky(img, coeffs: tuple[float, float, float, float, float, float],
-                  target_size: tuple[int, int]):
-    """Draw ``img`` on a ``target_size`` black canvas **where its sky is** on the
-    reference frame (``coeffs`` from :func:`_sky_affine`), or return ``None``
-    when none of it lands there — the caller then falls back to
-    :func:`_fit_onto` rather than showing an all-black frame.
+def _place_on_sky(rgb: np.ndarray,
+                  coeffs: tuple[float, float, float, float, float, float],
+                  target_size: tuple[int, int]) -> np.ndarray | None:
+    """Draw the **linear** ``(H, W, 3)`` frame ``rgb`` on a ``target_size`` canvas
+    **where its sky is** on the reference frame (``coeffs`` from
+    :func:`_sky_affine`), uncovered pixels NaN — or return ``None`` when none of
+    it lands there, and the caller falls back to :func:`_fit_onto` rather than
+    showing an all-black frame.
 
     A frame that already sits exactly on the reference grid (same size, an
     identity mapping to within :data:`_SKY_IDENTITY_TOL_PX`) comes back
     untouched, so the ordinary single-field re-stack is byte-for-byte what the
-    reel always drew. A source drawn smaller than it was decimated is first
-    box-shrunk to roughly the drawn scale, so stars are averaged rather than
-    point-sampled away (the same reason ``load_stack_rgb`` box-averages)."""
-    from PIL import Image
+    reel always drew.
+
+    **Why this runs before the stretch and samples nearest.** It used to resample
+    the *stretched u8* frame bilinearly. The stretch has already clipped the sky's
+    noise at its black point, so averaging clipped values lifted the sky; and a
+    sub-pixel bilinear resample averages neighbours, smoothing the earlier frame's
+    noise ~30 % while the newest is never resampled. On a mosaic that grew, the
+    shallow first night came out *quieter and brighter* than the deep newest one
+    (Scout 2026-10-28) — the reverse of the reel's story. The caller now loads
+    each source at the reference's sky scale (:func:`_sky_scale_width`), so the
+    mapping is ~1:1 and a nearest pick moves whole pixels without averaging any.
+    A source still drawn smaller than it was loaded (one capped by
+    :data:`_MAX_PLACED_SOURCE_WIDTH`) is first area-averaged, NaN-aware, in the
+    linear domain — what ``load_stack_rgb`` does."""
+    from seestack.render.thumbnail import _nan_aware_area_downscale_plane
 
     a, b, c, d, e, f = coeffs
     tw, th = target_size
+    h, w = rgb.shape[:2]
     corners = [(0.0, 0.0), (tw, 0.0), (0.0, th), (tw, th)]
-    if img.size == (tw, th) and all(
+    if (w, h) == (tw, th) and all(
             abs(a * x + b * y + c - x) <= _SKY_IDENTITY_TOL_PX
             and abs(d * x + e * y + f - y) <= _SKY_IDENTITY_TOL_PX
             for x, y in corners):
-        return img
+        return rgb
 
     # Does any of the source land on the target? Map the source's corners into
     # target coordinates through the inverse and intersect the bounding boxes.
-    w, h = img.size
     det = a * e - b * d
     inv = ((e, -b, b * f - c * e), (-d, a, c * d - a * f))
     xs, ys = [], []
@@ -510,30 +523,60 @@ def _place_on_sky(img, coeffs: tuple[float, float, float, float, float, float],
     if max(xs) <= 0 or min(xs) >= tw or max(ys) <= 0 or min(ys) >= th:
         return None
 
-    # Source pixels per target pixel; above ~1.5 pre-shrink with a box filter.
+    # Source pixels per target pixel; above ~1.5 pre-shrink with an area average.
     scale = abs(det) ** 0.5
     if scale > 1.5:
         nw, nh = max(1, round(w / scale)), max(1, round(h / scale))
         sx, sy = nw / w, nh / h
-        img = img.resize((nw, nh), Image.BOX)
+        shrunk = np.empty((nh, nw, rgb.shape[2]), dtype=np.float32)
+        for ch in range(rgb.shape[2]):
+            shrunk[..., ch] = _nan_aware_area_downscale_plane(rgb[..., ch], nw, nh)
+        rgb, w, h = shrunk, nw, nh
         a, b, c, d, e, f = a * sx, b * sx, c * sx, d * sy, e * sy, f * sy
-    return img.transform((tw, th), Image.AFFINE, (a, b, c, d, e, f),
-                         resample=Image.BILINEAR, fillcolor=(0, 0, 0))
+
+    # The nearest source pixel under each target pixel's centre (Pillow's
+    # convention, pixel i is continuous i + 0.5, which `_sky_affine` is fitted in).
+    u = np.arange(tw, dtype=np.float64)[None, :] + 0.5
+    v = np.arange(th, dtype=np.float64)[:, None] + 0.5
+    src_x = np.floor(a * u + b * v + c).astype(np.int64)
+    src_y = np.floor(d * u + e * v + f).astype(np.int64)
+    inside = (src_x >= 0) & (src_x < w) & (src_y >= 0) & (src_y < h)
+    out = np.full((th, tw, rgb.shape[2]), np.nan, dtype=np.float32)
+    out[inside] = rgb[src_y[inside], src_x[inside]]
+    return out
 
 
-def _unify_frame(img, src_fits: str | Path, ref_fits: str | Path,
-                 ref_size: tuple[int, int]):
-    """One reel frame on the reference frame's canvas: placed by the sky when
-    both masters carry a celestial WCS (:func:`_place_on_sky`), otherwise —
-    or when the placement finds no shared sky — fitted and centred as the reel
-    always did (:func:`_fit_onto`)."""
-    if str(src_fits) != str(ref_fits):
-        coeffs = _sky_affine(src_fits, img.size, ref_fits, ref_size)
-        if coeffs is not None:
-            placed = _place_on_sky(img, coeffs, ref_size)
-            if placed is not None:
-                return placed
-    return _fit_onto(img, ref_size)
+#: The widest an earlier frame is ever loaded to match the reference's sky scale
+#: (a mosaic shown against a newer single panel would otherwise load near full
+#: size). Past it the placement area-averages the rest of the way — a little more
+#: smoothing on that one shape, but a bounded allocation on the NAS.
+_MAX_PLACED_SOURCE_WIDTH = 4096
+
+
+def _sky_scale_width(src_fits: str | Path, ref_fits: str | Path,
+                     ref_size: tuple[int, int], max_width: int) -> int | None:
+    """The width to load ``src_fits`` at so one of its pixels covers the same sky
+    as one pixel of the reference reel frame — or ``None`` (load it as usual)
+    when either master has no usable WCS.
+
+    Every master used to be decimated to ``max_width`` by its *own* factor, so a
+    single panel (≈1.05×) and the 2×2 mosaic it grew into (≈2×) had their noise
+    averaged down by different amounts before the reel compared them. Loading each
+    earlier night at the reference's sky scale averages them alike."""
+    from seestack.io.wcs_io import celestial_wcs_from_fits
+
+    src, sw, sh = celestial_wcs_from_fits(src_fits)
+    if src is None or sw <= 0 or sh <= 0:
+        return None
+    full = _sky_affine(src_fits, (sw, sh), ref_fits, ref_size)
+    if full is None:
+        return None
+    a, b, _c, d, e, _f = full
+    per_ref_px = abs(a * e - b * d) ** 0.5   # full-res source px per reel px
+    if not np.isfinite(per_ref_px) or per_ref_px <= 0:
+        return None
+    width = int(round(sw / per_ref_px))
+    return max(1, min(width, sw, max(max_width, _MAX_PLACED_SOURCE_WIDTH)))
 
 
 def render_deepening_frames(fits_paths: list[str | Path], *,
@@ -549,7 +592,7 @@ def render_deepening_frames(fits_paths: list[str | Path], *,
     frame's canvas so the encoder gets a uniform series even as the canvas grows
     across nights — placed by their WCS where both masters carry one, so the
     object stays put while a mosaic grows around it, else fitted and centred
-    (see :func:`_unify_frame`). Frames that can't be loaded are skipped
+    (see :func:`_place_on_sky`). Frames that can't be loaded are skipped
     (best-effort).
 
     ``labels`` (optional, parallel to ``fits_paths``) burns a small provenance
@@ -583,35 +626,45 @@ def render_deepening_frames(fits_paths: list[str | Path], *,
             if params is not None:
                 break
 
-    images: list = []
-    frame_labels: list[str] = []
-    sources: list[str | Path] = []
-    for rgb, display_space, label, fp in loaded:
-        if display_space:
-            disp = np.clip(np.nan_to_num(rgb), 0.0, 1.0)
-        elif params is not None:
-            disp = _apply_stf_params(rgb, params)
-        else:
-            # No usable linear reference (every frame display-space-flat); show
-            # what we have rather than nothing.
-            disp = np.clip(np.nan_to_num(rgb), 0.0, 1.0)
-        u8 = pack_unit(disp)
-        images.append(Image.fromarray(u8, mode="RGB"))
-        frame_labels.append(label)
-        sources.append(fp)
+    def _to_display(rgb: np.ndarray, display_space: bool) -> np.ndarray:
+        if display_space or params is None:
+            # An export is shown verbatim; with no usable linear reference (every
+            # frame display-space-flat) show what we have rather than nothing.
+            return np.clip(np.nan_to_num(rgb), 0.0, 1.0)
+        return _apply_stf_params(rgb, params)
 
-    target_size = images[-1].size
-    ref_fits = sources[-1]
-    # Unify size first (so the label is drawn crisp at the final output
-    # resolution, not up/down-scaled with the frame), then burn each label in.
     # Each earlier night is drawn where its sky sits on the newest frame — a
     # mosaic that grew panel by panel would otherwise have its first panel
     # centred and blown up to fill the frame, the object jumping and zooming
-    # between nights (see `_unify_frame`; no WCS ⇒ the old fit-and-centre).
-    resized = [_unify_frame(im, src, ref_fits, target_size)
-               for im, src in zip(images, sources, strict=True)]
-    return [_draw_corner_label(im, lbl)
-            for im, lbl in zip(resized, frame_labels, strict=True)]
+    # between nights. It is loaded at the newest frame's sky scale and placed in
+    # the *linear* domain before the shared stretch, so a shallow night is never
+    # averaged or lifted into looking cleaner than the deep one (see
+    # `_place_on_sky`). No WCS, or no shared sky ⇒ the old fit-and-centre.
+    ref_rgb, _ref_ds, _ref_label, ref_fits = loaded[-1]
+    target_size = (ref_rgb.shape[1], ref_rgb.shape[0])
+    frames: list = []
+    for i, (rgb, display_space, label, fp) in enumerate(loaded):
+        placed: np.ndarray | None = None
+        if i < len(loaded) - 1 and str(fp) != str(ref_fits):
+            src = rgb
+            width = _sky_scale_width(fp, ref_fits, target_size, max_width)
+            if width is not None and width != rgb.shape[1]:
+                try:
+                    src, _ds = load_stack_rgb(fp, max_width=width)
+                except Exception as exc:  # noqa: BLE001 — keep the first load
+                    log.warning("deepening reel: could not reload %s: %s", fp, exc)
+            coeffs = _sky_affine(fp, (src.shape[1], src.shape[0]), ref_fits, target_size)
+            if coeffs is not None:
+                placed = _place_on_sky(src, coeffs, target_size)
+        if placed is not None:
+            img = Image.fromarray(pack_unit(_to_display(placed, display_space)), mode="RGB")
+        else:
+            img = _fit_onto(Image.fromarray(pack_unit(_to_display(rgb, display_space)),
+                                            mode="RGB"), target_size)
+        # Size is unified first, so the label is drawn crisp at the final output
+        # resolution rather than up/down-scaled with the frame.
+        frames.append(_draw_corner_label(img, label))
+    return frames
 
 
 def write_deepening_reel(frames: list, out_dir: Path, out_basename: str) -> Path | None:

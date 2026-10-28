@@ -2,7 +2,7 @@
 
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-ptp2yd`) — an upload never replaces a sub that reached `incoming/` while it streamed
 
-- **v0.503.15** — 🔒 BUG FIX (AGENTS.md §10, Scout sweep (4), found and fixed in the same run). `POST /api/upload`
+- **v0.503.16** — 🔒 BUG FIX (AGENTS.md §10, Scout sweep (4), found and fixed in the same run). `POST /api/upload`
   checks `dest.exists()` *before* a stream that can take minutes, then placed the finished `.part` with an
   unconditional `os.replace` — whose docstring even said "the loser is simply overwritten". A sub that the NAS copy
   (or a second POST of the same name, or a second tab) put at that name meanwhile was silently replaced and the answer
@@ -15,6 +15,48 @@
   the zip member; the no-hard-link fallback both ways. Two existing tests updated for the create-only contract (the
   concurrent same-name test now asserts exactly one placed and one refused; the rename-failure test also fails the
   link). No config, schema, endpoint, response-shape or default change.
+## 2026-10-28 (Builder, branch `claude/pensive-hawking-3f01rd`) — the deepening reel's shallow night reads shallow on a grown mosaic
+
+- **v0.503.15** — 🐛 BUG FIX (trust / enjoy-share, the Scout's sweep (1) entry below, top of Bugs). All three measured
+  causes fixed in `seestack/render/deepening.py::render_deepening_frames`: each earlier night is now **loaded at the
+  newest frame's sky scale** (new `_sky_scale_width`, from `_sky_affine` on the full-res size; capped at
+  `_MAX_PLACED_SOURCE_WIDTH` = 4096 px, past which a NaN-aware area average does the rest), **placed in the linear
+  float domain before the shared stretch** (`_place_on_sky` now takes the float array, NaN outside), and **sampled
+  nearest** at each target pixel centre rather than bilinear — so no averaging of the earlier frame's noise and no
+  lifting of clipped sky. Measured on the Scout's shape (shallow σ 0.00566 → deep 0.004, reel at 256 px): grown 2×2
+  **26.1 → 49.3** vs deep 37.7, sky 51/51; shrunk **18.6 → 49.5** vs 37.6, sky 52/51 — the single field's 49.3/37.7.
+  Same-grid single field still never resamples (identity path), so that reel is byte-for-byte (its existing test
+  passes unchanged); no-WCS and no-shared-sky frames keep `_fit_onto`. `_unify_frame` folded into the render loop.
+  The reel cache signature tag goes `v3-sky` → `v4-sky-linear` (`webapp/routers/stack.py::_deepening_signature`) so
+  cached reels rebuild. **Tests (+2):** `test_a_shallow_night_on_a_changed_canvas_is_not_drawn_cleaner[grown|shrunk]`,
+  fail-before shown against `origin/main` (26.1 and 18.6 < 37.7×1.2). Suite 8315 passed / 7 skipped. No config,
+  schema, on-disk layout, default or API-shape change. *The entry as filed:*
+
+- **🟡 (Scout 2026-10-28, QA rotation sweep (1)) — on a mosaic whose canvas changed between runs, the "night after
+  night" deepening reel draws the earlier, shallower night *cleaner and brighter* than the deeper newest one.**
+  *(Pillar: trust / enjoy-share — PRIORITY 3–4; size **S–M**; severity moderate — the reel's whole story is "cleaner
+  and deeper", and on the owner's commonest shape (a mosaic that grows panel by panel) it shows the reverse; no data
+  at risk. Confidence: **reproduced** through the real `render_deepening_frames` at the owner's scale; occurrence on
+  his library **unmeasured** but it is the shape v0.502.23 was built for.)*
+  Scratch repro: an S30 panel 1080×1920 (night 1) and the 2×2 it became (2080×3760, both solved, flat sky 0.1),
+  sky σ in the panel's footprint, reel u8 green. **Same-grid single field, shallow (σ 0.00566) → deep (0.004):
+  49.3 → 37.7, sky median 51 → 51** (correct). **Grown 2×2, the same depths: 25.3 → 37.7, sky 73 → 51** — the
+  shallow night looks a third *quieter* and visibly brighter. Shrunk canvas (mosaic night, then a one-panel newest
+  run): 18.5 → 37.7. Equal depths grown: 21.4 vs 37.7, sky 67 vs 51. Three causes in `seestack/render/deepening.py`,
+  each measured: **(a)** every master is decimated to `max_width` by its *own* factor (`load_stack_rgb`), so a
+  panel and the mosaic are box-averaged by ~1.05× vs ~2.03×; **(b)** `_place_on_sky` resamples the *stretched u8*
+  frame — `_apply_stf_params` has already clipped noise at the black point, so the box pre-shrink + bilinear average
+  of clipped values lifts the sky (51 → 57–73); **(c)** a bilinear sub-pixel resample of the earlier frame alone
+  smooths its noise ~30 % while the reference is never resampled. Fixing (a)+(b) alone still gave 36.5 vs 37.7;
+  **(a)+(b)+(c) — load each source at the reference's sky scale, place in the linear float domain (NaN fill), then
+  stretch, with a non-smoothing resample — gave 49.5 / 51, matching the single field.** A pure same-grid single
+  field never resamples (`_SKY_IDENTITY_TOL_PX`), so it is unaffected and must stay byte-for-byte. Fix shape: move
+  placement ahead of the stretch in `render_deepening_frames` (place `rgb` floats, `nan_to_num` after); pick each
+  source's `max_width` from `_sky_affine`'s scale; resample nearest (or snap a near-pure-translation to whole
+  pixels) rather than bilinear — rotation between alt-az nights still needs a kernel, so pin the test on a
+  translation-only grow and keep any kernel's σ loss under ~10 %. Test: the two-depth grown/shrunk pairs above
+  (built like `tests/test_deepening_reel.py::_grown_mosaic`) must order σ shallow > deep and keep sky medians equal;
+  it fails today with 25.3 < 37.7.
 
 ## 2026-10-28 (Builder, branch `claude/pensive-hawking-uy9mbo`) — the Dashboard's nights chip says what it counts
 
