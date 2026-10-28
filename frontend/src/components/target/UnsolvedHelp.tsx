@@ -65,7 +65,12 @@ export function UnsolvedHelp({ setup }: { setup?: SolveSetup | null } = {}) {
           {setup ? (
             <>
               <Text size="xs" c="dimmed">
-                {setup.kind === "astap"
+                {setup.kind === "astap" && setup.cannot_run
+                  ? "Right now none of them can be located, because ASTAP — the "
+                    + "program that does the locating — is there but can't be started. "
+                    + "That's the orange note above, and until it's sorted no sub can "
+                    + "reach your picture."
+                  : setup.kind === "astap"
                   ? "Right now none of them can be located, because ASTAP — the "
                     + "program that does the locating — isn't installed yet. That's "
                     + "the orange note above, and until it's sorted no sub can reach "

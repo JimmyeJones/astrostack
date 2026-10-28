@@ -53,4 +53,10 @@ describe("detectSolveSetupProblem", () => {
       detectSolveSetupProblem({ "solve_failed:No Star Database Found": 3 }),
     ).toEqual({ kind: "database", frames: 3 });
   });
+
+  it("reports an ASTAP that is there but can't be started", () => {
+    expect(
+      detectSolveSetupProblem({ "solve_failed:astap cannot run": 5, "qc:fwhm": 1 }),
+    ).toEqual({ kind: "astap", frames: 5, cannot_run: true });
+  });
 });

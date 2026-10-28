@@ -29,6 +29,14 @@ describe("astapReadiness", () => {
       .toEqual({ ready: true });
   });
 
+  it("flags an ASTAP that was found but won't start (runs: false)", () => {
+    expect(astapReadiness({ found: true, path: "/opt/astap/astap", star_db_found: true, runs: false }))
+      .toEqual({ ready: false, kind: "astap", cannotRun: true });
+    // An older backend omits `runs` — never a spurious nag.
+    expect(astapReadiness({ found: true, path: "/opt/astap/astap", star_db_found: true }))
+      .toEqual({ ready: true });
+  });
+
   it("does not nag when system info hasn't loaded yet", () => {
     expect(astapReadiness(undefined)).toEqual({ ready: true });
   });
@@ -44,5 +52,8 @@ describe("astapReadinessSignature", () => {
     // after an earlier one was dismissed.
     expect(astapReadinessSignature({ ready: false, kind: "astap" })).toBe("astap");
     expect(astapReadinessSignature({ ready: false, kind: "database" })).toBe("database");
+    // Dismissing "not found" must not hide a later "found but can't start".
+    expect(astapReadinessSignature({ ready: false, kind: "astap", cannotRun: true }))
+      .toBe("astap-cannot-run");
   });
 });

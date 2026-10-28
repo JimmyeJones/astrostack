@@ -1319,15 +1319,16 @@ export function SettingsView() {
 
       {system.data ? (() => {
         const astap = system.data.astap;
-        const solveReady = astap.found && astap.star_db_found !== false;
+        const cannotRun = astap.found && astap.runs === false;
+        const solveReady = astap.found && astap.star_db_found !== false && !cannotRun;
         return (
           <Alert icon={<IconInfoCircle size={16} />} color={solveReady ? "teal" : "yellow"}>
             <Stack gap={6}>
               <Group gap="lg">
                 <Text size="sm">Data root: <b>{system.data.data_root}</b></Text>
                 <Text size="sm">CPUs: <b>{system.data.cpu_count}</b></Text>
-                <Badge color={astap.found ? "teal" : "red"}>
-                  ASTAP {astap.found ? "found" : "missing"}
+                <Badge color={astap.found && !cannotRun ? "teal" : "red"}>
+                  ASTAP {cannotRun ? "can't start" : astap.found ? "found" : "missing"}
                 </Badge>
                 {astap.found ? (
                   <Badge color={astap.star_db_found ? "teal" : "red"}>
@@ -1345,6 +1346,7 @@ export function SettingsView() {
               </Group>
               {astap.version ? <Text size="xs" c="dimmed">{astap.version}</Text> : null}
               {astap.hint ? <Text size="sm" c="yellow">{astap.hint}</Text> : null}
+              {cannotRun && astap.error ? <Text size="xs" c="dimmed">{astap.error}</Text> : null}
               <Group gap="xs" align="center">
                 <Button size="xs" variant="light" loading={astapTest.isPending}
                   disabled={!astap.found} onClick={() => astapTest.mutate()}>

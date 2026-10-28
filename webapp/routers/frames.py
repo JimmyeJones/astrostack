@@ -20,6 +20,7 @@ from seestack.qc.bulk_select import worst_frames_by_metric
 from seestack.render.thumbnail import THUMB_VERSION, generate_thumbnail, thumbs_dir
 from seestack.solve.astap import (
     SOLVE_FAILED_TIMEOUT,
+    SOLVE_SETUP_ASTAP_CANNOT_RUN,
     SOLVE_SETUP_ASTAP_MISSING,
     SOLVE_SETUP_NO_DATABASE,
     classify_solve_setup_error,
@@ -205,18 +206,25 @@ def _solve_setup_problem(counts: dict[str, int]) -> dict | None:
     server-side tally is reliable for the star-database case too — not just the
     deterministic "astap not found" message the frontend could already spot.
     ASTAP-missing wins over no-database (the solver never ran, so a database
-    message can't also be present)."""
-    astap = db = 0
+    message can't also be present).
+
+    ASTAP present but un-startable reports as ``"astap"`` too, with an additive
+    ``cannot_run`` flag so the banner can name the right fix."""
+    astap = cannot_run = db = 0
     for reason, n in counts.items():
         if not reason.startswith("solve_failed:"):
             continue
         kind = classify_solve_setup_error(reason)
         if kind == SOLVE_SETUP_ASTAP_MISSING:
             astap += n
+        elif kind == SOLVE_SETUP_ASTAP_CANNOT_RUN:
+            cannot_run += n
         elif kind == SOLVE_SETUP_NO_DATABASE:
             db += n
     if astap:
         return {"kind": "astap", "frames": astap}
+    if cannot_run:
+        return {"kind": "astap", "frames": cannot_run, "cannot_run": True}
     if db:
         return {"kind": "database", "frames": db}
     return None

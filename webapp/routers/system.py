@@ -123,6 +123,12 @@ def _astap_info(settings) -> dict:  # noqa: ANN001
                 "to it — every solve will fail. Add one (e.g. d05) to "
                 f"{path.parent} or set SEESTACK_ASTAP_DATA."
             )
+        if info["runs"] is False:
+            # More fundamental than a missing database: nothing can run at all.
+            info["hint"] = (
+                "ASTAP is there but can't be started — check the file is executable "
+                "(and not on a noexec mount) and built for this machine."
+            )
         return info
     except Exception as exc:  # noqa: BLE001
         return {"found": False, "path": None, "error": str(exc)}
