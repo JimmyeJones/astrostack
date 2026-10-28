@@ -82,6 +82,32 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 (Scout 2026-10-28, QA rotation sweep (1)) — on a mosaic whose canvas changed between runs, the "night after
+  night" deepening reel draws the earlier, shallower night *cleaner and brighter* than the deeper newest one.**
+  *(Pillar: trust / enjoy-share — PRIORITY 3–4; size **S–M**; severity moderate — the reel's whole story is "cleaner
+  and deeper", and on the owner's commonest shape (a mosaic that grows panel by panel) it shows the reverse; no data
+  at risk. Confidence: **reproduced** through the real `render_deepening_frames` at the owner's scale; occurrence on
+  his library **unmeasured** but it is the shape v0.502.23 was built for.)*
+  Scratch repro: an S30 panel 1080×1920 (night 1) and the 2×2 it became (2080×3760, both solved, flat sky 0.1),
+  sky σ in the panel's footprint, reel u8 green. **Same-grid single field, shallow (σ 0.00566) → deep (0.004):
+  49.3 → 37.7, sky median 51 → 51** (correct). **Grown 2×2, the same depths: 25.3 → 37.7, sky 73 → 51** — the
+  shallow night looks a third *quieter* and visibly brighter. Shrunk canvas (mosaic night, then a one-panel newest
+  run): 18.5 → 37.7. Equal depths grown: 21.4 vs 37.7, sky 67 vs 51. Three causes in `seestack/render/deepening.py`,
+  each measured: **(a)** every master is decimated to `max_width` by its *own* factor (`load_stack_rgb`), so a
+  panel and the mosaic are box-averaged by ~1.05× vs ~2.03×; **(b)** `_place_on_sky` resamples the *stretched u8*
+  frame — `_apply_stf_params` has already clipped noise at the black point, so the box pre-shrink + bilinear average
+  of clipped values lifts the sky (51 → 57–73); **(c)** a bilinear sub-pixel resample of the earlier frame alone
+  smooths its noise ~30 % while the reference is never resampled. Fixing (a)+(b) alone still gave 36.5 vs 37.7;
+  **(a)+(b)+(c) — load each source at the reference's sky scale, place in the linear float domain (NaN fill), then
+  stretch, with a non-smoothing resample — gave 49.5 / 51, matching the single field.** A pure same-grid single
+  field never resamples (`_SKY_IDENTITY_TOL_PX`), so it is unaffected and must stay byte-for-byte. Fix shape: move
+  placement ahead of the stretch in `render_deepening_frames` (place `rgb` floats, `nan_to_num` after); pick each
+  source's `max_width` from `_sky_affine`'s scale; resample nearest (or snap a near-pure-translation to whole
+  pixels) rather than bilinear — rotation between alt-az nights still needs a kernel, so pin the test on a
+  translation-only grow and keep any kernel's σ loss under ~10 %. Test: the two-depth grown/shrunk pairs above
+  (built like `tests/test_deepening_reel.py::_grown_mosaic`) must order σ shallow > deep and keep sky medians equal;
+  it fails today with 25.3 < 37.7.
+
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
