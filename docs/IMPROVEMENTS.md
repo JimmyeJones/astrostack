@@ -106,26 +106,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   missing set path should *fall back* to the bundled binary is a behaviour change — say it, don't do it silently.
   Test: the six values above through `_astap_info` and `solve_one`.
 
-- **🟡 (Scout 2026-10-28, QA rotation sweep (2)) — the walk-away per-panel readability hold compares a panel with
-  the subs *on record*, not with the picture standing, so an off-line **newest** night on one panel holds a stack
-  that would be strictly better, and says the mosaic "would be much thinner / out of the picture this target
-  already has" when it would not.** *(Pillar: autonomy / trust — PRIORITY 2; size **S**; severity low-to-moderate
-  — a blocked improvement and a false reason while the newest folder is away, held until he clicks "set aside";
-  nothing published is worse, nothing lost on disk. Confidence: **reproduced** through the real `_pipeline_body` /
-  `_auto_stack_readability_hold`, `run_stack` stubbed; occurrence on his install **unmeasured**.)*
-  `_panels_with_nothing_readable` (v0.503.5 `missing`, v0.503.16 `thinned`) counts each panel's readable subs
-  against every accepted solved sub it has *now*, with no time; the whole-target rule beside it compares with
-  `prior_max`. Repro A (deepening one panel): picture used A 4 + B 6 = 10; since then +6 on A (newest night,
-  off-line) and +3 on B (readable) → `readable` 13 ≥ 10, A keeps exactly the 4 the picture had, yet
-  `panels_thinned: 1`, held "much thinner than in the picture this target already has" — the stack would have
-  deepened B 6 → 9 and left A as it was. Repro B (growing into a mosaic): picture used 10 on A; since then a
-  brand-new panel B of 4 subs, all off-line, and +2 on A → `panels_missing: 1`, held "out of the picture this
-  target already has" — B was never in it. Pre-v0.503.16, Repro A stacked. Fix shape: count each panel's
-  "on record" subs only among those that existed at the standing picture — `frames.ingested_at` ≤ the best
-  genuine run's `timestamp_utc` (a `NULL` `ingested_at`, pre-fingerprint rows, keeps today's count, so it can only
-  release a hold, never add one) — keeping both regression tests from v0.503.5/16 green. Test: the two repros
-  above (stamp `ingested_at` before / after a run timestamp) stack; the existing `thinned` test still holds.
-
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
@@ -3613,7 +3593,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
-- ✅ v0.503.20 **A `NaN`/`Infinity` literal in a request body is rejected with a 422, not a 500** (`main._install_validation_handler`, `_json_safe_input`)
+- ✅ v0.503.21 **A `NaN`/`Infinity` literal in a request body is rejected with a 422, not a 500** (`main._install_validation_handler`, `_json_safe_input`)
+- ✅ v0.503.20 **The walk-away per-panel readability hold compares each panel with the subs it had when the standing picture was made — an off-line newest night on one panel, or a brand-new off-line panel, no longer holds a stack that would deepen the rest with a false "much thinner / out of the picture"** (`pipeline._subs_on_record_at_picture`, `frames.ingested_at` ≤ the best run's `timestamp_utc`; Scout sweep (2) entry)
 - ✅ v0.503.19 **An ASTAP that is there but can't be started reads as a setup problem — Target banner, Dashboard cue and Settings badge say so, and the solve ladder stops on it** (`ASTAPCannotRunError`, `SOLVE_SETUP_ASTAP_CANNOT_RUN`, `astapReadiness` `runs === false`)
 - ✅ v0.503.18 **A North-up save made before v0.288 on a mosaic canvas is recognised again, so a share render no longer turns it a second time** (`preview_orient.recovered_north_up_deg` asks the WCS at the master's centre, not the preview grid's); Scout's sweep (1), full entry in `SHIPPED.md`
 - ✅ v0.503.17 **An upload never replaces a sub that reached `incoming/` while it was still streaming — the final placement is create-only and the file is reported skipped** (`upload._place_new`, `os.link` instead of `os.replace`; Scout sweep (4), AGENTS.md §10)

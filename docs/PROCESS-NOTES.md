@@ -1,8 +1,8 @@
 # Process notes & QA sweep records
 
-## 2026-10-28 (Scout, branch `claude/blissful-einstein-m8o5zc`) — QA rotation sweep (4), new angle — non-finite JSON literals in every mutating route's body: one bug Scout-fixed (v0.503.20), persistence CLEAN
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-m8o5zc`) — QA rotation sweep (4), new angle — non-finite JSON literals in every mutating route's body: one bug Scout-fixed (v0.503.21), persistence CLEAN
 
-- **Suite:** 8338 passed / 7 skipped on `44217d7f` + this fix (xdist `-n 4`, BLAS capped, 20m33s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+- **Suite:** 8342 passed / 7 skipped on `41007acd` + this fix (xdist `-n 4`, BLAS capped, 19m23s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
   owner-gated — nothing owed. **Open PR at start:** #1317 (owner-answers docs, a ⭐ Full-res PNG entry, pushed
   ~7 min before) — a live run, left alone. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no
   console errors).
@@ -16,7 +16,7 @@
   integration-goal clamps `Infinity` to its max, every setting and nested `default_stack_options` / per-target
   stack-default field 422s; no NaN on disk; the GET crawl and the reboot are clean. **One bug:** 86 of 269
   requests 500 — all one cause, FastAPI's default 422 echoing the `input` through an `allow_nan=False` encoder.
-  Scout-fixed as v0.503.20 (the handler keeps FastAPI's shape). Reachable only by a hand-written client — the
+  Scout-fixed as v0.503.21 (the handler keeps FastAPI's shape). Reachable only by a hand-written client — the
   browser's `JSON.stringify(NaN)` is `null` — hence severity low; fixed because the fix is ten lines and the 500
   left a traceback in `/api/logs`, which the observer reads.
 - **Angles still unrun for (4):** a body that is valid JSON but deeply nested / huge (`ops` with 10⁵ entries)
