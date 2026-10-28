@@ -113,10 +113,14 @@ def recovered_north_up_deg(run) -> float:  # noqa: ANN001
     )
 
     try:
-        wcs, _full_w, _full_h = celestial_wcs_from_fits(run.fits_path)
+        wcs, full_w, full_h = celestial_wcs_from_fits(run.fits_path)
     except Exception:  # noqa: BLE001 — an unreadable master can't answer
         return 0.0
-    angle = north_up_rotation_deg(wcs, flat[0], flat[1])
+    # Asked at the *master's* centre, exactly as the save asked it: the WCS is in
+    # full-canvas pixels, so the preview grid's centre is a point up and left of
+    # the middle of a wide canvas, where North points a degree or two differently
+    # on a mosaic — and any difference at all changes the turned PNG's size.
+    angle = north_up_rotation_deg(wcs, full_w, full_h)
     if angle is None or abs(angle) < NORTH_UP_MIN_DEG:
         # The option was never offered for this run, so nothing baked it in.
         return 0.0
