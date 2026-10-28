@@ -2543,7 +2543,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   a bug" with a `--mosaic` dogfood measurement in the commit. (2) **Auto-edit, both halves.** New stacks: his
   "Finish" switch (`auto_edit_on_autostack`) is his to flip, and he has been told where it is. Never flip his
   stored value. Existing pictures: one plain-language "Finish my unedited pictures" action that runs the
-  existing `_auto_edit_run` path over every current picture with **no saved recipe**. Hand-saved looks are
+  existing `pipeline._auto_edit_process_run` path over every current picture with **no saved recipe**. Hand-saved looks are
   never touched, it is reversible with the editor's Reset, and the UI rule applies, so it goes into an
   existing grouping with no new banner. (3) **Speed.** Measure `render_run_full_res_png` on a mosaic-sized
   canvas, then fix the measured cost. Candidates: the PNG `compress_level`, caching the render keyed on
