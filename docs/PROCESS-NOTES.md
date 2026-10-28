@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-m8o5zc`) — QA rotation sweep (4), new angle — non-finite JSON literals in every mutating route's body: one bug Scout-fixed (v0.503.22), persistence CLEAN
+
+- **Suite:** 8342 passed / 7 skipped on `41007acd` + this fix (xdist `-n 4`, BLAS capped, 19m23s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+  owner-gated — nothing owed. **Open PR at start:** #1317 (owner-answers docs, a ⭐ Full-res PNG entry, pushed
+  ~7 min before) — a live run, left alone. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no
+  console errors).
+- **Sweep (4).** The 2026-10-17 route crash-fuzz sent `"nan"`/`"inf"` *strings*; nothing had sent the bare
+  `NaN`/`Infinity` *literals* Python's JSON parser accepts, nor asked whether one reaches disk. Scratch probe
+  (deleted): real two-target library + a stack run, `create_app()` under `TestClient`; from `/openapi.json`, every
+  numeric property of every mutating body schema (skipping scan/process/merge/delete/reset/upload/seestar/auth),
+  every numeric setting, and every float/int param of every editor op through the run recipe PUT, the default
+  recipe PUT and the preset POST; then a GET crawl, a scan of `config.json` and every SQLite row for a non-finite
+  value, and a reboot. **Persistence CLEAN:** `recipe_from_dict`/`validate_ops` turn the param into its default,
+  integration-goal clamps `Infinity` to its max, every setting and nested `default_stack_options` / per-target
+  stack-default field 422s; no NaN on disk; the GET crawl and the reboot are clean. **One bug:** 86 of 269
+  requests 500 — all one cause, FastAPI's default 422 echoing the `input` through an `allow_nan=False` encoder.
+  Scout-fixed as v0.503.22 (the handler keeps FastAPI's shape). Reachable only by a hand-written client — the
+  browser's `JSON.stringify(NaN)` is `null` — hence severity low; fixed because the fix is ten lines and the 500
+  left a traceback in `/api/logs`, which the observer reads.
+- **Angles still unrun for (4):** a body that is valid JSON but deeply nested / huge (`ops` with 10⁵ entries)
+  against the request-path renders; two mutating routes racing on one target's `project_meta`.
+
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-oxratg`) — QA rotation sweep (3), new angle — the binary the app is *told* to run (a set-but-wrong Settings `astap_path`): side effects CLEAN; one bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8326 passed / 7 skipped on `32eca5d4` (xdist `-n 4`, BLAS capped, 16m42s). **Inbox:** the same four

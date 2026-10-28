@@ -3595,6 +3595,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.22 **A `NaN`/`Infinity` literal in a request body is rejected with a 422, not a 500** (`main._install_validation_handler`, `_json_safe_input`)
 - ✅ v0.503.21 **A Settings "ASTAP path" that is set but wrong no longer reads as "ASTAP isn't installed" — stray spaces/quotes are cleaned, a folder finds the program inside it, and a path that leads nowhere is named (with the built-in ASTAP offered) in the solve reason and the Settings hint** (`astap._clean_user_path`, `astap_path_problem`, `system._astap_info`; Scout sweep (3) entry)
 - ✅ v0.503.20 **The walk-away per-panel readability hold compares each panel with the subs it had when the standing picture was made — an off-line newest night on one panel, or a brand-new off-line panel, no longer holds a stack that would deepen the rest with a false "much thinner / out of the picture"** (`pipeline._subs_on_record_at_picture`, `frames.ingested_at` ≤ the best run's `timestamp_utc`; Scout sweep (2) entry)
 - ✅ v0.503.19 **An ASTAP that is there but can't be started reads as a setup problem — Target banner, Dashboard cue and Settings badge say so, and the solve ladder stops on it** (`ASTAPCannotRunError`, `SOLVE_SETUP_ASTAP_CANNOT_RUN`, `astapReadiness` `runs === false`)
