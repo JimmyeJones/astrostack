@@ -1,5 +1,24 @@
 # Process notes & QA sweep records
 
+## 2026-10-28 (Scout, branch `claude/blissful-einstein-3560ux`) — QA rotation sweep (2), new angle — v0.503.5's per-panel missing-files hold at a panel that kept *a few* readable subs: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8313 passed / 7 skipped on `84d328d7` (xdist `-n 4`, BLAS capped, 17m36s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. **Dogfood `--mosaic`:**
+  CLEAN (trim 7.9 %, nothing overflowing, no console errors; the Target page's five notes agree, as on 10-28 `96mvmu`).
+- **Sweep (2).** Per-panel code since the last (2) (`1bsiin`, 10-25): v0.503.5 (`_panels_with_nothing_readable`,
+  the fix of that sweep's own entry), v0.503.12 (`canvas_is_mosaic` by name — no threshold), v0.503.6
+  (`thinStackWarning` remedy — already reads `field_fulls`). Ran `_panels_with_nothing_readable` on an S30 3×3 at
+  5,400 subs (0.21 s; centre panel off-line → flagged; one night off-line on every panel → not flagged, right).
+  Then the boundary it leaves: a panel with *one* readable sub of 600 is not "missing", and the typical depth is a
+  frame-weighted median, so neither notices it. Built the natural shape (a panel shot mostly on one night whose
+  folder goes off-line while newer nights deepen the others) through the real `_auto_stack_readability_hold`, only
+  `lib.open_target`/`first_existing_frame_path` stubbed: `hold: None`, panel 510 → 10 subs. Filed in Bugs (🟡, S).
+- **Read and holds:** the Live page's goal bar compares the whole target's integration against the *user-set* goal
+  unscaled — the same rule the readiness card states (a user goal is never re-scaled by `field_fulls`), so it is
+  consistent, not a finding; `livesession._conditions` is a keep-rate (accept is already graded per panel);
+  `thinpicture.samples_on_one_patch` is a mean depth by design, with the uneven-panel case owned by the mosaic map.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-96mvmu`) — QA rotation sweep (1), new angle — the deepening reel's frame placement on a canvas that grew or shrank: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8310 passed / 7 skipped on `0fe0b9a7` (xdist `-n 4`, BLAS capped, 17m30s). **Inbox:** the same four (#878,
