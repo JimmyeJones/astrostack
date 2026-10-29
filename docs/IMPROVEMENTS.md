@@ -2473,9 +2473,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   stored value. Existing pictures: one plain-language "Finish my unedited pictures" action that runs the
   existing `pipeline._auto_edit_process_run` path over every current picture with **no saved recipe**. Hand-saved looks are
   never touched, it is reversible with the editor's Reset, and the UI rule applies, so it goes into an
-  existing grouping with no new banner. (3) **Speed.** Measure `render_run_full_res_png` on a mosaic-sized
-  canvas, then fix the measured cost. Candidates: the PNG `compress_level`, caching the render keyed on
-  run + recipe + trim, and a "Preparing your picture…" state instead of a silent wait. (4) **The dark ring**:
+  existing grouping with no new banner. (3) **Speed** — *✅ v0.503.24* (`pipeline.cached_run_full_res_png`,
+  `<stem>_fullres.cache`; repeat download 26 s → 0.1 s at 5000×7000; a second click waits for the running render;
+  a "Preparing your full-size picture…" toast above 4 MP; see SHIPPED). **Still open in (3):** the *first* render
+  itself (measured 5000×7000: STF stats ~55 %, PNG encode ~25 %; `compress_level=1` saves only ~15 % of the
+  encode for +3 % size — not worth it; a faster stretch must stay pixel-identical to the stored preview's look,
+  so it is an engine change for its own run). (4) **The dark ring**:
   check whether Auto's background flatten removes it on `--mosaic`. If not, file it as a measured Bugs entry
   (likely unflattened Seestar vignetting averaged at the canvas edge). Size **M** for (1), **S** for (2) and
   (3) each; ship as separate commits.
@@ -3595,6 +3598,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.24 **A repeat "Full-res PNG" download is served from a cache beside the run, a second click waits for the running render, and a big picture says it is being prepared** (`pipeline.cached_run_full_res_png`, `fullres.announceFullResDownload`; part (3) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.503.23 **An unedited mosaic's Full-res PNG and its full-size-archive picture trim the ragged low-coverage border, the same rectangle Auto would cut, when `auto_crop_border` is on** (`pipeline.unedited_border_trim`, `render_preview_png_full_res(crop=)`; first slice of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.503.22 **A `NaN`/`Infinity` literal in a request body is rejected with a 422, not a 500** (`main._install_validation_handler`, `_json_safe_input`)
 - ✅ v0.503.21 **A Settings "ASTAP path" that is set but wrong no longer reads as "ASTAP isn't installed" — stray spaces/quotes are cleaned, a folder finds the program inside it, and a path that leads nowhere is named (with the built-in ASTAP offered) in the solve reason and the Settings hint** (`astap._clean_user_path`, `astap_path_problem`, `system._astap_info`; Scout sweep (3) entry)

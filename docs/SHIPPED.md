@@ -1,5 +1,31 @@
 # Shipped — the record
 
+## 2026-10-29 (Builder, branch `claude/relaxed-davinci-j7rbj6`) — a repeat Full-res PNG is instant, and a big one says it is coming
+
+- **v0.503.24** — ⚡ SPEED (trust / friendliness, part (3) of the owner's ⭐ 2026-10-28 entry: the Full-res PNG
+  "takes a super long time"). **Measured** `render_preview_png_full_res` on synthetic linear mosaics with NaN
+  borders (agent container, one BLAS thread): **3494×2470 ~5.9 s, 5000×7000 ~26 s**, of which the STF's
+  whole-canvas medians/percentile are ~55 % and the PNG encode ~25 % (`compress_level` 6→1 saves ~1 s of 6 for
+  +3 % size, so it was left alone). It was paid again on **every** click, and a link download shows nothing until
+  the first byte, so the natural second click started a second whole-canvas render beside the first. **Fix:**
+  `pipeline.cached_run_full_res_png` serves `download_full_res_png` from `<stem>_fullres.cache` beside the master —
+  one file holding the signature, a newline and the render's own PNG bytes, written to a private `.tmp` and
+  renamed, so the signature and the picture can never come from two renders. `full_res_png_signature` covers
+  everything `render_run_full_res_png` reads: master, stored preview, both coverage maps, the saved recipe, the run
+  row's `preview_stretch`/`preview_black`/`preview_north_up_deg`/`is_mosaic`, `north_up`, `max_long_edge`,
+  `trim_border` and the app version. A per-file lock makes a click during a running render wait and take the cached
+  bytes. The full-size archive reads the cache but never writes one (`write=False`), so a library backup doesn't
+  leave a full-size copy beside every run. `fullres_cache` is a registered `RUN_ARTEFACT_SUFFIXES` entry, so it is
+  deleted, archived and merged with its run like `_share.png`. Frontend: `fullres.announceFullResDownload` shows a
+  "Preparing your full-size picture…" toast (one id, so a second click replaces it) on the three Full-res PNG
+  entry points (`ImageLightbox`, `SavePictureMenu`, the Dashboard strip) when the canvas is ≥ 4 MP or unknown;
+  an ordinary 1080×1920 field gets none. **Measured after:** repeat download **5.9 s → 0.006 s** and **26 s →
+  0.1 s**, bytes identical. **Tests:** `tests/webapp/test_full_res_png_cache.py` (9: repeat served from cache and
+  equal to the render; new master / North-up / trim switch re-render; the signature moves with every input; two
+  concurrent asks render once; archive reads-never-writes; a stale or foreign file is never served; an unwritable
+  folder still hands over the picture; the cache is a run file) — the route test fails with the route reverted to
+  the uncached render; `src/fullres.test.ts` (+3). No config, schema, default, layout or response-shape change; the
+  first render is unchanged and is the open remainder of (3).
 ## 2026-10-29 (Builder, branch `claude/relaxed-davinci-ls9zd1`) — an unedited mosaic's Full-res PNG trims its ragged border
 
 - **v0.503.23** — 🐛 BUG FIX (editor / trust, first slice of the owner's ⭐ 2026-10-28 entry). A picture nobody
