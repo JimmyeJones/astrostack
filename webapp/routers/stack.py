@@ -1314,6 +1314,49 @@ async def render_stack_run(
 _FULL_RES_PNG_MAX_LONG_EDGE = 8000
 
 
+def _full_res_run_and_recipe(request: Request, safe: str, run_id: int):  # noqa: ANN202
+    """The run behind a Full-res PNG and its saved editor recipe — the recipe only
+    when the run's preview is a baked display-space edit, read here because only
+    here is the project open. (The stretch History's "Adjust" saved rides on the
+    run row itself.) 404 when the run has no FITS to render."""
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        if run is None or not run.fits_path or not Path(run.fits_path).exists():
+            raise HTTPException(
+                status_code=404,
+                detail="No FITS for this run to render at full resolution")
+        recipe_json = None
+        if _preview_is_display_space(run.options_json):
+            recipe_json = proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
+    finally:
+        proj.close()
+        lib.close()
+    return run, recipe_json
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/full-res-png/size")
+async def full_res_png_size(
+    safe: str, run_id: int, request: Request, north_up: bool = False,
+) -> dict[str, Any]:
+    """How big the "Full-res PNG" download will be, without rendering it —
+    ``{"width", "height", "trimmed"}``, with ``width``/``height`` null when it
+    can't be said exactly (``pipeline.full_res_png_size``). The download menus
+    used to print the stack canvas, which an unedited mosaic's border trim and an
+    Auto-edited picture's crop both make untrue. Read-only; fetched when a
+    menu opens, never on a list."""
+    run, recipe_json = _full_res_run_and_recipe(request, safe, run_id)
+    size = await run_in_threadpool(
+        pipeline.full_res_png_size, run, recipe_json,
+        north_up=bool(north_up), max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE,
+        trim_border=bool(deps.get_settings(request).auto_crop_border))
+    if size is None:
+        return {"width": None, "height": None, "trimmed": False}
+    return {"width": size[0], "height": size[1], "trimmed": size[2]}
+
+
 # NOTE: declared before the "/{kind}" catch-all download route below so the
 # literal "full-res-png" segment isn't swallowed as an artifact kind.
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
@@ -1346,25 +1389,8 @@ async def download_full_res_png(
     A picture with no saved recipe — one nobody edited — has its ragged mosaic
     border trimmed when ``auto_crop_border`` is on, the same rectangle the
     editor's Auto would cut (``pipeline.unedited_border_trim``)."""
-    from webapp.routers.editor import RECIPE_META_PREFIX
-
-    lib, proj = deps.open_target_project(request, safe)
-    try:
-        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
-        if run is None or not run.fits_path or not Path(run.fits_path).exists():
-            raise HTTPException(
-                status_code=404,
-                detail="No FITS for this run to render at full resolution")
-        basename = run.output_basename
-        # The saved editor recipe, when the run's preview is a baked display-space
-        # edit — read here because only here is the project open. (The stretch
-        # History's "Adjust" saved rides on the run row itself.)
-        recipe_json = None
-        if _preview_is_display_space(run.options_json):
-            recipe_json = proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
-    finally:
-        proj.close()
-        lib.close()
+    run, recipe_json = _full_res_run_and_recipe(request, safe, run_id)
+    basename = run.output_basename
 
     # Which render a finished run *means* at full resolution — the saved recipe
     # when its preview is a baked display-space edit, else the STF (or the asinh

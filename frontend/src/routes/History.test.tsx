@@ -978,6 +978,25 @@ describe("HistoryView", () => {
     expect(screen.getByText("Same look, full size (1080×1920 px)")).toBeInTheDocument();
   });
 
+  it("prints an unedited mosaic's trimmed download size once the menu asks", async () => {
+    // The download trims a mosaic's ragged border (v0.503.23), so the canvas is
+    // no longer the file's size; the menu asks the server when it opens.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, has_fits: true, canvas_w: 907, canvas_h: 615 }),
+    ]);
+    const size = vi.spyOn(client.api, "stackFullResPngSize")
+      .mockResolvedValue({ width: 875, height: 587, trimmed: true });
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(size).not.toHaveBeenCalled();  // never fetched for a closed menu
+    openSaveShare();
+    await menuItem("Full-res PNG");
+    expect(await screen.findByText("Same look, ragged mosaic border trimmed (875×587 px)"))
+      .toBeInTheDocument();
+    expect(screen.queryByText("Same look, full size (907×615 px)")).not.toBeInTheDocument();
+    expect(size).toHaveBeenCalledWith("M_42", 1, false);
+  });
+
   it("warns that a plain stack's TIFF opens dark, and doesn't on an editor export", async () => {
     // The one download on this menu with nothing said about it, and the one most
     // likely to look broken: an ordinary stack's TIFF is linear.

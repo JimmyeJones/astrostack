@@ -1,5 +1,23 @@
 # Shipped — the record
 
+## 2026-10-29 (Builder, branch `claude/relaxed-davinci-qovgg5`) — the Full-res PNG hint prints the file's own size
+
+- **v0.504.1** — 🐞 FRIENDLINESS (part of slice (1) of the owner's ⭐ 2026-10-28 entry). Since v0.503.23 an unedited
+  mosaic's Full-res PNG is trimmed of its ragged border, but History's / the Target page's Save menu still printed the
+  stack canvas beside it ("Same look, full size (907×615 px)" for an 875×587 file) — and never was right for an
+  Auto-edited picture whose recipe crops. **New:** `pipeline.full_res_png_size` predicts the file's size without
+  rendering, by replaying the renderers' own geometry — a recipe's crops/resizes (`crop_bounds`, `resize_shape`,
+  rotate refused via `geometry_pixel_steps`), the unedited trim (`unedited_border_trim` + `crop_bounds`), then the
+  final long-edge cap — and declines (`null`) for a North-up turn, a rotating recipe or an unedited canvas wider than
+  the cap (`load_stack_rgb` area-averages it). Served read-only at `GET …/stack-runs/{id}/full-res-png/size`; the
+  menu fetches it only when opened (`SavePictureMenu`, `onOpen`) and `fullres.fullResDownloadHint` prints "Same look,
+  ragged mosaic border trimmed (875×587 px)" or the edit's own size, keeping the old sentence until it answers. The
+  run/recipe read is shared with the download (`stack._full_res_run_and_recipe`), so the two cannot disagree about
+  which recipe applies. **Tests:** 7 in `tests/webapp/test_full_res_png.py`, each pinning the answer against the
+  bytes the download hands over (trimmed mosaic, trim off, single field, tall canvas past the cap, a crop+resize
+  recipe, North-up declined, 404); vitest for the hint and for History fetching only on open. No config, schema,
+  default or layout change; API additive.
+
 ## 2026-10-29 (Builder, branch `claude/relaxed-davinci-uv0ayj`) — "Finish my unedited pictures"
 
 - **v0.504.0** — 🌟 AUTONOMY / FRIENDLINESS (part (2) of the owner's ⭐ 2026-10-28 entry: "about 25 % of my images"

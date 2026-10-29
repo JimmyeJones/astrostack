@@ -1589,6 +1589,14 @@ export interface GradeReport {
   changed_ids: number[] | null;
 }
 
+/** `GET …/stack-runs/{id}/full-res-png/size` — the Full-res PNG's own size. */
+export interface FullResPngSize {
+  width: number | null;
+  height: number | null;
+  /** True when it is smaller because the ragged mosaic border was trimmed. */
+  trimmed: boolean;
+}
+
 export interface StackRun {
   id: number;
   timestamp_utc: string;
@@ -4108,6 +4116,13 @@ export const api = {
   stackFullResPngUrl: (safe: string, id: number, northUp = false) =>
     `/api/targets/${safe}/stack-runs/${id}/full-res-png` +
     (northUp ? "?north_up=true" : ""),
+  // How big that download will be, without rendering it — the menus print the
+  // file's size, which an unedited mosaic's border trim and an edit's crop make
+  // differ from the canvas. width/height are null when it can't be said exactly.
+  stackFullResPngSize: (safe: string, id: number, northUp = false) =>
+    req<FullResPngSize>(
+      `/api/targets/${safe}/stack-runs/${id}/full-res-png/size` +
+      (northUp ? "?north_up=true" : "")),
   stackRenderUrl: (
     safe: string, id: number, stretch: number, black: number, northUp = false,
   ) =>

@@ -2853,6 +2853,99 @@ def unedited_border_trim(run) -> tuple[float, float, float, float] | None:  # no
         return None
 
 
+def _capped_size(w: int, h: int, max_long_edge: int) -> tuple[int, int]:
+    """The ``(w, h)`` the Full-res renderers' final ``max_long_edge`` resize
+    leaves — the same arithmetic, so the prediction is the file's own."""
+    long_edge = max(w, h)
+    if long_edge <= max_long_edge:
+        return w, h
+    scale = max_long_edge / long_edge
+    return max(1, round(w * scale)), max(1, round(h * scale))
+
+
+def full_res_png_size(
+    run, recipe_json: str | None, *,  # noqa: ANN001 — a StackRunRow, detached from the DB
+    north_up: bool = False, max_long_edge: int = 8000, trim_border: bool = False,
+) -> tuple[int, int, bool] | None:
+    """``(width, height, trimmed)`` of the PNG :func:`render_run_full_res_png`
+    would hand over for these arguments — **without rendering it** — or ``None``
+    when that can't be said exactly.
+
+    The download menus used to print the stack *canvas* beside "Full-res PNG",
+    which stopped being the file's size the day an unedited mosaic's download
+    started trimming its ragged border (v0.503.23), and never was the size of an
+    Auto-edited picture whose recipe crops. ``trimmed`` is True when the size is
+    smaller because :func:`unedited_border_trim` cut the border away.
+
+    Replays the renderers' own geometry: a saved recipe's crops and resizes
+    through :func:`~seestack.edit.ops.geometry.geometry_pixel_steps` (the code the
+    WCS carried onto an export uses), the unedited trim through ``crop_bounds``,
+    then the final long-edge cap. ``None`` — the menu then keeps its canvas-based
+    sentence — for a North-up turn (it re-grids the picture), a recipe that
+    rotates, and an unedited canvas wider than the cap (``load_stack_rgb``
+    area-averages it during the load). Reads at most the coverage maps' trim and
+    one FITS header; never the pixels."""
+    w, h = int(run.canvas_w or 0), int(run.canvas_h or 0)
+    if w <= 0 or h <= 0 or not run.fits_path:
+        return None
+    if bool(north_up) or bool(baked_north_up_deg(run)):
+        return None
+    recipe_dict = None
+    if recipe_json:
+        with contextlib.suppress(json.JSONDecodeError):
+            parsed = json.loads(recipe_json)
+            if isinstance(parsed, dict):
+                recipe_dict = parsed
+    if recipe_dict is not None:
+        from seestack.edit.ops.geometry import (
+            GEOMETRY_OP_IDS,
+            crop_bounds,
+            geometry_pixel_steps,
+            resize_shape,
+        )
+        from seestack.edit.recipe import recipe_from_dict
+
+        try:
+            recipe = recipe_from_dict(recipe_dict)
+            if geometry_pixel_steps(recipe, (h, w)) is None:
+                return None  # an active rotate re-grids the picture
+            for op in recipe.ops:
+                if not op.enabled or op.id not in GEOMETRY_OP_IDS:
+                    continue
+                if op.id == "geometry.crop":
+                    box = crop_bounds(h, w, op.params)
+                    if box is not None:
+                        w, h = box[1] - box[0], box[3] - box[2]
+                elif op.id == "geometry.resize":
+                    out = resize_shape(h, w, op.params)
+                    if out is not None:
+                        h, w = int(out[0]), int(out[1])
+        except Exception:  # noqa: BLE001 — an unreadable recipe has no size to promise
+            return None
+        return (*_capped_size(w, h, max_long_edge), False)
+    from seestack.stack.output import fits_is_display_space
+
+    try:
+        display_space = fits_is_display_space(run.fits_path)
+    except Exception:  # noqa: BLE001
+        return None
+    if w > max_long_edge:
+        return None
+    trimmed = False
+    if trim_border and not display_space:
+        rect = unedited_border_trim(run)
+        if rect is not None:
+            from seestack.edit.ops.geometry import crop_bounds
+
+            box = crop_bounds(h, w, {"x0": rect[0], "y0": rect[1],
+                                     "x1": rect[2], "y1": rect[3]})
+            if box is not None:
+                nw, nh = box[1] - box[0], box[3] - box[2]
+                trimmed = (nw, nh) != (w, h)
+                w, h = nw, nh
+    return (*_capped_size(w, h, max_long_edge), trimmed)
+
+
 #: One lock per cached Full-res PNG, so a second click on a render that is still
 #: running waits for it and is then served from the cache, instead of starting a
 #: second whole-canvas render beside the first — which is exactly what a beginner

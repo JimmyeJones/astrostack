@@ -8,7 +8,7 @@ import {
 } from "@tabler/icons-react";
 import { api, ObjectInfo, StackRun } from "../api/client";
 import type { CaptureLabel } from "../format";
-import { announceFullResDownload, fullResPngHint } from "../fullres";
+import { announceFullResDownload, fullResDownloadHint } from "../fullres";
 import { keepsakeFilename, sharePictureText } from "../share";
 import { tiffDownloadHint } from "../tiffDownload";
 import { storedPreviewScaleBar } from "./AnnotatedImage";
@@ -45,7 +45,7 @@ export const MENU_HINT: CSSProperties = {
  *
  * The pieces are the ones that already existed — `SharePictureButton`,
  * `DownloadMenuItem`, `WallpaperMenuItems`, `sharePictureText`,
- * `keepsakeFilename`, `fullResPngHint`, `tiffDownloadHint`, `postCaption` — so
+ * `keepsakeFilename`, `fullResDownloadHint`, `tiffDownloadHint`, `postCaption` — so
  * this is a regrouping, not a re-derivation.
  *
  * The wording follows the History card's label-plus-hint idiom (the one
@@ -136,6 +136,20 @@ export function SavePictureMenu({
     staleTime: Infinity,
   });
 
+  // The Full-res PNG's real size, asked for only once the menu is opened (one
+  // small request per picture, never a list's worth): an unedited mosaic's
+  // download is trimmed and an edit carries its own crop, so the canvas the
+  // hint used to print was not the file's size. Until it answers, the hint
+  // keeps its canvas sentence.
+  const [opened, setOpened] = useState(false);
+  const fullResSize = useQuery({
+    queryKey: ["full-res-size", safe, run.id, northUp],
+    queryFn: () => api.stackFullResPngSize(safe, run.id, northUp),
+    enabled: opened && run.has_fits,
+    staleTime: 60_000,
+    retry: false,
+  });
+
   // Nothing to save and nothing to share — offer no menu at all rather than an
   // empty dropdown.
   if (!run.has_preview && !run.has_fits && !run.has_tiff) return null;
@@ -197,7 +211,8 @@ export function SavePictureMenu({
   };
 
   return (
-    <Menu shadow="md" width={260} position={position} withinPortal={withinPortal}>
+    <Menu shadow="md" width={260} position={position} withinPortal={withinPortal}
+      onOpen={() => setOpened(true)}>
       <Menu.Target>
         <Button
           size={size} variant={variant}
@@ -225,7 +240,7 @@ export function SavePictureMenu({
             component="a" href={api.stackFullResPngUrl(safe, run.id, northUp)}
             onClick={() => announceFullResDownload(run.canvas_w, run.canvas_h)}>
             Full-res PNG
-            <span style={MENU_HINT}>{fullResPngHint(run.canvas_w, run.canvas_h)}</span>
+            <span style={MENU_HINT}>{fullResDownloadHint(run.canvas_w, run.canvas_h, fullResSize.data)}</span>
           </Menu.Item>
         ) : null}
         {run.has_preview ? (
