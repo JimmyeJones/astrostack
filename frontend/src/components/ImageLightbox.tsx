@@ -3,7 +3,7 @@ import { ActionIcon, Group, Menu, Modal, Text, Tooltip } from "@mantine/core";
 import {
   IconArrowsMaximize, IconDatabase, IconPhotoDown, IconZoomIn, IconZoomOut,
 } from "@tabler/icons-react";
-import { fullResPngLabel } from "../fullres";
+import { announceFullResDownload, fullResPngLabel } from "../fullres";
 import { SharePictureButton } from "./SharePictureButton";
 import { ScanToPhoneButton } from "./ScanToPhoneButton";
 
@@ -302,7 +302,8 @@ export function ImageLightbox({
               </Menu.Target>
               <Menu.Dropdown>
                 {fullResHref ? (
-                  <Menu.Item component="a" href={fullResHref}>
+                  <Menu.Item component="a" href={fullResHref}
+                    onClick={() => announceFullResDownload(fullResCanvas?.w, fullResCanvas?.h)}>
                     {fullResPngLabel(fullResCanvas?.w, fullResCanvas?.h)}
                   </Menu.Item>
                 ) : null}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  FULL_RES_PNG_MAX_LONG_EDGE, fullResPngCapped, fullResPngHint, fullResPngLabel,
+  FULL_RES_PNG_MAX_LONG_EDGE, FULL_RES_SLOW_PIXELS, fullResPngCapped, fullResPngHint,
+  fullResPngLabel, fullResPreparingNotice,
 } from "./fullres";
 
 const CAP = FULL_RES_PNG_MAX_LONG_EDGE;
@@ -48,5 +49,27 @@ describe("what the full-res PNG download actually is", () => {
     expect(fullResPngLabel()).toBe("Full-res PNG (native size)");
     expect(fullResPngHint()).toBe("Same look, full size");
     expect(fullResPngHint(0, 0)).toBe("Same look, full size");
+  });
+});
+
+// Owner ⭐ 2026-10-28: the Full-res PNG "takes a super long time". A download
+// link shows nothing until the first byte, so a big mosaic's click looked dead
+// and invited a second click. The notice says it is coming; a small field,
+// which arrives in about a second, gets none.
+describe("the notice while a big full-res picture is prepared", () => {
+  it("says nothing for an ordinary Seestar field", () => {
+    expect(fullResPreparingNotice(1080, 1920)).toBeNull();
+  });
+
+  it("names the size and says not to click again on a big mosaic", () => {
+    const msg = fullResPreparingNotice(3494, 2470);
+    expect(msg).toContain("3494×2470");
+    expect(msg).toMatch(/no need to click again/);
+    expect(3494 * 2470).toBeGreaterThan(FULL_RES_SLOW_PIXELS);
+  });
+
+  it("still speaks when the size is unknown", () => {
+    expect(fullResPreparingNotice()).toMatch(/^A big picture can take a minute/);
+    expect(fullResPreparingNotice(null, 1200)).not.toBeNull();
   });
 });

@@ -8,7 +8,7 @@ import {
 } from "@tabler/icons-react";
 import { api, ObjectInfo, StackRun } from "../api/client";
 import type { CaptureLabel } from "../format";
-import { fullResPngHint } from "../fullres";
+import { announceFullResDownload, fullResPngHint } from "../fullres";
 import { keepsakeFilename, sharePictureText } from "../share";
 import { tiffDownloadHint } from "../tiffDownload";
 import { storedPreviewScaleBar } from "./AnnotatedImage";
@@ -222,7 +222,8 @@ export function SavePictureMenu({
         <Menu.Label>Download</Menu.Label>
         {run.has_fits ? (
           <Menu.Item leftSection={<IconPhotoDown size={16} />}
-            component="a" href={api.stackFullResPngUrl(safe, run.id, northUp)}>
+            component="a" href={api.stackFullResPngUrl(safe, run.id, northUp)}
+            onClick={() => announceFullResDownload(run.canvas_w, run.canvas_h)}>
             Full-res PNG
             <span style={MENU_HINT}>{fullResPngHint(run.canvas_w, run.canvas_h)}</span>
           </Menu.Item>

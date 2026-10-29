@@ -23,6 +23,8 @@
  * silently-stale copy here would put the untruth straight back.
  */
 
+import { notifications } from "@mantine/notifications";
+
 /** The long-edge ceiling the full-res PNG endpoint renders to. Mirrors
  *  `webapp/routers/stack.py:_FULL_RES_PNG_MAX_LONG_EDGE`. */
 export const FULL_RES_PNG_MAX_LONG_EDGE = 8000;
@@ -64,4 +66,41 @@ export function fullResPngHint(w?: number | null, h?: number | null): string {
   if (!fullResPngCapped(w, h)) return `Same look, full size (${w}×${h} px)`;
   return `Same look, up to ${FULL_RES_PNG_MAX_LONG_EDGE} px — this canvas is `
     + `${w}×${h}, so the FITS or TIFF holds its native pixels`;
+}
+
+/** Canvas area (px) above which the full-res render is slow enough to need a
+ *  word: measured at ~6 s for a 3494×2470 (8.6 MP) mosaic and ~25 s at
+ *  5000×7000 on the agent container, slower on a NAS. An ordinary Seestar field
+ *  (1080×1920, ~2 MP) comes back in about a second and gets no notice. */
+export const FULL_RES_SLOW_PIXELS = 4_000_000;
+
+/**
+ * What to tell someone who just clicked "Full-res PNG" while the server
+ * renders it — or `null` when the picture is small enough to arrive before a
+ * notice could be read.
+ *
+ * A plain download link shows nothing in the browser until the first byte
+ * arrives, so on a big mosaic the click looked like it did nothing for half a
+ * minute; the owner reported it as taking "a super long time", and the natural
+ * second click used to start a second render. Unknown dimensions answer with
+ * the notice, because then the size really is unknown.
+ */
+export function fullResPreparingNotice(w?: number | null, h?: number | null): string | null {
+  const known = !!w && !!h && w > 0 && h > 0;
+  if (known && w * h < FULL_RES_SLOW_PIXELS) return null;
+  const size = known ? `This picture is ${w}×${h} px, so it` : "A big picture";
+  return `${size} can take a minute to prepare. The download starts by itself — `
+    + "no need to click again. Downloading it a second time is instant.";
+}
+
+/** Show {@link fullResPreparingNotice} as a toast, for a download link's
+ *  `onClick` (the link itself still does the download). One id, so a second
+ *  click replaces the notice instead of stacking another. */
+export function announceFullResDownload(w?: number | null, h?: number | null): void {
+  const message = fullResPreparingNotice(w, h);
+  if (!message) return;
+  notifications.show({
+    id: "full-res-preparing", title: "Preparing your full-size picture…",
+    message, color: "blue", autoClose: 12000,
+  });
 }

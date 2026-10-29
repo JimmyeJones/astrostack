@@ -870,6 +870,13 @@ RUN_ARTEFACT_SUFFIXES: dict[str, str] = {
     # output tree can hold.
     "share_png": "_share.png",
     "share_sig": "_share.sig",
+    # The Full-res PNG download's render of the run's picture, cached with its
+    # signature as one file (`webapp.pipeline.cached_run_full_res_png`) because
+    # the render is many seconds on a mosaic and the button gets pressed again.
+    # A cache like the share source above — rebuilt whenever the master, the
+    # preview, the coverage maps, the recipe or the app version moves — and the
+    # same size class, so it travels and is deleted with the run.
+    "fullres_cache": "_fullres.cache",
     # The cross-run "night after night" reel (webp, or an APNG fallback) and its
     # series signature. Cached beside the *newest* run's basename
     # (`webapp.routers.stack._build_or_get_deepening_reel`), which is why it has
