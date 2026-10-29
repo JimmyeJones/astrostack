@@ -5228,47 +5228,85 @@ def submit_refinish_pictures(settings: Settings, jm: JobManager) -> Job:
     def body(job: Job) -> dict[str, Any]:
         lib = Library.open_or_create(settings.resolved_library_root)
         try:
-            verdicts = scan_refinish(lib)
-            todo = [v for v in verdicts if v.verdict == REFINISH]
-            left: dict[str, list[str]] = {}
-            for v in verdicts:
-                if v.verdict != REFINISH:
-                    left.setdefault(v.verdict, []).append(v.name)
-            refinished: list[str] = []
-            failed: list[dict[str, str]] = []
-            cancelled = False
-            job.set_progress("refinish", 0, len(todo), f"0/{len(todo)} pictures")
-            jm.maybe_flush(job)
-            for i, v in enumerate(todo):
-                if job.cancel_requested():
-                    cancelled = True
-                    break
-                try:
-                    n_ops = _auto_edit_process_run(
-                        lib, v.safe_name, v.run_id, auto_crop=settings.auto_crop_border)
-                except Exception as exc:  # noqa: BLE001 — isolate one target
-                    log.exception("refinish: %s failed", v.safe_name)
-                    failed.append({"target": v.name, "error": f"{type(exc).__name__}: {exc}"})
-                else:
-                    if n_ops is None:
-                        failed.append({"target": v.name,
-                                       "error": "skipped: no stacked file, or a recipe we did not bake"})
-                    else:
-                        refinished.append(v.name)
-                job.set_progress("refinish", i + 1, len(todo), f"{i + 1}/{len(todo)} pictures")
-                jm.maybe_flush(job)
-            return {
-                "refinished": refinished,
-                "failed": failed,
-                "cancelled": cancelled,
-                # Flat targets deliberately not touched, by reason — the owner
-                # redoes "by_hand" ones himself; the others are his choice.
-                "left_alone": left,
-            }
+            out = _auto_finish_displayed_pictures(
+                settings, jm, job, lib, scan_refinish(lib), REFINISH, "refinish")
+            out["refinished"] = out.pop("finished")
+            return out
         finally:
             lib.close()
 
     return jm.submit("refinish_pictures", body)
+
+
+def submit_finish_unedited_pictures(settings: Settings, jm: JobManager) -> Job:
+    """Finish every picture nobody ever edited, with Auto (the owner's ⭐ entry of
+    2026-10-28, part 2).
+
+    For every target :func:`webapp.finishunedited.scan_finish_unedited` answers
+    ``"finish"`` for — its displayed picture is a flat autostretch with no saved
+    recipe at all — apply Auto to the displayed run, with the owner's crop
+    preference, through the same :func:`_auto_edit_process_run` every other
+    unattended finish uses. Saved edits, his own pinned covers and targets whose
+    auto-edit preference is off are left exactly as they are and named in the
+    summary. Serial, cancellable between targets, one failure never stops the
+    rest; re-running it is harmless because a finished picture is no longer
+    unedited.
+    """
+    from webapp.finishunedited import FINISH, scan_finish_unedited
+
+    def body(job: Job) -> dict[str, Any]:
+        lib = Library.open_or_create(settings.resolved_library_root)
+        try:
+            return _auto_finish_displayed_pictures(
+                settings, jm, job, lib, scan_finish_unedited(lib), FINISH, "finish")
+        finally:
+            lib.close()
+
+    return jm.submit("finish_unedited_pictures", body)
+
+
+def _auto_finish_displayed_pictures(settings: Settings, jm: JobManager, job: Job,
+                                    lib: Library, verdicts: list[Any],
+                                    act: str, phase: str) -> dict[str, Any]:
+    """The loop the two "finish these pictures" jobs share: Auto onto each
+    verdict whose ``verdict`` is ``act`` (at its ``run_id``), the rest grouped by
+    reason under ``left_alone``. Each verdict carries ``safe_name``, ``name``,
+    ``verdict`` and ``run_id``."""
+    todo = [v for v in verdicts if v.verdict == act]
+    left: dict[str, list[str]] = {}
+    for v in verdicts:
+        if v.verdict != act:
+            left.setdefault(v.verdict, []).append(v.name)
+    finished: list[str] = []
+    failed: list[dict[str, str]] = []
+    cancelled = False
+    job.set_progress(phase, 0, len(todo), f"0/{len(todo)} pictures")
+    jm.maybe_flush(job)
+    for i, v in enumerate(todo):
+        if job.cancel_requested():
+            cancelled = True
+            break
+        try:
+            n_ops = _auto_edit_process_run(
+                lib, v.safe_name, v.run_id, auto_crop=settings.auto_crop_border)
+        except Exception as exc:  # noqa: BLE001 — isolate one target
+            log.exception("%s: %s failed", phase, v.safe_name)
+            failed.append({"target": v.name, "error": f"{type(exc).__name__}: {exc}"})
+        else:
+            if n_ops is None:
+                failed.append({"target": v.name,
+                               "error": "skipped: no stacked file, or a recipe we did not bake"})
+            else:
+                finished.append(v.name)
+        job.set_progress(phase, i + 1, len(todo), f"{i + 1}/{len(todo)} pictures")
+        jm.maybe_flush(job)
+    return {
+        "finished": finished,
+        "failed": failed,
+        "cancelled": cancelled,
+        # Pictures deliberately not touched, by reason — the owner's call.
+        "left_alone": left,
+    }
 
 
 def _wants_auto_edit_for(lib: Library, safe: str, library_default: bool) -> bool:

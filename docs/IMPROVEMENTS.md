@@ -2469,11 +2469,9 @@ problems. Dogfood it every big-picture run and fix root causes.
   re-rendered trimmed *with* `stack_runs.preview_crop` recorded (`seestack/previewcrop.py`) — an additive
   re-render, M; and `frontend/src/fullres.ts`'s hint still prints the full canvas size beside a trimmed mosaic
   download. Never touch the FITS; a saved recipe's own crop always wins. (2) **Auto-edit, both halves.** New stacks: his
-  "Finish" switch (`auto_edit_on_autostack`) is his to flip, and he has been told where it is. Never flip his
-  stored value. Existing pictures: one plain-language "Finish my unedited pictures" action that runs the
-  existing `pipeline._auto_edit_process_run` path over every current picture with **no saved recipe**. Hand-saved looks are
-  never touched, it is reversible with the editor's Reset, and the UI rule applies, so it goes into an
-  existing grouping with no new banner. (3) **Speed** — *✅ v0.503.24* (`pipeline.cached_run_full_res_png`,
+  "Finish" switch (`auto_edit_on_autostack`) is his to flip — never flip his stored value. Existing pictures:
+  *✅ v0.504.0* "Finish my unedited pictures" (`webapp.finishunedited`, `submit_finish_unedited_pictures`; Settings →
+  Maintenance, inside the existing re-finish card; see SHIPPED). (3) **Speed** — *✅ v0.503.24* (`pipeline.cached_run_full_res_png`,
   `<stem>_fullres.cache`; repeat download 26 s → 0.1 s at 5000×7000; a second click waits for the running render;
   a "Preparing your full-size picture…" toast above 4 MP; see SHIPPED). **Still open in (3):** the *first* render
   itself (measured 5000×7000: STF stats ~55 %, PNG encode ~25 %; `compress_level=1` saves only ~15 % of the
@@ -3598,6 +3596,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.504.0 **"Finish my unedited pictures": one Settings → Maintenance button applies Auto to every displayed picture with no saved recipe, after a dry run naming what it leaves alone (saved edits, his own pinned covers, auto-edit off)** (`webapp.finishunedited.scan_finish_unedited`, `pipeline.submit_finish_unedited_pictures`, `/api/unstretched-pictures/finish-unedited`; part (2) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.503.25 **An editor export made after a new night arrived no longer moves the picture the walk-away per-panel readability hold compares with — the deeper stack is not held again** (`pipeline._subs_on_record_at_picture` skips `editor_recipe`/`channel_combine` runs on a tie; Scout 2026-10-29 sweep (2))
 - ✅ v0.503.24 **A repeat "Full-res PNG" download is served from a cache beside the run, a second click waits for the running render, and a big picture says it is being prepared** (`pipeline.cached_run_full_res_png`, `fullres.announceFullResDownload`; part (3) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.503.23 **An unedited mosaic's Full-res PNG and its full-size-archive picture trim the ragged low-coverage border, the same rectangle Auto would cut, when `auto_crop_border` is on** (`pipeline.unedited_border_trim`, `render_preview_png_full_res(crop=)`; first slice of the owner's ⭐ 2026-10-28 entry)

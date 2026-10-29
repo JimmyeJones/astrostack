@@ -44,7 +44,10 @@ sits on the card, and the one-click Auto is where it has always been, in that
 target's own editor. *(One narrow, owner-requested exception, 2026-09-26: the
 #903 repair at the bottom of this module gives back only pictures the app itself
 had finished with Auto before a restack flattened them — see
-:mod:`webapp.refinish`.)*
+:mod:`webapp.refinish`. And a second, owner-requested 2026-10-28: "Finish my
+unedited pictures" applies Auto to every displayed picture with **no saved
+recipe at all** — see :mod:`webapp.finishunedited`. Both are buttons he presses,
+behind a dry run that names what they touch; nothing here acts on its own.)*
 
 **And it answers a second question about the same card: is that picture deep
 enough?** *(v0.450.0.)* A different question from stretch — a stretch is a
@@ -304,4 +307,55 @@ def start_refinish(request: Request) -> dict:
     if existing is not None:
         return {"job_id": existing.id, "already_running": True}
     job = pipeline.submit_refinish_pictures(deps.get_settings(request), jm)
+    return {"job_id": job.id, "already_running": False}
+
+
+# ---------------------------------------------------------------------------
+# The second owner-requested exception (2026-10-28, ⭐ entry part 2): finish
+# every picture nobody ever edited. Same shape as the repair above — a dry run
+# that names exactly what it would and would not touch, then a job — and just
+# as narrow: a picture with any saved recipe is never in it
+# (:mod:`webapp.finishunedited`).
+
+
+class FinishUneditedPreview(BaseModel):
+    # Targets the job would finish with Auto.
+    finish: list[RefinishTarget]
+    # Unedited-looking targets it leaves alone, by reason: "has_edit" (a saved
+    # edit that was never exported), "cover_pinned" (a picture you pinned),
+    # "auto_edit_off" (that target's auto-edit preference is off).
+    left_alone: dict[str, list[RefinishTarget]]
+
+
+@router.get("/api/unstretched-pictures/finish-unedited", response_model=FinishUneditedPreview)
+def preview_finish_unedited(request: Request) -> FinishUneditedPreview:
+    """Dry run: which never-edited pictures the job would finish with Auto, and
+    which flat ones it would leave alone and why. Writes nothing."""
+    from webapp.finishunedited import FINISH, scan_finish_unedited
+
+    lib = deps.open_library(request)
+    try:
+        verdicts = scan_finish_unedited(lib)
+    finally:
+        lib.close()
+    left: dict[str, list[RefinishTarget]] = {}
+    for v in verdicts:
+        if v.verdict != FINISH:
+            left.setdefault(v.verdict, []).append(RefinishTarget(safe_name=v.safe_name, name=v.name))
+    return FinishUneditedPreview(
+        finish=[RefinishTarget(safe_name=v.safe_name, name=v.name)
+                for v in verdicts if v.verdict == FINISH],
+        left_alone=left)
+
+
+@router.post("/api/unstretched-pictures/finish-unedited")
+def start_finish_unedited(request: Request) -> dict:
+    """Queue the finish job. Idempotent: an active one is returned, not doubled."""
+    from webapp import pipeline
+
+    jm = deps.get_job_manager(request)
+    existing = jm.active_of_kind("finish_unedited_pictures")
+    if existing is not None:
+        return {"job_id": existing.id, "already_running": True}
+    job = pipeline.submit_finish_unedited_pictures(deps.get_settings(request), jm)
     return {"job_id": job.id, "already_running": False}

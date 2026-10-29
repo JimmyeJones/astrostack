@@ -4569,6 +4569,17 @@ export const api = {
   startRefinish: () =>
     req<{ job_id: string; already_running: boolean }>(
       "/api/unstretched-pictures/refinish", { method: "POST" }),
+  // The owner's 2026-10-28 ask: every picture nobody ever edited (no saved
+  // recipe at all), finished with Auto in one go — and which flat ones it
+  // leaves alone. See webapp/finishunedited.py.
+  finishUneditedPreview: () =>
+    req<{
+      finish: { safe_name: string; name: string }[];
+      left_alone: Record<string, { safe_name: string; name: string }[]>;
+    }>("/api/unstretched-pictures/finish-unedited"),
+  startFinishUnedited: () =>
+    req<{ job_id: string; already_running: boolean }>(
+      "/api/unstretched-pictures/finish-unedited", { method: "POST" }),
   getUnstretchedPictures: () =>
     req<{
       count: number;
