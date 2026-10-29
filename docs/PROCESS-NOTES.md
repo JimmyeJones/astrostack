@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-10-29 (Scout, branch `claude/exciting-wozniak-6ya1y4`) — QA rotation sweep (2), new angle — *which run* v0.503.20's per-panel hold treats as "the picture standing": one bug, Scout-fixed (v0.503.25). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8363 passed / 7 skipped on `6b1409fa` (xdist `-n 4`, BLAS capped, 17m03s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the known non-finding only — the
+  Dashboard's ASTAP note in a dogfood without ASTAP).
+- **Sweep (2).** Per-panel code since the last (2) (`13a3el`): v0.503.20 (`_subs_on_record_at_picture`), v0.503.23
+  (`unedited_border_trim` — Auto's own `largest_covered_rect`, already measured on uneven panels; not re-swept),
+  v0.503.24 (a cache, no per-panel number). Asked of v0.503.20: the "picture standing" is picked by a *whole-target
+  peak* (`max(n_frames_used)`, newest of a tie) — which rows can win that? `stack_runs` also holds editor exports and
+  channel combines. A combine's count is its few source stacks, so it never wins; but `export_edit` copies its
+  source's `n_frames_used` under its own, later timestamp, so it ties and wins. Repro A plus one export row through
+  the real `_pipeline_body`: held, `panels_thinned: 1`. Fixed (derived runs skipped on a tie) with a fail-before test.
+- **Read and holds:** a newer *smaller* stack holding a panel the larger one lacks needs `n_frames_used` to fall with
+  every sub still accepted — only alignment drops do that (`n_used = offered − align_failed`), and a rejected night
+  trips the `sum(on_record) < prior_max` fallback. A merge carries each source's runs with their own timestamps
+  (`carry_stack_runs`) and its subs' `ingested_at` verbatim, so a merged duplicate's panel is "not on record" at the
+  other target's best picture — but that picture never held it either. `ingested_at` is written once
+  (`add_frame`), never on update; `parse_capture_time` is UTC-aware, so the container's TZ cannot move the cutoff.
+- **Not yet run in a sweep (2):** the run's `timestamp_utc` is written when the stack *finishes*, so a sub ingested
+  during a long (hours, at 35k subs) manual stack counts as on record though it is not in the picture — only ever
+  toward a hold, the old behaviour's direction.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-4u2f5p`) — QA rotation sweep (1), new angle — every picture download measured against the stored preview, end to end over HTTP, on the decimated `--big` mosaic: CLEAN. Inbox unchanged. Dogfood `--mosaic --big` CLEAN.
 
 - **Collision note:** #1320 (`claude/blissful-einstein-m8o5zc`, a live Scout run, opened minutes before this one

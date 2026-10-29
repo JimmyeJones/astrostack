@@ -5,12 +5,12 @@
 > belongs in `docs/PROCESS-NOTES.md`, never here. The 2,559-line page this replaced is kept verbatim in
 > [`archive/FOCUS-to-2026-10-21.md`](archive/FOCUS-to-2026-10-21.md) — nothing was deleted.
 
-## Front of the queue (2026-10-28)
+## Front of the queue (2026-10-29)
 
 **No ungated bug is open. First: the rest of the owner's ⭐ entry from #1317 (unedited pictures' ragged border, and
 speed) — Full-res PNG + archive trimmed in v0.503.23, repeat downloads cached in v0.503.24; share JPEG / wallpaper, (2), (4) and the first render's speed remain** (in "Features that serve real workflows"; ⭐ is always
 taken first). Then a Builder should take a beginner feature from that section, or dogfood (`--mosaic --editor`)
-and file what it finds. Recently closed: a `NaN`/`Infinity` body literal is a 422, not a 500 (v0.503.22, Scout sweep (4)); a set-but-wrong ASTAP path now says what is wrong with it (v0.503.21, Scout sweep (3)); the walk-away per-panel readability hold compares a panel with the picture standing (v0.503.20, Scout sweep (2)); an ASTAP that is there but can't be started now reads as a setup
+and file what it finds. Recently closed: an editor export no longer moves the picture the per-panel hold asks about (v0.503.25, Scout sweep (2)); a `NaN`/`Infinity` body literal is a 422, not a 500 (v0.503.22, Scout sweep (4)); a set-but-wrong ASTAP path now says what is wrong with it (v0.503.21, Scout sweep (3)); the walk-away per-panel readability hold compares a panel with the picture standing (v0.503.20, Scout sweep (2)); an ASTAP that is there but can't be started now reads as a setup
 problem (v0.503.19, Scout sweep (3)); a legacy North-up save on a mosaic is recovered again (v0.503.18, Scout sweep (1)); an upload no longer replaces a sub that reached `incoming/` mid-stream (v0.503.17, Scout sweep (4)); a mosaic panel left a few readable subs vs the walk-away hold (v0.503.16); the deepening reel's shallow night drawn cleaner on a grown mosaic (v0.503.15); one night, one dark window (v0.503.10); the hung ffmpeg decoder vs Cancel (v0.503.8); the walk-away missing-files hold on a mosaic panel (v0.503.5); Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
 progress / Tonight badge); a dogfood pass found and fixed the week plan's same-sky flip (v0.502.41); the Scout's sweep (4) fixed a merge that
 deleted a folder a stack was still writing into (v0.502.42). After that, a Builder with nothing ungated should take a beginner feature from "Features that serve
@@ -19,17 +19,18 @@ real workflows" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), or dogfood (`--mosaic -
 **Gated, do not start:** the un-located-panel entry (third in Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
 re-litigate a stand-down that carries numbers. **Issue inbox:** #878, #880, #903, #1015 — all previously acted-on
-and owner-gated, none updated since 2026-10-12 (re-checked 2026-10-28).
+and owner-gated, none updated since 2026-10-12 (re-checked 2026-10-29).
 
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (1), 2026-10-28
-→ next sweep is (2).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (2), 2026-10-29
+→ next sweep is (3).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-10-29 (Scout, branch `claude/exciting-wozniak-6ya1y4`) — **QA rotation sweep (2), new angle: which run v0.503.20's per-panel hold calls "the picture standing" — an editor export copies its source's `n_frames_used` under a later timestamp, won the tie, and re-held repro A; Scout-fixed, v0.503.25** (`_subs_on_record_at_picture`). Inbox: the same four, owner-gated. Suite 8363 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: the rest of #1317's ⭐ entry. **Rotation: (2) done → next sweep is (3).***
 *2026-10-29 (Builder, branch `claude/relaxed-davinci-j7rbj6`) — **v0.503.24: the ⭐ entry's part (3) — a repeat Full-res PNG comes off `<stem>_fullres.cache` (`pipeline.cached_run_full_res_png`; 26 s → 0.1 s at 5000×7000), a second click waits for the running render, and a ≥ 4 MP picture toasts "Preparing your full-size picture…"** (`fullres.announceFullResDownload`). **START HERE NEXT RUN:** Builder: the rest of the ⭐ entry — share JPEG / wallpaper via a trimmed stored preview with `preview_crop`, (2) "Finish my unedited pictures", (4) the dark ring; the first render's own speed is an engine change.*
 *2026-10-29 (Builder, branch `claude/relaxed-davinci-ls9zd1`) — **v0.503.23: the ⭐ entry's first slice — an unedited mosaic's Full-res PNG and archive picture trim the ragged border by Auto's own rule** (`pipeline.unedited_border_trim`; `--mosaic` 907×615 with 26,801 no-coverage px → 875×587 with 0, 7.9 %). Suite 8354 passed / 7 skipped. **START HERE NEXT RUN:** Builder: the rest of the ⭐ entry — share JPEG / wallpaper via a trimmed stored preview with `preview_crop` recorded, then (2) "Finish my unedited pictures", (3) speed, (4) the dark ring.*
 *2026-10-28 (Scout, branch `claude/blissful-einstein-4u2f5p`) — **QA rotation sweep (1), new angle: every picture download (Full-res PNG, JPEG, both turned North-up, the wallpaper) measured against the stored preview over HTTP on the decimated `--big` mosaic — CLEAN** (smoothed diff ≤ 1.54/255; the raw 23/255 is star dots under a half-pixel offset, not tone). The "Gallery lightbox prev/next" lead does not exist (no prev/next) and is closed. Inbox: the same four, owner-gated. Suite 8344 passed / 7 skipped; dogfood `--mosaic --big` CLEAN (trim 7.9 %). Ran beside #1320's sweep (4). **START HERE NEXT RUN:** Builder: #1317's ⭐ entry. **Rotation: (1) done → next sweep is (2).***
@@ -44,7 +45,6 @@ dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: the pan
 *2026-10-28 (Builder, branch `claude/pensive-hawking-4fcqpx`) — **v0.503.19: an ASTAP that is there but can't be started is a setup problem** (`ASTAPCannotRunError`, `SOLVE_SETUP_ASTAP_CANNOT_RUN`; Target banner, Dashboard cue via `astapReadiness` `runs === false`, Settings badge). **START HERE NEXT RUN:** Builder: the Scout's walk-away per-panel hold entry (top of Bugs).*
 *2026-10-28 (Scout, branch `claude/blissful-einstein-13a3el`) — **QA rotation sweep (2), new angle: what the per-panel readability hold compares a panel *with* — subs on record, not the standing picture; an off-line newest night on one panel, or a brand-new off-line panel, holds a strictly better stack with "would be much thinner / out of the picture" (`_panels_with_nothing_readable`); filed reproduced in Bugs.** Inbox: the same four, owner-gated. Suite 8323 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). Ran beside #1313's sweep (1). **START HERE NEXT RUN:** Builder: the ASTAP entry, then this one. **Rotation: (2) done → next sweep is (3).***
 *2026-10-28 (Scout, branch `claude/blissful-einstein-dck0um`) — **QA rotation sweep (1), new angle: the legacy North-up recovery asked the master's WCS at the preview grid's centre, so a pre-v0.288 North-up save on a mosaic read as un-rotated (14 of 16 cases); Scout-fixed, v0.503.18** (`recovered_north_up_deg`). `noisedelta` held by reading. Inbox: the same four, owner-gated. Suite 8321 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). Ran beside #1312's sweep (4). **START HERE NEXT RUN:** Builder: the un-startable ASTAP entry (top of Bugs). **Rotation: (1) done → next sweep is (2).***
-*2026-10-28 (Scout, branch `claude/blissful-einstein-ptp2yd`) — **QA rotation sweep (4), new angle: `upload`, the one router that writes into `incoming/`, against §10 — a sub landing at the same name *while* an upload streamed was silently replaced (`os.replace` after a pre-stream `exists()`); Scout-fixed as v0.503.17 (`_place_new`, create-only `os.link`).** Inbox: the same four, owner-gated. Suite 8318 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: the un-startable-ASTAP entry. **Rotation: (4) done → next sweep is (1).***
 
 ## Standing frontier
 

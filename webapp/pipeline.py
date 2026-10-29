@@ -3944,11 +3944,26 @@ def _subs_on_record_at_picture(
     stamps are not telling the truth about it — a clock that moved, or rows
     written again after the run (a rebuilt or re-registered target) — and the
     cautious answer is the one the hold gave before.
+
+    **The picture is a stack, never an export of one.** ``export_edit`` records
+    its result with its source's ``n_frames_used`` under the export's own
+    ``timestamp_utc``, so an edit exported after the newest night arrived tied
+    the stack and won the tie as the newer — and that night's off-line subs read
+    as subs the picture had (Scout 2026-10-29, sweep 2). Editor exports and
+    channel combines are only asked when no stack of that count is left.
     """
+    def _derived(r: Any) -> bool:
+        try:
+            data = json.loads(r.options_json or "")
+        except (TypeError, ValueError):
+            return False
+        return isinstance(data, dict) and (
+            "editor_recipe" in data or "channel_combine" in data)
+
+    tied = [r for r in runs if r.n_frames_used == prior_max]
+    tied = [r for r in tied if not _derived(r)] or tied
     best = None
-    for r in runs:
-        if r.n_frames_used != prior_max:
-            continue
+    for r in tied:
         if best is None or (r.timestamp_utc or "") > (best.timestamp_utc or ""):
             best = r
     from seestack.session_recap import parse_capture_time
