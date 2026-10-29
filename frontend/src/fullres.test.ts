@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  FULL_RES_PNG_MAX_LONG_EDGE, FULL_RES_SLOW_PIXELS, fullResPngCapped, fullResPngHint,
-  fullResPngLabel, fullResPreparingNotice,
+  FULL_RES_PNG_MAX_LONG_EDGE, FULL_RES_SLOW_PIXELS, fullResDownloadHint, fullResPngCapped,
+  fullResPngHint, fullResPngLabel, fullResPreparingNotice,
 } from "./fullres";
 
 const CAP = FULL_RES_PNG_MAX_LONG_EDGE;
@@ -71,5 +71,31 @@ describe("the notice while a big full-res picture is prepared", () => {
   it("still speaks when the size is unknown", () => {
     expect(fullResPreparingNotice()).toMatch(/^A big picture can take a minute/);
     expect(fullResPreparingNotice(null, 1200)).not.toBeNull();
+  });
+});
+
+describe("fullResDownloadHint — the file's own size once the server says it", () => {
+  it("keeps the canvas sentence until there is an answer", () => {
+    expect(fullResDownloadHint(1080, 1920)).toBe(fullResPngHint(1080, 1920));
+    expect(fullResDownloadHint(1080, 1920, null)).toBe(fullResPngHint(1080, 1920));
+    expect(fullResDownloadHint(1080, 1920, { width: null, height: null, trimmed: false }))
+      .toBe(fullResPngHint(1080, 1920));
+  });
+
+  it("prints the trimmed size of an unedited mosaic, not its canvas", () => {
+    const hint = fullResDownloadHint(907, 615, { width: 875, height: 587, trimmed: true });
+    expect(hint).toBe("Same look, ragged mosaic border trimmed (875×587 px)");
+    expect(hint).not.toContain("907");
+  });
+
+  it("prints an edit's own cropped size", () => {
+    expect(fullResDownloadHint(400, 300, { width: 146, height: 138, trimmed: false }))
+      .toBe("Same look, full size (146×138 px)");
+  });
+
+  it("leaves a capped canvas's explanation alone", () => {
+    const w = FULL_RES_PNG_MAX_LONG_EDGE + 4000;
+    expect(fullResDownloadHint(w, 4000, { width: 8000, height: 2667, trimmed: false }))
+      .toBe(fullResPngHint(w, 4000));
   });
 });

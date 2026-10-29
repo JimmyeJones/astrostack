@@ -68,6 +68,26 @@ export function fullResPngHint(w?: number | null, h?: number | null): string {
     + `${w}×${h}, so the FITS or TIFF holds its native pixels`;
 }
 
+/**
+ * The hint once the server has said how big the file really is
+ * (`api.stackFullResPngSize`). An unedited mosaic's download is trimmed of its
+ * ragged border and an edited one carries its own crop, so the canvas printed by
+ * {@link fullResPngHint} stopped being the file's size on exactly the pictures
+ * this owner shoots. Without an answer (still loading, an older backend, or a
+ * size the server won't promise) it is {@link fullResPngHint} unchanged.
+ */
+export function fullResDownloadHint(
+  canvasW?: number | null, canvasH?: number | null,
+  size?: { width: number | null; height: number | null; trimmed: boolean } | null,
+): string {
+  const w = size?.width, h = size?.height;
+  if (!w || !h || w <= 0 || h <= 0) return fullResPngHint(canvasW, canvasH);
+  if (size?.trimmed) return `Same look, ragged mosaic border trimmed (${w}×${h} px)`;
+  // Smaller only because of the cap: the canvas sentence already says why.
+  if (fullResPngCapped(canvasW, canvasH)) return fullResPngHint(canvasW, canvasH);
+  return `Same look, full size (${w}×${h} px)`;
+}
+
 /** Canvas area (px) above which the full-res render is slow enough to need a
  *  word: measured at ~6 s for a 3494×2470 (8.6 MP) mosaic and ~25 s at
  *  5000×7000 on the agent container, slower on a NAS. An ordinary Seestar field

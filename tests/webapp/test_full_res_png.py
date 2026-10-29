@@ -537,3 +537,128 @@ def test_the_trim_is_cut_after_the_stretch_so_the_tone_is_unchanged(tmp_path):
     cut = np.asarray(Image.open(io.BytesIO(render_preview_png_full_res(path, crop=rect))))
     x0, x1, y0, y1 = crop_bounds(90, 120, dict(zip(("x0", "y0", "x1", "y1"), rect, strict=True)))
     assert np.array_equal(cut, whole[y0:y1, x0:x1])
+
+
+# `…/full-res-png/size` — the download menus print the file's size, and an
+# unedited mosaic's border trim (v0.503.23) and an Auto-edited picture's crop both
+# made the stack canvas they used to print untrue. Every case here pins the
+# answer against the file the download button actually hands over.
+
+def _size(client, safe: str, run_id: int, **params) -> dict:
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png/size",
+                   params=params)
+    assert r.status_code == 200
+    return r.json()
+
+
+def _downloaded_size(client, safe: str, run_id: int, **params) -> tuple[int, int]:
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png",
+                   params=params)
+    assert r.status_code == 200
+    with Image.open(io.BytesIO(r.content)) as im:
+        return im.size
+
+
+def test_full_res_size_of_an_unedited_mosaic_is_the_trimmed_file(
+        client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 640, 480
+    run_id, _ = _add_mosaic_run(solved_library, safe, w=w, h=h)
+    got = _size(client, safe, run_id)
+    assert (got["width"], got["height"]) == _downloaded_size(client, safe, run_id)
+    assert (got["width"], got["height"]) != (w, h)  # the canvas is no longer the answer
+    assert got["trimmed"] is True
+
+
+def test_full_res_size_with_the_trim_off_is_the_whole_canvas(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, _ = _add_mosaic_run(solved_library, safe, w=640, h=480)
+    assert client.put("/api/settings", json={"auto_crop_border": False}).status_code == 200
+    got = _size(client, safe, run_id)
+    assert (got["width"], got["height"]) == (640, 480) == _downloaded_size(client, safe, run_id)
+    assert got["trimmed"] is False
+
+
+def test_full_res_size_of_a_single_field_is_its_canvas(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, _ = _add_mosaic_run(solved_library, safe, w=640, h=480, is_mosaic=False)
+    got = _size(client, safe, run_id)
+    assert (got["width"], got["height"], got["trimmed"]) == (640, 480, False)
+    assert _downloaded_size(client, safe, run_id) == (640, 480)
+
+
+def test_full_res_size_of_a_tall_canvas_past_the_cap_is_the_capped_file(
+        client, solved_library):
+    """Only the *height* is over the cap, which the renderer resizes at the end —
+    the same arithmetic, so the answer is still the file's own."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run(solved_library, safe, w=300, h=8500)
+    got = _size(client, safe, run_id)
+    assert (got["width"], got["height"]) == _downloaded_size(client, safe, run_id)
+    assert got["height"] == 8000
+
+
+def test_full_res_size_of_an_edited_picture_follows_its_recipe_crop(
+        client, solved_library):
+    """An Auto-edited mosaic's saved recipe crops (and here resizes too): the
+    download is that framing, and so is the size the menu prints."""
+    import json
+
+    from seestack.edit.recipe import OpInstance, Recipe
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 400, 300
+    recipe = Recipe(ops=[
+        OpInstance(id="tone.stretch", params={"mode": "stf", "target_bg": 0.25},
+                   enabled=True),
+        OpInstance(id="geometry.crop",
+                   params={"x0": 0.1, "y0": 0.05, "x1": 0.83, "y1": 0.97}, enabled=True),
+        OpInstance(id="geometry.resize", params={"scale": 0.5}, enabled=True),
+        OpInstance(id="geometry.crop",
+                   params={"x0": 0.0, "y0": 0.0, "x1": 0.9, "y1": 1.0}, enabled=False),
+    ])
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        tdir = lib.target_dir(lib.find_target(safe))
+        fits_path = tdir / "master_cropped_edit.fits"
+        rng = np.random.default_rng(6)
+        fits.PrimaryHDU(data=rng.random((3, h, w), dtype=np.float32) * 0.02).writeto(
+            fits_path, overwrite=True)
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="edited", fits_path=str(fits_path),
+                tiff_path=None, preview_path=None, n_frames_used=5,
+                canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=5,
+                options_json=json.dumps({"preview_display_space": True}),
+            ))
+            proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe.to_json())
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+    got = _size(client, safe, run_id)
+    want = _downloaded_size(client, safe, run_id)
+    assert (got["width"], got["height"]) == want
+    assert want != (w, h)
+    assert got["trimmed"] is False  # his own framing, not the unedited trim
+
+
+def test_full_res_size_declines_a_north_up_turn(client, solved_library):
+    """A turn re-grids the picture; the size is not promised, and the menu keeps
+    its canvas-based sentence rather than printing a guess."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_north_up_saved_run(solved_library, safe, w=400, h=300)
+    assert _size(client, safe, run_id) == {"width": None, "height": None, "trimmed": False}
+    plain = _add_run(solved_library, safe, w=400, h=300)
+    assert _size(client, safe, plain, north_up=True)["width"] is None
+
+
+def test_full_res_size_404_without_a_fits(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run(solved_library, safe, w=100, h=80, with_fits=False)
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png/size")
+    assert r.status_code == 404
