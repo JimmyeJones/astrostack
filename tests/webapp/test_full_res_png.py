@@ -383,3 +383,157 @@ def test_full_res_png_of_an_unturned_run_is_untouched(client, solved_library):
 
     r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
     assert r.content == render_preview_png_full_res(fits_path)
+
+
+# ---------------------------------------------------------------------------
+# An unedited mosaic's ragged border (owner ⭐ 2026-10-28): the Full-res PNG of a
+# picture nobody edited used to hand over the whole low-coverage fringe — the
+# colour-confetti band he took for his sensor — because only the editor's Auto
+# ever asked for the border trim.
+
+def _ragged_frame_counts(h: int, w: int) -> np.ndarray:
+    """A 2×2 mosaic's frame-count map: four panels of 25 subs, each sub dithered
+    and slightly rotated, so every panel edge is a ramp of a few subs and the
+    canvas edge is stepped — NaN where none reached."""
+    rng = np.random.default_rng(5)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    count = np.zeros((h, w), np.float32)
+    ph, pw = 0.5 * h, 0.5 * w
+    for pcy, pcx in ((0.26 * h, 0.26 * w), (0.26 * h, 0.74 * w),
+                     (0.74 * h, 0.26 * w), (0.74 * h, 0.74 * w)):
+        for _ in range(25):
+            cy = pcy + rng.uniform(-16, 16)
+            cx = pcx + rng.uniform(-16, 16)
+            t = np.deg2rad(rng.uniform(-2.0, 2.0))
+            u = (xx - cx) * np.cos(t) + (yy - cy) * np.sin(t)
+            v = -(xx - cx) * np.sin(t) + (yy - cy) * np.cos(t)
+            count += ((np.abs(u) < pw / 2) & (np.abs(v) < ph / 2))
+    count[count == 0] = np.nan
+    return count
+
+
+def _add_mosaic_run(data_root, safe: str, *, w: int, h: int,
+                    is_mosaic: bool = True) -> tuple[int, str]:
+    """An unedited mosaic run: a linear master whose fringe is per-pixel colour
+    speckle and whose uncovered corners are NaN, plus the frame-count sibling the
+    stacker writes beside it. Returns ``(run_id, fits_path)``."""
+    from seestack.edit.proxy import frame_coverage_path_for
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        tdir = lib.target_dir(lib.find_target(safe))
+        fits_path = tdir / f"mosaic_{w}x{h}.fits"
+        counts = _ragged_frame_counts(h, w)
+        rng = np.random.default_rng(3)
+        cube = np.full((3, h, w), 50.0, np.float32) + rng.normal(0, 1, (3, h, w)).astype(np.float32)
+        thin = ~np.isfinite(counts) | (counts < 12)
+        cube[:, thin] = rng.random((3, int(thin.sum())), dtype=np.float32) * 400.0
+        cube[:, ~np.isfinite(counts)] = np.nan
+        fits.PrimaryHDU(data=cube).writeto(fits_path, overwrite=True)
+        fits.PrimaryHDU(data=counts).writeto(frame_coverage_path_for(fits_path),
+                                             overwrite=True)
+        preview_path = tdir / "mosaic_preview.png"
+        Image.new("RGB", (64, 48), (20, 40, 70)).save(preview_path)
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="mosaic", fits_path=str(fits_path),
+                tiff_path=None, preview_path=str(preview_path), n_frames_used=100,
+                canvas_h=h, canvas_w=w, coverage_min=0, coverage_max=100,
+                options_json="{}", is_mosaic=is_mosaic,
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        return run_id, str(fits_path)
+    finally:
+        lib.close()
+
+
+def _rect_px(rect, w: int, h: int) -> tuple[int, int]:
+    from seestack.edit.ops.geometry import crop_bounds
+
+    x0, x1, y0, y1 = crop_bounds(h, w, {"x0": rect[0], "y0": rect[1],
+                                       "x1": rect[2], "y1": rect[3]})
+    return x1 - x0, y1 - y0
+
+
+def test_full_res_png_of_an_unedited_mosaic_trims_its_ragged_border(
+        client, solved_library):
+    """No saved recipe and ``auto_crop_border`` on (the default): the download is
+    the rectangle the editor's Auto would trim to — no NaN-black corner and no
+    confetti fringe left in it — not the whole ragged canvas."""
+    from types import SimpleNamespace
+
+    from webapp.routers.editor import _trim_rect_for_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 640, 480
+    run_id, fits_path = _add_mosaic_run(solved_library, safe, w=w, h=h)
+    rect = _trim_rect_for_run(SimpleNamespace(fits_path=fits_path, is_mosaic=True))
+    assert rect is not None
+    want = _rect_px(rect, w, h)
+    # A border trim, not a collapse (AGENTS.md §1: >~15 % would be a bug).
+    assert want[0] * want[1] > 0.85 * w * h
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    assert r.status_code == 200
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size == want
+        arr = np.asarray(im.convert("RGB"), dtype=np.float32)
+    # The kept picture is the flat interior: not one pixel of the speckle band,
+    # which renders bright and multi-coloured beside the dark, even sky.
+    speckle = int((arr.max(axis=2) > 128).sum())
+    assert speckle == 0
+    # …and the untrimmed canvas does hold the band, so this test can see it.
+    assert client.put("/api/settings", json={"auto_crop_border": False}).status_code == 200
+    whole = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    with Image.open(io.BytesIO(whole.content)) as im:
+        assert im.size == (w, h)
+        assert int((np.asarray(im.convert("RGB")).max(axis=2) > 128).sum()) > 1000
+
+
+def test_full_res_png_keeps_the_whole_canvas_with_the_trim_switched_off(
+        client, solved_library):
+    """``auto_crop_border`` off is the owner saying "keep my full frame" — the
+    download is the whole canvas, exactly as before."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 640, 480
+    run_id, _ = _add_mosaic_run(solved_library, safe, w=w, h=h)
+    assert client.put("/api/settings", json={"auto_crop_border": False}).status_code == 200
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    assert r.status_code == 200
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size == (w, h)
+
+
+def test_full_res_png_of_a_single_field_is_never_trimmed(client, solved_library):
+    """The same rule as Auto: only a mosaic's border is trimmed, so a single-field
+    run with the very same coverage sibling downloads at its full canvas."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 640, 480
+    run_id, _ = _add_mosaic_run(solved_library, safe, w=w, h=h, is_mosaic=False)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    assert r.status_code == 200
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size == (w, h)
+
+
+def test_the_trim_is_cut_after_the_stretch_so_the_tone_is_unchanged(tmp_path):
+    """The trimmed download is a *crop* of the untrimmed one, pixel for pixel —
+    the tone is measured on the whole canvas as the stored preview's is, so the
+    trim reframes the picture and never re-stretches it."""
+    from seestack.edit.ops.geometry import crop_bounds
+    from seestack.render.thumbnail import render_preview_png_full_res
+
+    rng = np.random.default_rng(9)
+    path = tmp_path / "m.fits"
+    fits.PrimaryHDU(data=(rng.random((3, 90, 120), dtype=np.float32) * 300.0)).writeto(path)
+    rect = (0.1, 0.2, 0.8, 0.9)
+    whole = np.asarray(Image.open(io.BytesIO(render_preview_png_full_res(path))))
+    cut = np.asarray(Image.open(io.BytesIO(render_preview_png_full_res(path, crop=rect))))
+    x0, x1, y0, y1 = crop_bounds(90, 120, dict(zip(("x0", "y0", "x1", "y1"), rect, strict=True)))
+    assert np.array_equal(cut, whole[y0:y1, x0:x1])

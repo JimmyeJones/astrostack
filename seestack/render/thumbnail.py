@@ -428,6 +428,7 @@ def render_preview_png_full_res(
     fits_path: str | Path, *, max_long_edge: int = 8000,
     north_up: bool = False,
     stretch: float | None = None, black: float | None = None,
+    crop: tuple[float, float, float, float] | None = None,
 ) -> bytes:
     """Render a stacked-image FITS to a PNG at (near) native output resolution
     using the **same stretch as the baked gallery/History preview** — the STF
@@ -484,6 +485,16 @@ def render_preview_png_full_res(
     ceiling that bounds memory / response size on a RAM-capped host; the FITS/TIFF
     stay available for the true native pixels of an enormous mosaic. Returns PNG
     bytes.
+
+    ``crop`` is fractional ``(x0, y0, x1, y1)`` canvas bounds — the ragged-border
+    trim a picture nobody edited gets on download (the webapp decides when). It
+    is cut **after** the stretch, so the tone is the one measured on the whole
+    canvas, i.e. still the stored preview's look, and before the North-up turn,
+    because the bounds are fractions of the canvas grid. It goes through the
+    editor's own ``geometry.crop`` arithmetic (``crop_bounds``), so the rectangle
+    is the one Auto would cut. A display-space FITS is a finished edit whose
+    framing is its own, so it ignores ``crop``; ``None`` (the default) is
+    byte-for-byte the render this function has always made.
     """
     import io
 
@@ -513,6 +524,15 @@ def render_preview_png_full_res(
     del rgb  # the stretch is the only reader; free it before the clip
     disp = np.nan_to_num(stretched, copy=False)
     np.clip(disp, 0.0, 1.0, out=disp)
+    if crop is not None and not display_space:
+        from seestack.edit.ops.geometry import crop_bounds
+
+        x0, y0, x1, y1 = crop
+        box = crop_bounds(disp.shape[0], disp.shape[1],
+                          {"x0": x0, "y0": y0, "x1": x1, "y1": y1})
+        if box is not None:
+            cx0, cx1, cy0, cy1 = box
+            disp = disp[cy0:cy1, cx0:cx1]
     if north_up:
         disp = _apply_north_up(disp, fits_path)
     u8 = pack_unit(disp, copy=False)

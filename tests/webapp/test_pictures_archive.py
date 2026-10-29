@@ -381,3 +381,25 @@ def test_cancelling_leaves_no_archive(client, solved_library):
     assert report.n_pictures == 0
     assert not picturesarchive.archive_path(settings).exists()
     assert not list(picturesarchive.archive_dir(settings).glob("*.part"))
+
+
+def test_archive_trims_an_unedited_mosaic_exactly_like_its_download(
+    client, solved_library,
+):
+    """An unedited mosaic's ragged border is trimmed in the archive too (owner ⭐
+    2026-10-28), and it is still the very bytes the target's own "Full-res PNG"
+    button serves — one rule for both, not two."""
+    from .test_full_res_png import _add_mosaic_run
+
+    safe = _safes(client)[0]
+    w, h = 640, 480
+    run_id, _ = _add_mosaic_run(solved_library, safe, w=w, h=h)
+
+    built = _build(client)
+    from_archive = _archive(client, built["job_id"]).read(f"{safe}.png")
+    with Image.open(io.BytesIO(from_archive)) as im:
+        assert im.size[0] < w and im.size[1] < h
+
+    single = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    assert single.status_code == 200
+    assert from_archive == single.content
