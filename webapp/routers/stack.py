@@ -1341,7 +1341,11 @@ async def download_full_res_png(
     North up → Save" baked into the stored preview, whether or not ``north_up``
     was asked for: those bytes are what every other surface shows, and this render
     starts from the canvas-grid FITS, so without it the download comes back
-    rotated away from the picture it claims to be."""
+    rotated away from the picture it claims to be.
+
+    A picture with no saved recipe — one nobody edited — has its ragged mosaic
+    border trimmed when ``auto_crop_border`` is on, the same rectangle the
+    editor's Auto would cut (``pipeline.unedited_border_trim``)."""
     from webapp.routers.editor import RECIPE_META_PREFIX
 
     lib, proj = deps.open_target_project(request, safe)
@@ -1372,6 +1376,7 @@ async def download_full_res_png(
     png = await run_in_threadpool(
         pipeline.render_run_full_res_png, run, recipe_json,
         north_up=bool(north_up), max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE,
+        trim_border=bool(deps.get_settings(request).auto_crop_border),
     )
     filename = f"{basename}_fullres.png"
     return Response(

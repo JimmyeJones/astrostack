@@ -299,7 +299,8 @@ def build_full_size_archive(
             try:
                 if pick.run is not None:
                     png = render_run_full_res_png(
-                        pick.run, pick.recipe_json, max_long_edge=cap)
+                        pick.run, pick.recipe_json, max_long_edge=cap,
+                        trim_border=bool(settings.auto_crop_border))
                     zf.writestr(pick.name, png)
                     del png
                     report.n_full_res += 1

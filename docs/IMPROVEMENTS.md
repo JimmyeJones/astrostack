@@ -2461,14 +2461,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   25 % of my images" look like this, and he could not tell whether it was his sensor or the app. **It is the
   app.** Asked by multiple choice: the download was **one picture's Full-res PNG**, the pictures were **never
   edited**, and the fix is **"Both"**. The cause: `pipeline.render_run_full_res_png` with no recipe goes to
-  `thumbnail.render_preview_png_full_res`, a plain STF of the whole master with no border trim; and
-  `auto_crop_border` (on) is only read by the editor's Auto. So `_trim_rect_for_run` exists and is never asked
-  for the one picture he actually downloads. **Spec:** (1) **Trim on every surface of an unedited picture.**
-  A run with no saved recipe applies `_trim_rect_for_run` when `Settings.auto_crop_border` is on, through the
-  same rule as the editor's Auto. That covers Full-res PNG, the full-size archive, the share JPEG and the
-  wallpaper. The stored preview / Library tile only gets it if it can be re-rendered additively. Never touch
-  the FITS. A saved recipe's own crop always wins. Honour AGENTS.md §1's "a trim above ~15 % of the canvas is
-  a bug" with a `--mosaic` dogfood measurement in the commit. (2) **Auto-edit, both halves.** New stacks: his
+  `thumbnail.render_preview_png_full_res`, a plain STF of the whole master with no border trim. **Spec:**
+  (1) **Trim on every surface of an unedited picture.** *Full-res PNG + full-size archive ✅ v0.503.23*
+  (`pipeline.unedited_border_trim`, `render_run_full_res_png(trim_border=)`; `--mosaic` 7.9 %, see SHIPPED).
+  **Still open in (1):** the share JPEG and the wallpaper serve the stored preview (or the share-source render,
+  deliberately left untrimmed because it must match that preview's geometry), so they need the stored preview
+  re-rendered trimmed *with* `stack_runs.preview_crop` recorded (`seestack/previewcrop.py`) — an additive
+  re-render, M; and `frontend/src/fullres.ts`'s hint still prints the full canvas size beside a trimmed mosaic
+  download. Never touch the FITS; a saved recipe's own crop always wins. (2) **Auto-edit, both halves.** New stacks: his
   "Finish" switch (`auto_edit_on_autostack`) is his to flip, and he has been told where it is. Never flip his
   stored value. Existing pictures: one plain-language "Finish my unedited pictures" action that runs the
   existing `pipeline._auto_edit_process_run` path over every current picture with **no saved recipe**. Hand-saved looks are
@@ -3595,6 +3595,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.23 **An unedited mosaic's Full-res PNG and its full-size-archive picture trim the ragged low-coverage border, the same rectangle Auto would cut, when `auto_crop_border` is on** (`pipeline.unedited_border_trim`, `render_preview_png_full_res(crop=)`; first slice of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.503.22 **A `NaN`/`Infinity` literal in a request body is rejected with a 422, not a 500** (`main._install_validation_handler`, `_json_safe_input`)
 - ✅ v0.503.21 **A Settings "ASTAP path" that is set but wrong no longer reads as "ASTAP isn't installed" — stray spaces/quotes are cleaned, a folder finds the program inside it, and a path that leads nowhere is named (with the built-in ASTAP offered) in the solve reason and the Settings hint** (`astap._clean_user_path`, `astap_path_problem`, `system._astap_info`; Scout sweep (3) entry)
 - ✅ v0.503.20 **The walk-away per-panel readability hold compares each panel with the subs it had when the standing picture was made — an off-line newest night on one panel, or a brand-new off-line panel, no longer holds a stack that would deepen the rest with a false "much thinner / out of the picture"** (`pipeline._subs_on_record_at_picture`, `frames.ingested_at` ≤ the best run's `timestamp_utc`; Scout sweep (2) entry)

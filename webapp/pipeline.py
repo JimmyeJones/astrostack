@@ -2769,7 +2769,7 @@ def render_run_recipe_fullres_png(
 
 def render_run_full_res_png(
     run, recipe_json: str | None, *,  # noqa: ANN001 — a StackRunRow, detached from the DB
-    north_up: bool = False, max_long_edge: int = 8000,
+    north_up: bool = False, max_long_edge: int = 8000, trim_border: bool = False,
 ) -> bytes:
     """PNG bytes of **the run's current picture** at native resolution.
 
@@ -2786,6 +2786,16 @@ def render_run_full_res_png(
     display-space* — the caller reads it, because only the caller has the
     project open. ``None`` (no recipe, or a corrupt one) renders the master.
     Blocking: run it in a threadpool from async code.
+
+    ``trim_border`` is the owner's ``auto_crop_border`` setting, passed by the two
+    callers that hand over a *file* — the Full-res PNG button and the archive.
+    With it on, a picture with no saved recipe has its ragged mosaic border cut
+    away (:func:`unedited_border_trim`), the same rectangle the editor's Auto
+    would trim: an unedited picture used to come out with the whole low-coverage
+    fringe — the colour-confetti band the owner took for his sensor — because
+    only Auto ever asked for the trim. A saved recipe's framing always wins, and
+    the default ``False`` keeps the share/wallpaper source (which must match the
+    un-cropped stored preview it stands in for) exactly as it was.
     """
     recipe_dict = None
     if recipe_json:
@@ -2819,7 +2829,27 @@ def render_run_full_res_png(
 
     return render_preview_png_full_res(
         run.fits_path, max_long_edge=max_long_edge, north_up=render_north_up,
-        stretch=run.preview_stretch, black=run.preview_black)
+        stretch=run.preview_stretch, black=run.preview_black,
+        crop=unedited_border_trim(run) if trim_border else None)
+
+
+def unedited_border_trim(run) -> tuple[float, float, float, float] | None:  # noqa: ANN001
+    """The fractional border trim a picture with **no saved recipe** gets on
+    download — exactly the rule the editor's Auto applies
+    (``build_auto_recipe_for_run``): the well-covered rectangle of the coverage
+    map (``_trim_rect_for_run``), on a mosaic only, ``None`` when there is nothing
+    worth trimming. Best-effort: anything unreadable means no trim, never a
+    failed download."""
+    from webapp.routers.editor import _run_is_mosaic, _trim_rect_for_run
+
+    try:
+        if not _run_is_mosaic(run, load=True):
+            return None
+        return _trim_rect_for_run(run)
+    except Exception:  # noqa: BLE001 — a trim is never worth failing a download over
+        log.warning("unedited border trim failed for run %s", getattr(run, "id", "?"),
+                    exc_info=True)
+        return None
 
 
 def _apply_editor_to_run(lib: Library, safe: str, run_id: int,
