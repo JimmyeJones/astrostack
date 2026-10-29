@@ -1373,8 +1373,11 @@ async def download_full_res_png(
     # whole-library archive can never hand over two different pictures of one run.
     # In the threadpool because it renders (and the recovered-angle path reads the
     # preview's PNG header and the master's WCS), and this endpoint is async.
+    # Cached beside the run (`pipeline.cached_run_full_res_png`): the render is
+    # many seconds on a mosaic, and the second click of a button that seemed to
+    # do nothing waits for the first render rather than starting another.
     png = await run_in_threadpool(
-        pipeline.render_run_full_res_png, run, recipe_json,
+        pipeline.cached_run_full_res_png, run, recipe_json,
         north_up=bool(north_up), max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE,
         trim_border=bool(deps.get_settings(request).auto_crop_border),
     )

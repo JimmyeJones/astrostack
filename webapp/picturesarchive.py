@@ -270,7 +270,7 @@ def build_full_size_archive(
     pictures (a render is not interruptible), and a stop leaves **no** archive —
     a half-built backup that looked complete would be worse than none.
     """
-    from webapp.pipeline import render_run_full_res_png
+    from webapp.pipeline import cached_run_full_res_png
     from webapp.routers.stack import _FULL_RES_PNG_MAX_LONG_EDGE
 
     cap = _FULL_RES_PNG_MAX_LONG_EDGE if max_long_edge is None else max_long_edge
@@ -298,9 +298,11 @@ def build_full_size_archive(
                 progress(f"Preparing {pick.name}", i, total)
             try:
                 if pick.run is not None:
-                    png = render_run_full_res_png(
+                    # A picture already downloaded comes off its cache;
+                    # the archive never writes one (`write=False`).
+                    png = cached_run_full_res_png(
                         pick.run, pick.recipe_json, max_long_edge=cap,
-                        trim_border=bool(settings.auto_crop_border))
+                        trim_border=bool(settings.auto_crop_border), write=False)
                     zf.writestr(pick.name, png)
                     del png
                     report.n_full_res += 1

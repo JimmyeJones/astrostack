@@ -13,6 +13,7 @@ import contextlib
 import json
 import logging
 import os
+import threading
 import time
 from itertools import islice
 from pathlib import Path
@@ -2850,6 +2851,127 @@ def unedited_border_trim(run) -> tuple[float, float, float, float] | None:  # no
         log.warning("unedited border trim failed for run %s", getattr(run, "id", "?"),
                     exc_info=True)
         return None
+
+
+#: One lock per cached Full-res PNG, so a second click on a render that is still
+#: running waits for it and is then served from the cache, instead of starting a
+#: second whole-canvas render beside the first — which is exactly what a beginner
+#: does when the first click seems to do nothing for half a minute.
+_FULL_RES_LOCKS: dict[str, threading.Lock] = {}
+_FULL_RES_LOCKS_GUARD = threading.Lock()
+
+
+def full_res_png_cache_path(run) -> Path | None:  # noqa: ANN001
+    """Where a run's rendered Full-res PNG is cached: ``<basename>_fullres.cache``
+    beside its master, a registered artefact (``RUN_ARTEFACT_SUFFIXES``), so it is
+    deleted, archived and merged with the run. ``None`` without a master."""
+    from seestack.stack.output import RUN_ARTEFACT_SUFFIXES
+
+    if not run.fits_path:
+        return None
+    master = Path(run.fits_path)
+    stem = master.name[:-len(master.suffix)] if master.suffix else master.name
+    return master.with_name(f"{stem}{RUN_ARTEFACT_SUFFIXES['fullres_cache']}")
+
+
+def full_res_png_signature(run, recipe_json: str | None, *,  # noqa: ANN001
+                           north_up: bool, max_long_edge: int,
+                           trim_border: bool) -> str:
+    """Content signature of one Full-res PNG render: everything
+    :func:`render_run_full_res_png` reads. The master and the stored preview (a
+    History "Adjust" or North-up save rewrites it), both coverage maps (the
+    border trim is measured on them), the saved recipe, the run row's own stretch
+    and turn, the arguments, and the app version — so a renderer change rebuilds
+    rather than serving last release's pixels. Stats and a hash; no read."""
+    import hashlib
+
+    from seestack.edit.proxy import coverage_path_for, frame_coverage_path_for
+    from webapp.routers.stack import _file_stamp
+
+    fits_path = run.fits_path
+    parts = [
+        "v1",
+        _file_stamp(fits_path),
+        _file_stamp(run.preview_path),
+        _file_stamp(str(frame_coverage_path_for(fits_path)) if fits_path else None),
+        _file_stamp(str(coverage_path_for(fits_path)) if fits_path else None),
+        hashlib.sha1((recipe_json or "").encode()).hexdigest(),
+        repr((run.preview_stretch, run.preview_black,
+              getattr(run, "preview_north_up_deg", None), run.is_mosaic)),
+        repr((bool(north_up), int(max_long_edge), bool(trim_border))),
+        APP_VERSION,
+    ]
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()
+
+
+def cached_run_full_res_png(
+    run, recipe_json: str | None, *,  # noqa: ANN001 — a StackRunRow, detached from the DB
+    north_up: bool = False, max_long_edge: int = 8000, trim_border: bool = False,
+    write: bool = True,
+) -> bytes:
+    """:func:`render_run_full_res_png`, served from a cache beside the run when
+    nothing it depends on has changed (:func:`full_res_png_signature`).
+
+    The render is whole-canvas work — measured at ~6 s for a 3494×2470 mosaic and
+    ~25 s at 5000×7000 on the agent container, and slower on a NAS — so the owner
+    paid it again on every click of the same button. The file is the signature,
+    a newline, then the PNG bytes, written to a private ``.tmp`` and renamed, so
+    the signature and the picture can never come from two different renders and
+    a concurrent reader never sees half a file. The bytes served are the render's
+    own, unchanged.
+
+    ``write=False`` reads a cached picture but never writes one: the whole-library
+    archive renders every pick once, and leaving a full-size copy of each beside
+    its run would spend disk the owner never asked to spend. Any cache failure
+    falls back to a plain render — a cache is never worth failing a download over.
+    """
+    def _render() -> bytes:
+        return render_run_full_res_png(
+            run, recipe_json, north_up=north_up, max_long_edge=max_long_edge,
+            trim_border=trim_border)
+
+    cache = full_res_png_cache_path(run)
+    if cache is None:
+        return _render()
+    try:
+        sig = full_res_png_signature(
+            run, recipe_json, north_up=north_up, max_long_edge=max_long_edge,
+            trim_border=trim_border).encode()
+    except Exception:  # noqa: BLE001 — see the docstring
+        log.warning("full-res cache signature failed for run %s",
+                    getattr(run, "id", "?"), exc_info=True)
+        return _render()
+    head = sig + b"\n"
+
+    def _hit() -> bytes | None:
+        with contextlib.suppress(OSError):
+            data = cache.read_bytes()
+            if data.startswith(head):
+                return data[len(head):]
+        return None
+
+    if not write:
+        return _hit() or _render()
+    with _FULL_RES_LOCKS_GUARD:
+        lock = _FULL_RES_LOCKS.setdefault(str(cache), threading.Lock())
+    with lock:
+        png = _hit()
+        if png is not None:
+            return png
+        png = _render()
+        tmp = cache.with_name(
+            f"{cache.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        try:
+            with tmp.open("wb") as fh:
+                fh.write(head)
+                fh.write(png)
+            tmp.replace(cache)
+        except OSError:
+            log.warning("could not cache the full-res picture at %s", cache,
+                        exc_info=True)
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
+        return png
 
 
 def _apply_editor_to_run(lib: Library, safe: str, run_id: int,
