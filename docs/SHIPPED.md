@@ -1,5 +1,19 @@
 # Shipped — the record
 
+## 2026-10-29 (Scout, branch `claude/exciting-wozniak-6ya1y4`) — an editor export no longer moves the picture the per-panel hold asks about
+
+- **v0.503.25** — 🐞 AUTONOMY (walk-away, mosaic; Scout-fixed in QA rotation sweep (2)). v0.503.20 asks the per-panel
+  readability hold about the subs each panel had **when the standing picture was made**: the run with the largest
+  `n_frames_used`, the newest of a tie, and `frames.ingested_at` ≤ its `timestamp_utc`. But `export_edit` records an
+  editor export with its **source's** `n_frames_used` under the **export's own** timestamp — so an edit exported after
+  the newest night arrived tied the stack, won the tie as the newer, and that night's off-line subs counted as subs the
+  picture had. Repro A from v0.503.20 (picture A 4 + B 6 = 10; A +6 off-line, B +3 readable), plus one export row at
+  a later time, through the real `_pipeline_body` (only `run_stack` stubbed): **held** with "much thinner than in the
+  picture this target already has", `panels_thinned: 1`. **Fix:** `_subs_on_record_at_picture` chooses among tied
+  runs that are not `editor_recipe`/`channel_combine` records, and asks those only when no stack of that count is
+  left. **Test:** `test_an_editor_export_does_not_move_the_picture_the_panel_hold_asks_about` (fails before with the
+  hold above, passes after). Walk-away only (the owner runs `auto_stack` off), hence low severity; no config, schema,
+  default, layout or response-shape change.
 ## 2026-10-29 (Builder, branch `claude/relaxed-davinci-j7rbj6`) — a repeat Full-res PNG is instant, and a big one says it is coming
 
 - **v0.503.24** — ⚡ SPEED (trust / friendliness, part (3) of the owner's ⭐ 2026-10-28 entry: the Full-res PNG

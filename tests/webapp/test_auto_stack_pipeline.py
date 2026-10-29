@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -2073,3 +2074,29 @@ def test_a_missing_panel_never_holds_a_targets_first_stack(
         assert not summary.get("auto_stack_held_unreadable")
     finally:
         lib.close()
+
+
+def test_an_editor_export_does_not_move_the_picture_the_panel_hold_asks_about(
+    solved_library, monkeypatch,
+):
+    """Scout 2026-10-29, sweep 2. Repro A again, with one difference: after the
+    newest night arrived the owner opened the picture in the editor and exported
+    it. ``export_edit`` copies its source's ``n_frames_used`` under the export's
+    own ``timestamp_utc``, so the export tied the stack for "best" and won the
+    tie as the newer — and "on record at the picture" became "on record at the
+    export", counting A's off-line newest night as subs the picture had. A then
+    read as keeping 4 of 10 and the deeper stack was held again."""
+    def shape(proj, a, b):
+        _stamp_ingested(proj, a[:4] + b[:6], _BEFORE_PICTURE)
+        _record_run(proj, n_frames_used=10)
+        _stamp_ingested(proj, a[4:] + b[6:], _AFTER_PICTURE)
+        proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc="2026-05-03T00:00:00Z",
+            output_basename="master_edit", fits_path=None, tiff_path=None,
+            preview_path=None, n_frames_used=10, canvas_h=10, canvas_w=10,
+            coverage_min=1, coverage_max=1,
+            options_json=json.dumps({"editor_recipe": {"ops": []},
+                                     "derived_from": 1, "display_space": True}),
+        ))
+        _unread(proj, a[4:])
+    _stacks_without_a_hold(solved_library, monkeypatch, 10, 9, shape)

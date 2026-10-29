@@ -3598,6 +3598,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.25 **An editor export made after a new night arrived no longer moves the picture the walk-away per-panel readability hold compares with — the deeper stack is not held again** (`pipeline._subs_on_record_at_picture` skips `editor_recipe`/`channel_combine` runs on a tie; Scout 2026-10-29 sweep (2))
 - ✅ v0.503.24 **A repeat "Full-res PNG" download is served from a cache beside the run, a second click waits for the running render, and a big picture says it is being prepared** (`pipeline.cached_run_full_res_png`, `fullres.announceFullResDownload`; part (3) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.503.23 **An unedited mosaic's Full-res PNG and its full-size-archive picture trim the ragged low-coverage border, the same rectangle Auto would cut, when `auto_crop_border` is on** (`pipeline.unedited_border_trim`, `render_preview_png_full_res(crop=)`; first slice of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.503.22 **A `NaN`/`Infinity` literal in a request body is rejected with a 422, not a 500** (`main._install_validation_handler`, `_json_safe_input`)
