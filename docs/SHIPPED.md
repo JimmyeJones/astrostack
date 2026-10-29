@@ -1,5 +1,25 @@
 # Shipped — the record
 
+## 2026-10-29 (Builder, branch `claude/relaxed-davinci-ls9zd1`) — an unedited mosaic's Full-res PNG trims its ragged border
+
+- **v0.503.23** — 🐛 BUG FIX (editor / trust, first slice of the owner's ⭐ 2026-10-28 entry). A picture nobody
+  edited came out of "Full-res PNG" (and the full-size archive) with the whole low-coverage fringe — the
+  colour-confetti band and the NaN-black corners he took for his sensor — because `render_run_full_res_png` with
+  no recipe rendered a plain STF of the whole master and only the editor's Auto ever asked `_trim_rect_for_run`.
+  **Fix:** `render_run_full_res_png(trim_border=)` — passed `Settings.auto_crop_border` by exactly the two callers
+  that hand over a file (`download_full_res_png`, `picturesarchive.build_full_size_archive`) — trims a run with no
+  saved recipe by `pipeline.unedited_border_trim`, which is Auto's own rule (mosaic only, `_trim_rect_for_run`,
+  `None` when nothing is worth trimming, best-effort). `render_preview_png_full_res(crop=)` cuts **after** the
+  stretch (the tone is still measured on the whole canvas, i.e. the stored preview's look) and before the North-up
+  turn, through `geometry.crop_bounds`; a display-space FITS ignores it. A saved recipe's framing always wins; the
+  share/wallpaper source (`_build_or_get_share_source`) passes nothing and is unchanged, because it must match the
+  un-cropped stored preview. **Measured on the `--mosaic` dogfood** (recipe cleared so the run is unedited):
+  907×615 with 26,801 no-coverage black pixels → **875×587 with 0**, a **7.9 %** trim — the same number Auto
+  prints, under §1's 15 % bar; `auto_crop_border` off still gives 907×615. **Tests:**
+  `tests/webapp/test_full_res_png.py` (trimmed to Auto's rectangle with no speckle pixel left, the switch off keeps
+  the canvas, a single field is never trimmed, the trim is a pure crop of the untrimmed render) and
+  `tests/webapp/test_pictures_archive.py` (the archive picture is the trimmed download, byte for byte); 3 fail
+  with the fix reverted. No config, schema, default, layout or response-shape change.
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-m8o5zc`) — a `NaN`/`Infinity` literal in a request body is a 422, not a 500
 
 - **v0.503.22** — 🐛 BUG FIX (robustness, Scout QA rotation sweep (4)). The server's JSON parser accepts the
