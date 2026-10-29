@@ -1387,6 +1387,7 @@ describe("jobKindLabel", () => {
     expect(jobKindLabel("pipeline")).toBe("Importing & processing new frames");
     expect(jobKindLabel("qc_solve")).toBe("Quality check & plate-solve");
     expect(jobKindLabel("rescue_unsolved")).toBe("Locating your un-located subs together");
+    expect(jobKindLabel("finish_unedited_pictures")).toBe("Finishing your unedited pictures with Auto");
     expect(jobKindLabel("process_target")).toBe("Processing target (check, solve & stack)");
     expect(jobKindLabel("stack")).toBe("Stacking");
     expect(jobKindLabel("reprocess_all")).toBe("Reprocessing all targets");

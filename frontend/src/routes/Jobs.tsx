@@ -60,6 +60,8 @@ const KIND_LABEL: Record<string, string> = {
   video_stack: "Stacking Moon/Sun video",
   video_grade: "Checking Moon/Sun video",
   pictures_archive: "Preparing your full-size pictures",
+  refinish_pictures: "Giving back pictures a restack flattened",
+  finish_unedited_pictures: "Finishing your unedited pictures with Auto",
 };
 
 /** Human-readable name for an engine job kind (pure, tested). */

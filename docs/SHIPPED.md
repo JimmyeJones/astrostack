@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## 2026-10-29 (Builder, branch `claude/relaxed-davinci-uv0ayj`) — "Finish my unedited pictures"
+
+- **v0.504.0** — 🌟 AUTONOMY / FRIENDLINESS (part (2) of the owner's ⭐ 2026-10-28 entry: "about 25 % of my images"
+  were never edited and show the plain stack's ragged border; he chose "Both"). **New:** `webapp.finishunedited`
+  scans every target's *displayed* picture (`displayed_picture_run`) and answers `finish` when it is not a finished
+  picture (`run_is_a_finished_picture`) **and has no saved recipe at all**; otherwise it names it — `has_edit` (any
+  saved recipe, even all-disabled), `cover_pinned` (a pin *he* placed; an app pin from `seestack.coverpin` falls
+  through), `auto_edit_off` (that target's preference). `GET /api/unstretched-pictures/finish-unedited` is the dry
+  run, `POST` queues `finish_unedited_pictures` (idempotent via `active_of_kind`), which runs the existing
+  `_auto_edit_process_run` with his `auto_crop_border` — the writer itself still refuses any recipe it did not bake.
+  The loop is now shared with the #903 repair (`pipeline._auto_finish_displayed_pictures`; the repair's summary keys
+  are unchanged). **UI (consolidation, no new card or banner):** a second half of Settings → Maintenance's existing
+  `RefinishPicturesCard`, behind a confirm; the repair's button is shown only for targets the new one would not
+  already finish (`withoutCovered`), so one target never gets two buttons. Jobs names both kinds in plain words.
+  **Tests:** `tests/webapp/test_finish_unedited.py` (9, including an end-to-end run through the real writer on a
+  ragged-NaN-border mosaic run: recipe saved, preview baked and smaller, `preview_crop_json` recorded, a second run
+  touches nothing), vitest for the summaries, the de-duplication and the confirm. No config, schema, default or
+  layout change; API additive.
+
 ## 2026-10-29 (Scout, branch `claude/exciting-wozniak-6ya1y4`) — an editor export no longer moves the picture the per-panel hold asks about
 
 - **v0.503.25** — 🐞 AUTONOMY (walk-away, mosaic; Scout-fixed in QA rotation sweep (2)). v0.503.20 asks the per-panel
