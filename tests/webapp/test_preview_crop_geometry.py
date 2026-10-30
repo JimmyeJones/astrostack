@@ -25,7 +25,13 @@ from astropy.io import fits
 
 from seestack.io.library import Library
 from seestack.io.project import StackRunRow
-from seestack.previewcrop import UNKNOWN, PreviewCrop, parse_preview_crop
+from seestack.previewcrop import (
+    UNKNOWN,
+    PreviewCrop,
+    make_crop,
+    parse_preview_crop,
+    preview_crop_json,
+)
 
 pytest.importorskip("PIL")
 
@@ -181,17 +187,41 @@ def test_re_rendering_without_a_trim_clears_a_recorded_crop(client, solved_libra
 
 
 def test_saving_the_preview_from_adjust_clears_a_recorded_crop(client, solved_library):
-    """History's "Adjust → Save" re-renders straight off the master FITS, so the
-    new bytes cover the whole canvas again."""
+    """History's "Adjust → Save" re-renders straight off the master FITS, so with
+    the border trim switched off the new bytes cover the whole canvas again and
+    the auto-edit's crop must not outlive them."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     run_id, _fits_path, _preview = _make_trimmable_mosaic_run(solved_library, safe)
     assert _auto_edit(solved_library, safe, run_id) is not None
     assert _run_row(solved_library, safe, run_id).preview_crop_json is not None
+    assert client.put("/api/settings",
+                      json={"auto_crop_border": False}).status_code == 200
 
     r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
                     json={"stretch": 0.5, "black": 0.0, "north_up": False})
     assert r.status_code == 200
     assert _run_row(solved_library, safe, run_id).preview_crop_json is None
+
+
+def test_saving_from_adjust_records_the_crop_its_own_render_cut(client, solved_library):
+    """With the border trim on (v0.504.3) the save cuts an unedited mosaic's
+    border rectangle itself — so the recorded crop is *that* one, the bytes'
+    own, rewritten by this save rather than left over from the auto-edit."""
+    from webapp.pipeline import unedited_border_trim
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, _fits_path, preview = _make_trimmable_mosaic_run(solved_library, safe)
+    assert _auto_edit(solved_library, safe, run_id) is not None
+    _set_crop(solved_library, safe, run_id,
+              preview_crop_json(make_crop(0.3, 0.3, 0.7, 0.7)))
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                    json={"stretch": 0.5, "black": 0.0, "north_up": False})
+    assert r.status_code == 200
+    row = _run_row(solved_library, safe, run_id)
+    want = make_crop(*unedited_border_trim(row))
+    assert parse_preview_crop(row.preview_crop_json).as_tuple() == want.as_tuple()
+    assert r.json()["border_trimmed"] is True
 
 
 def test_the_run_listing_reports_the_baked_crop(client, solved_library):

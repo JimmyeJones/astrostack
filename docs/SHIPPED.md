@@ -1,5 +1,22 @@
 # Shipped — the record
 
+## 2026-10-30 (Builder, branch `claude/relaxed-davinci-dtngwa`) — History's "Adjust → Save" keeps an unedited mosaic's border trimmed
+
+- **v0.504.3** — 🐞 TRUST / IMAGE QUALITY (part of slice (1) of the owner's ⭐ 2026-10-28 entry). v0.504.2 trimmed a fresh
+  unedited mosaic's stored preview, but saving a new stretch from History's Adjust panel re-rendered the **whole canvas**
+  through `render_stack_png` and cleared `preview_crop_json`, so the colour-confetti fringe came straight back onto the
+  thumbnail, share JPEG and wallpaper — while the Full-res PNG beside them stayed trimmed. **New:** `render_stack_png`
+  takes `crop=` (cut after the stretch, before the North-up turn, through `crop_bounds` — the same order and arithmetic as
+  `render_preview_png_full_res`), and `routers.stack.save_stack_preview`'s slider path passes
+  `pipeline.unedited_border_trim(run)` when `auto_crop_border` is on and the master is linear, then records that crop
+  (still "always written": the whole canvas records `None`). The response gains an additive `border_trimmed`, and the
+  panel's toast says *"the ragged mosaic edge is trimmed off, as Auto does"* because the live Adjust render above it is
+  still the whole canvas (the pins/bar there are measured on it). The share/wallpaper native render already replays a
+  recorded border-rule crop on the saved curve (`_render_reproduces_the_crop`), so the JPEG is the Full-res PNG's
+  picture. Tests: new `tests/webapp/test_adjust_save_trims_border.py` (6) — fail-before: the save wrote the 1024×768
+  whole canvas and the JPEG came back 2400×1800. Single field, setting off, display-space and `keep_processed` saves are
+  unchanged; no schema, config, default or API-shape change.
+
 ## 2026-10-30 (Builder, branch `claude/relaxed-davinci-6iepcu`) — an unedited mosaic's stored preview, share JPEG and wallpaper lose the ragged border
 
 - **v0.504.2** — 🐞 TRUST / IMAGE QUALITY (part of slice (1) of the owner's ⭐ 2026-10-28 entry). v0.503.23 trimmed an

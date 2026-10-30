@@ -4251,7 +4251,9 @@ export const api = {
     safe: string, id: number, stretch: number, black: number, northUp = false,
     keepProcessed = false,
   ) =>
-    req<{ ok: boolean }>(`/api/targets/${safe}/stack-runs/${id}/preview`, {
+    // border_trimmed: the saved picture is an unedited mosaic's border-trimmed
+    // rectangle (absent on the keep_processed path and on older servers).
+    req<{ ok: boolean; border_trimmed?: boolean }>(`/api/targets/${safe}/stack-runs/${id}/preview`, {
       // north_up saves the image rotated so North is up, matching what the user
       // sees on screen when they save with the History "North up" toggle on.
       // keep_processed re-bakes a processed run's own saved edit instead of the

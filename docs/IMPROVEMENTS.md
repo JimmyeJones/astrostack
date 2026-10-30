@@ -2467,7 +2467,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   *Stored preview, share JPEG, wallpaper ✅ v0.504.2* for every **new** stack (`pipeline.trim_unedited_stored_preview`,
   `preview_crop` recorded; the native share render replays it). *(The menu hint's size ✅ v0.504.1.)* **Still open in
   (1):** pictures stacked *before* v0.504.2 keep a whole-canvas stored preview (their remedy today is "Finish my
-  unedited pictures"; a no-Auto backfill is S), and History's "Adjust → Save" re-renders the whole canvas (S). Never touch the FITS; a saved recipe's own crop always wins. (2) **Auto-edit, both halves.** New stacks: his
+  unedited pictures"; a no-Auto backfill is S). *(History's "Adjust → Save" ✅ v0.504.3, `render_stack_png(crop=)`.)* Never touch the FITS; a saved recipe's own crop always wins. (2) **Auto-edit, both halves.** New stacks: his
   "Finish" switch (`auto_edit_on_autostack`) is his to flip — never flip his stored value. Existing pictures:
   *✅ v0.504.0* "Finish my unedited pictures" (`webapp.finishunedited`, `submit_finish_unedited_pictures`; Settings →
   Maintenance, inside the existing re-finish card; see SHIPPED). (3) **Speed** — *✅ v0.503.24* (`pipeline.cached_run_full_res_png`,
@@ -3595,6 +3595,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.504.3 **History's "Adjust → Save" on an unedited mosaic keeps Auto's border rectangle and records it, instead of bringing the ragged fringe back** (`render_stack_png(crop=)`, `save_stack_preview` `border_trimmed`; part of slice (1) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.504.2 **A fresh unedited mosaic's stored preview — and so its thumbnail, share JPEG and wallpaper — is cut to Auto's border rectangle, with `preview_crop` recorded, and the share/wallpaper render at full size replays that trim** (`pipeline.trim_unedited_stored_preview`, `_render_reproduces_the_crop`; part of slice (1) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.504.1 **The "Full-res PNG" menu hint prints the file's own size — an unedited mosaic's trimmed size, an edit's cropped size — instead of the stack canvas** (`pipeline.full_res_png_size`, `GET …/full-res-png/size`, `fullres.fullResDownloadHint`; part of slice (1) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.504.0 **"Finish my unedited pictures": one Settings → Maintenance button applies Auto to every displayed picture with no saved recipe, after a dry run naming what it leaves alone (saved edits, his own pinned covers, auto-edit off)** (`webapp.finishunedited.scan_finish_unedited`, `pipeline.submit_finish_unedited_pictures`, `/api/unstretched-pictures/finish-unedited`; part (2) of the owner's ⭐ 2026-10-28 entry)

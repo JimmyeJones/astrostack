@@ -1216,7 +1216,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const save = useMutation({
     mutationFn: (keepProcessed: boolean) =>
       api.saveStackPreview(safe, run.id, dStretch, dBlack, applyNorthUp, keepProcessed),
-    onSuccess: (_data, keepProcessed) => {
+    onSuccess: (data, keepProcessed) => {
       setCacheBust(Date.now());
       // The save records the North-up rotation it baked in on the run itself, so
       // the card's own row is stale the moment it lands.
@@ -1234,7 +1234,14 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         notifications.show({ message: "Kept your processed picture", color: "teal" });
         return;
       }
-      notifications.show({ message: "Preview updated", color: "teal" });
+      // The live render above is the whole canvas; the saved picture of an
+      // unedited mosaic keeps its ragged edge trimmed, so say why it is smaller.
+      notifications.show({
+        message: data?.border_trimmed
+          ? "Preview updated — the ragged mosaic edge is trimmed off, as Auto does"
+          : "Preview updated",
+        color: "teal",
+      });
     },
     onError: () => notifications.show({ message: "Could not save preview", color: "red" }),
   });
