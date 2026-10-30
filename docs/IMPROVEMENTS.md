@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- ⭐ entry (1), pre-v0.504.2 stored previews: a no-Auto border-trim backfill (`pipeline.backfill_unedited_preview_trims`) — Builder, branch `claude/relaxed-davinci-ti73cu`, 2026-10-30.
 
 ---
 
