@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-10-30 (Scout, branch `claude/exciting-wozniak-1xi45k`) — QA rotation sweep (3), new angle — what a *successful* ASTAP writes into its `.ini`: non-finite numbers. Side effects CLEAN; one bug, Scout-fixed (v0.504.4). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8399 passed / 7 skipped on `a90ee6d0` (xdist `-n 4`, BLAS capped, 19m04s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the known non-finding only — the
+  Dashboard's ASTAP note in a dogfood without ASTAP).
+- **Sweep (3).** Every earlier (3) sweep varied whether the binary starts, what it litters, how it dies or which one
+  is resolved; the garbled-`.ini` case was read as "a missing card KeyErrors, caught". None asked about a card that
+  *parses* to a non-finite float — `float()` takes `nan`/`inf`/`infinity`. Scratch probe (deleted): a stub that
+  exits 0 and writes a valid `.wcs` plus an `.ini` in three shapes, through the real scan → `solve_one` →
+  `apply_solve_result_to_db` → `refresh_target_stats`, then every parameter-free GET route. (a) NaN centre:
+  `solve_one` returned `ra=nan`; SQLite stored NULL — a solved, `wcs_json`-carrying, centreless frame (the `.wcs`
+  fallback only fires on `None`). (b) NaN scale/rotation: stored NULL, harmless. (c) inf centre: stored `inf`;
+  `refresh_target_stats` raised `OverflowError` in `_main_object_panels` (`round(inf)`). Fixed in
+  `_parse_astap_ini` (non-finite = missing); fail-before 7/7. Severity low (real ASTAP is not known to write these),
+  confidence high. **Side effects:** none — `incoming/` byte- and mtime-identical, nothing added beside the subs.
+  **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-10-29 (Scout, branch `claude/exciting-wozniak-6ya1y4`) — QA rotation sweep (2), new angle — *which run* v0.503.20's per-panel hold treats as "the picture standing": one bug, Scout-fixed (v0.503.25). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8363 passed / 7 skipped on `6b1409fa` (xdist `-n 4`, BLAS capped, 17m03s). **Inbox:** the same four
