@@ -1,5 +1,18 @@
 # Shipped — the record
 
+## 2026-10-30 (Scout, branch `claude/exciting-wozniak-1xi45k`) — a non-finite number in ASTAP's `.ini` reads as missing
+
+- **v0.504.4** — 🐞 ROBUSTNESS (Scout QA sweep (3), Scout-fixed). `_parse_astap_ini` turned every `KEY=value` line
+  through `float()`, which also accepts `nan`, `inf` and `infinity`. A solve that exited 0 with a valid `.wcs` but a
+  non-finite `CRVAL1`/`CRVAL2` in its `.ini` therefore "parsed": a NaN centre reached SQLite, which stores NaN as
+  NULL — a solved frame with no centre, exactly the case `solve_one`'s `.wcs` fallback exists for, but that fallback
+  only fires on `None`, so it never ran (the frame cannot be the reference or seed sibling hints). An infinite centre
+  was stored as-is and `Library.refresh_target_stats` raised `OverflowError` in `_main_object_panels`
+  (`round(inf)`) on every refresh of that target. **New:** non-finite values are skipped like unparseable ones, so a
+  bad centre raises inside the parse (already caught), the centre is recovered from the `.wcs`, and a non-finite
+  `CROTA2` reads as the 0.0 default. Tests: new `tests/test_astap_nonfinite_ini.py` (7, a real stub binary through
+  the real `solve_one`) — all 7 fail before the fix. No schema, config, default or API change.
+
 ## 2026-10-30 (Builder, branch `claude/relaxed-davinci-dtngwa`) — History's "Adjust → Save" keeps an unedited mosaic's border trimmed
 
 - **v0.504.3** — 🐞 TRUST / IMAGE QUALITY (part of slice (1) of the owner's ⭐ 2026-10-28 entry). v0.504.2 trimmed a fresh

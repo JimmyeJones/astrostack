@@ -4,6 +4,10 @@ Moved verbatim and in order from the foot of the `## Shipped` list in [`../IMPRO
 oldest last, so the working list stays no longer than a run found it (AGENTS.md §2). Newer moves are appended
 above older ones.
 
+## Moved 2026-10-30 (Scout, branch `claude/exciting-wozniak-1xi45k`)
+
+- **Integration time inline on History cards + Reuse settings from Gallery** —
+
 ## Moved 2026-10-23 (Scout, branch `claude/beautiful-newton-v9b2h7`)
 
 - **Fix red CI (pytest-qt import crash)** — CI had been failing on every merge:
