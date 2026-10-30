@@ -5041,14 +5041,24 @@ def _build_or_get_share_source(run: Any, recipe_json: str | None,
     out_dir = master.parent
     cache = out_dir / f"{stem}{RUN_ARTEFACT_SUFFIXES['share_png']}"
     sig_file = out_dir / f"{stem}{RUN_ARTEFACT_SUFFIXES['share_sig']}"
+    # An unedited picture whose stored preview is trimmed renders trimmed too —
+    # the gate (:func:`_render_reproduces_the_crop`) has already checked that the
+    # border rule gives the recorded rectangle.
+    trim_border = (recipe_json is None
+                   and not _preview_is_display_space(run.options_json)
+                   and isinstance(recovered_preview_crop(run), PreviewCrop))
     sig = _share_source_signature(run, recipe_json, long_edge)
+    if trim_border:
+        import hashlib
+
+        sig = hashlib.sha1(f"{sig}|trim".encode()).hexdigest()
     if cache.exists() and sig_file.exists():
         with contextlib.suppress(OSError):
             if sig_file.read_text().strip() == sig:
                 return cache.read_bytes()
     try:
         png = pipeline.render_run_full_res_png(
-            run, recipe_json, max_long_edge=int(long_edge))
+            run, recipe_json, max_long_edge=int(long_edge), trim_border=trim_border)
     except Exception:  # noqa: BLE001 — a broken FITS just falls back to the preview
         return None
     # A temporary of this writer's own, not a shared one: these endpoints are sync
@@ -5164,11 +5174,24 @@ def _render_reproduces_the_crop(run: Any, crop: Any,
     is not a crop of the canvas at all.
     """
     from seestack.edit.recipe import preview_crop_of_recipe, recipe_from_json
-    from seestack.previewcrop import PreviewCrop
+    from seestack.previewcrop import PreviewCrop, make_crop
 
-    if not recipe_json or not _preview_is_display_space(run.options_json):
-        return False
     if not isinstance(crop, PreviewCrop):
+        return False
+    if not _preview_is_display_space(run.options_json):
+        # A picture nobody edited whose stored preview a finished stack trimmed
+        # (:func:`webapp.pipeline.trim_unedited_stored_preview`): the render
+        # replays that trim (``trim_border``) when it is the very rectangle the
+        # border rule gives today. Anything else on a linear run — a crop no
+        # render of it replays — is still a *no*.
+        if recipe_json:
+            return False
+        rect = pipeline.unedited_border_trim(run)
+        trim = make_crop(*rect) if rect is not None else None
+        return trim is not None and all(
+            abs(a - b) < 1e-9 for a, b in
+            zip(trim.as_tuple(), crop.as_tuple(), strict=True))
+    if not recipe_json:
         return False
     try:
         recipe_crop = preview_crop_of_recipe(recipe_from_json(recipe_json))
@@ -5261,9 +5284,10 @@ def _native_picture_source(run: Any, preview_png: bytes, baked_north_up: float,
       grid is the un-rotated one, and matching a baked angle is the North-up
       view's question, not this one);
     * a display-space preview with no saved recipe to reproduce it;
-    * a preview that shows only part of the canvas (an auto-crop border trim) —
-      the render is of the whole canvas, so it would hand back a wider picture
-      than the one on screen;
+    * a preview that shows only part of the canvas where the render would not
+      cut the same part (:func:`_render_reproduces_the_crop`) — it would hand
+      back a wider picture than the one on screen. A saved recipe's crop and an
+      unedited mosaic's stack-time border trim are both replayed;
     * a run with no readable FITS, or one whose canvas is no bigger than the
       preview already is — where there is nothing to gain.
     """

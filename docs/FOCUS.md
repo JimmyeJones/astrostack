@@ -8,7 +8,7 @@
 ## Front of the queue (2026-10-29)
 
 **No ungated bug is open. First: the rest of the owner's ⭐ entry from #1317 (unedited pictures' ragged border, and
-speed) — Full-res PNG + archive trimmed in v0.503.23, repeat downloads cached in v0.503.24, "Finish my unedited pictures" v0.504.0, the menu hint's size v0.504.1; share JPEG / wallpaper, (4) and the first render's speed remain** (in "Features that serve real workflows"; ⭐ is always
+speed) — Full-res PNG + archive trimmed in v0.503.23, repeat downloads cached in v0.503.24, "Finish my unedited pictures" v0.504.0, the menu hint's size v0.504.1, stored preview / share JPEG / wallpaper for new stacks v0.504.2; older previews, Adjust → Save, (4) and the first render's speed remain** (in "Features that serve real workflows"; ⭐ is always
 taken first). Then a Builder should take a beginner feature from that section, or dogfood (`--mosaic --editor`)
 and file what it finds. Recently closed: an editor export no longer moves the picture the per-panel hold asks about (v0.503.25, Scout sweep (2)); a `NaN`/`Infinity` body literal is a 422, not a 500 (v0.503.22, Scout sweep (4)); a set-but-wrong ASTAP path now says what is wrong with it (v0.503.21, Scout sweep (3)); the walk-away per-panel readability hold compares a panel with the picture standing (v0.503.20, Scout sweep (2)); an ASTAP that is there but can't be started now reads as a setup
 problem (v0.503.19, Scout sweep (3)); a legacy North-up save on a mosaic is recovered again (v0.503.18, Scout sweep (1)); an upload no longer replaces a sub that reached `incoming/` mid-stream (v0.503.17, Scout sweep (4)); a mosaic panel left a few readable subs vs the walk-away hold (v0.503.16); the deepening reel's shallow night drawn cleaner on a grown mosaic (v0.503.15); one night, one dark window (v0.503.10); the hung ffmpeg decoder vs Cancel (v0.503.8); the walk-away missing-files hold on a mosaic panel (v0.503.5); Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
@@ -30,6 +30,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-30 (Builder, branch `claude/relaxed-davinci-6iepcu`) — **v0.504.2: a fresh unedited mosaic's stored preview, share JPEG and wallpaper are trimmed of the ragged border** (`pipeline.trim_unedited_stored_preview`, `preview_crop` recorded; `--mosaic` 26,801 no-coverage px → 0). **START HERE NEXT RUN:** Builder: the rest of the ⭐ entry — pre-v0.504.2 previews (backfill), Adjust → Save trim, (4) the dark ring.*
 *2026-10-29 (Builder, branch `claude/relaxed-davinci-qovgg5`) — **v0.504.1: the Full-res PNG menu hint prints the file's own size (an unedited mosaic's trimmed size, an edit's crop) instead of the canvas** (`pipeline.full_res_png_size`, `…/full-res-png/size`). **START HERE NEXT RUN:** Builder: the rest of the ⭐ entry — share JPEG / wallpaper trim (with `preview_crop` recorded), (4) the dark ring.*
 *2026-10-29 (Builder, branch `claude/relaxed-davinci-uv0ayj`) — **v0.504.0: the ⭐ entry's part (2) — "Finish my unedited pictures" in Settings → Maintenance applies Auto to every displayed picture with no saved recipe** (`webapp.finishunedited`, `submit_finish_unedited_pictures`). **START HERE NEXT RUN:** Builder: the rest of the ⭐ entry — share JPEG / wallpaper trim (with `preview_crop` recorded), the `fullres.ts` size hint, (4) the dark ring.*
 *2026-10-29 (Scout, branch `claude/exciting-wozniak-6ya1y4`) — **QA rotation sweep (2), new angle: which run v0.503.20's per-panel hold calls "the picture standing" — an editor export copies its source's `n_frames_used` under a later timestamp, won the tie, and re-held repro A; Scout-fixed, v0.503.25** (`_subs_on_record_at_picture`). Inbox: the same four, owner-gated. Suite 8363 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: the rest of #1317's ⭐ entry. **Rotation: (2) done → next sweep is (3).***
@@ -44,7 +45,6 @@ shadows the working bundled ASTAP (`find_astap` never falls back) and the screen
 database he has; filed reproduced in Bugs.** Inbox: the same four, owner-gated. Suite 8326 passed / 7 skipped;
 dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: the panel-hold entry, then this one.
 **Rotation: (3) done → next sweep is (4).***
-*2026-10-28 (Builder, branch `claude/pensive-hawking-4fcqpx`) — **v0.503.19: an ASTAP that is there but can't be started is a setup problem** (`ASTAPCannotRunError`, `SOLVE_SETUP_ASTAP_CANNOT_RUN`; Target banner, Dashboard cue via `astapReadiness` `runs === false`, Settings badge). **START HERE NEXT RUN:** Builder: the Scout's walk-away per-panel hold entry (top of Bugs).*
 
 ## Standing frontier
 
