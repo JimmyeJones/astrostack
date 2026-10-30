@@ -135,6 +135,15 @@ async def lifespan(app: FastAPI):
     jm.start()
     app.state.job_manager = jm
 
+    # Pictures stacked before v0.504.2 still have a whole-canvas stored preview
+    # (the colour-confetti mosaic fringe) beside a trimmed Full-res PNG; give
+    # them the trim a fresh stack gets, once per target, as a queued job.
+    try:
+        from webapp.pipeline import submit_unedited_preview_trim_backfill
+        submit_unedited_preview_trim_backfill(store.get(), jm)
+    except Exception:  # noqa: BLE001 — housekeeping must never block startup
+        log.warning("Could not queue the stored-preview border trim", exc_info=True)
+
     watcher = Watcher(
         get_settings=store.get,
         on_batch_ready=lambda: _on_batch_ready(app),
