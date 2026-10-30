@@ -3595,6 +3595,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.504.4 **A non-finite number in ASTAP's `.ini` (`nan`/`inf`) reads as missing, so the centre is recovered from the `.wcs` instead of being stored as NULL (NaN) or breaking the target's stats refresh (inf)** (`astap._parse_astap_ini`; Scout sweep (3))
 - ✅ v0.504.3 **History's "Adjust → Save" on an unedited mosaic keeps Auto's border rectangle and records it, instead of bringing the ragged fringe back** (`render_stack_png(crop=)`, `save_stack_preview` `border_trimmed`; part of slice (1) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.504.2 **A fresh unedited mosaic's stored preview — and so its thumbnail, share JPEG and wallpaper — is cut to Auto's border rectangle, with `preview_crop` recorded, and the share/wallpaper render at full size replays that trim** (`pipeline.trim_unedited_stored_preview`, `_render_reproduces_the_crop`; part of slice (1) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.504.1 **The "Full-res PNG" menu hint prints the file's own size — an unedited mosaic's trimmed size, an edit's cropped size — instead of the stack canvas** (`pipeline.full_res_png_size`, `GET …/full-res-png/size`, `fullres.fullResDownloadHint`; part of slice (1) of the owner's ⭐ 2026-10-28 entry)
@@ -4946,5 +4947,3 @@ _Newest first. One line each: what + commit/PR. Entries that had grown to paragr
 - **Mono single-frame edge test** — verified the mono stack path on a
 
 - **Low-frame sigma-clip caution** — the Stack form now shows an inline caution
-
-- **Integration time inline on History cards + Reuse settings from Gallery** —

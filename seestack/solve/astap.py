@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import errno
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -624,9 +625,15 @@ def _parse_astap_ini(ini_path: Path) -> tuple[float, float, float, float]:
             continue
         k, _, v = line.partition("=")
         try:
-            values[k.strip().upper()] = float(v.strip())
+            x = float(v.strip())
         except ValueError:
             continue
+        # ``float()`` also accepts ``nan``/``inf``: read those as missing, so a
+        # NaN centre falls back to the ``.wcs`` (``solve_one``) instead of being
+        # stored — SQLite turns NaN into NULL, and an infinite centre breaks the
+        # target's stats refresh.
+        if math.isfinite(x):
+            values[k.strip().upper()] = x
     ra = values["CRVAL1"]
     dec = values["CRVAL2"]
     pixscale_arcsec = abs(values["CDELT2"]) * 3600.0
