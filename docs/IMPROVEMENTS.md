@@ -2499,7 +2499,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   a "Preparing your full-size picture…" toast above 4 MP; see SHIPPED). **Still open in (3):** the *first* render
   itself (measured 5000×7000: STF stats ~55 %, PNG encode ~25 %; `compress_level=1` saves only ~15 % of the
   encode for +3 % size — not worth it; a faster stretch must stay pixel-identical to the stored preview's look,
-  so it is an engine change for its own run). (4) **The dark ring**: *checked 2026-10-30* — Auto does
+  so it is an engine change for its own run; *re-profiled 2026-10-30, `autostretch` alone on 5000×7000×3: 10.7 s = `nanpercentile` 1.3 s + `_robust_median_sigma` 1.1 s/channel (~44 %) + the per-pixel rolloff/MTF/clip ~1.5 s/channel, much of it first-touch of fresh full-size temporaries (~41 %) — an exact in-place rewrite buys ~20–30 %, not a step change*). (4) **The dark ring**: *checked 2026-10-30* — Auto does
   **not** remove it; filed, measured, as the first Bugs entry (the per-frame flatten's rim on a vignetted sub). Size **M** for (1), **S** for (2) and
   (3) each; ship as separate commits.
 
