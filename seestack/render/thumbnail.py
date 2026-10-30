@@ -380,6 +380,7 @@ def render_stack_png(
     black: float = 0.35,
     max_width: int = 1024,
     north_up: bool = False,
+    crop: tuple[float, float, float, float] | None = None,
 ) -> bytes:
     """Render a stacked-image FITS to PNG bytes with an adjustable asinh stretch.
 
@@ -401,6 +402,14 @@ def render_stack_png(
     picture at every size the app renders at — the sliders' own preview, the
     2048 px lightbox behind it, and the full-res download. The preview-cap render
     that bakes the stored PNG is unchanged, bit for bit.
+
+    ``crop`` is fractional ``(x0, y0, x1, y1)`` canvas bounds, cut exactly as
+    :func:`render_preview_png_full_res` cuts them — after the stretch (so the
+    curve is the whole canvas's) and before the North-up turn (the bounds are
+    fractions of the canvas grid), through the editor's ``crop_bounds``. History's
+    "Adjust → Save" passes an unedited mosaic's border trim so the saved picture
+    keeps the rectangle its stored preview had. A display-space export ignores it;
+    ``None`` (the default) is the whole-canvas render.
     """
     import io
 
@@ -416,6 +425,15 @@ def render_stack_png(
         stats=_preview_grid_asinh_stats(
             fits_path, rgb, rendered_max_width=max_width))
     disp = np.clip(np.nan_to_num(stretched), 0.0, 1.0)
+    if crop is not None and not display_space:
+        from seestack.edit.ops.geometry import crop_bounds
+
+        x0, y0, x1, y1 = crop
+        box = crop_bounds(disp.shape[0], disp.shape[1],
+                          {"x0": x0, "y0": y0, "x1": x1, "y1": y1})
+        if box is not None:
+            cx0, cx1, cy0, cy1 = box
+            disp = disp[cy0:cy1, cx0:cx1]
     if north_up:
         disp = _apply_north_up(disp, fits_path)
     u8 = pack_unit(disp)

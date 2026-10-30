@@ -3348,9 +3348,26 @@ async def save_stack_preview(
 
     from seestack.render.thumbnail import applied_north_up_deg, render_stack_png
     from seestack.stack.output import fits_is_display_space
+    is_display = await run_in_threadpool(fits_is_display_space, run.fits_path)
+    # An unedited mosaic keeps the rectangle its stored preview was trimmed to
+    # (``pipeline.trim_unedited_stored_preview``): a new stretch is a new tone,
+    # not a reason to bring the colour-confetti fringe back onto the thumbnail,
+    # the share JPEG and the wallpaper. Auto's own rule, the owner's
+    # ``auto_crop_border`` switch, and the same rectangle the Full-res PNG cuts —
+    # so the two downloads stay one picture. A display-space export's framing is
+    # its own.
+    border_crop = None
+    if not is_display and deps.get_settings(request).auto_crop_border:
+        from seestack.previewcrop import make_crop
+
+        rect = await run_in_threadpool(pipeline.unedited_border_trim, run)
+        border_crop = make_crop(*rect) if rect is not None else None
+        if border_crop is not None and border_crop.is_full:
+            border_crop = None
     png = await run_in_threadpool(
         render_stack_png, run.fits_path,
         stretch=stretch, black=black, max_width=1024, north_up=north_up,
+        crop=border_crop.as_tuple() if border_crop is not None else None,
     )
     Path(run.preview_path).write_bytes(png)
     # The rotation the render actually applied — 0.0 when the toggle was off, when
@@ -3366,7 +3383,6 @@ async def save_stack_preview(
     # renders its sub half through the *same* asinh curve (keeping the two halves
     # honestly comparable). A display-space export ignores the sliders (rendered
     # verbatim), so leave its columns NULL — the reveal self-hides for those runs.
-    is_display = await run_in_threadpool(fits_is_display_space, run.fits_path)
     lib, proj = deps.open_target_project(request, safe)
     try:
         proj.set_stack_preview_stretch(
@@ -3376,11 +3392,13 @@ async def save_stack_preview(
         )
         proj.set_stack_preview_north_up(run_id, north_up_deg)
         # This render comes straight off the master FITS, so it covers the whole
-        # canvas — clear any border trim a previous "Process target" auto-edit
-        # baked into the old bytes, exactly as the North-up angle above is always
-        # written rather than left alone. A stale crop would have every surface
-        # that lines up with the preview correcting for a trim that is gone.
-        proj.set_stack_preview_crop(run_id, None)
+        # canvas or exactly the border trim cut above — always written, never
+        # left alone, exactly as the North-up angle above: a stale crop from a
+        # previous "Process target" auto-edit would have every surface that lines
+        # up with the preview correcting for a trim that is gone.
+        proj.set_stack_preview_crop(
+            run_id,
+            preview_crop_json(border_crop) if border_crop is not None else None)
         # ...and for the same reason, these bytes are no longer a recipe result.
         # Saving from Adjust replaces a "Process target" auto-edit's tone-mapped
         # preview with a plain stretch of the linear FITS (the recipe itself is
@@ -3399,7 +3417,10 @@ async def save_stack_preview(
         proj.close()
         lib.close()
     return {"ok": True, "stretch": stretch, "black": black, "north_up": north_up,
-            "north_up_deg": north_up_deg}
+            "north_up_deg": north_up_deg,
+            # Additive: True when the saved picture is the unedited mosaic's
+            # border-trimmed rectangle, so the panel can say so.
+            "border_trimmed": border_crop is not None}
 
 
 _BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}
