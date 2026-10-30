@@ -82,6 +82,31 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 (Builder 2026-10-30, the ⭐ 2026-10-28 entry's part (4)) — the "darker ring just inside" the ragged border is
+  made by the stacker's per-frame sky flatten: on a vignetted sub, `Background2D` leaves a dark rim along every
+  sub's own edge, and the canvas border is where only sub edges land.** *(Pillar: image quality / trust —
+  PRIORITY 4 with an editor face; size **L** (hot path); severity moderate — a visible dark frame inside the
+  trimmed picture, which Auto does not remove; nothing is lost on disk. Confidence: mechanism **measured** on
+  synthetic subs through the real functions; the size of the S30's own vignette is **unmeasured** — the gate.)*
+  **Measured, one 1080×1920 sub, sky 1000 ADU, σ 30, no stars, `subtract_background(BackgroundOptions())`:**
+  no vignette → residual ~0 everywhere; a 20 % corner fall-off (quadratic or cos⁴ — same numbers) → **−24 ADU in
+  the outer 8 px, −18 at 16–32 px, −12 at 32–64, −3.5 at 64–128, +5 inside, −51 in the corners** (10 % → half
+  that, 30 % → ×1.5). The 128-px mesh plus `filter_size=3` cannot follow the fall-off in the last half-box, and
+  `_zero_sky_per_channel` then lifts the interior. Stacked, the interior averages rims with centres while the
+  border (and, under field rotation, the corners) gets rims alone; after N subs the rim is many σ deep.
+  **On the dithered demo** (`load_sample(shape="dithered")`, `_render_star_field` multiplied by a vignette, real
+  `run_stack` → `build_auto_recipe_for_run` → `apply_recipe`): 30 % → the edited picture's median is **−0.054**
+  of display range within 3 px of coverage, −0.03 at 3–10 px (interior 0.237; no vignette: +0.04, i.e. no ring),
+  and **survives Auto's crop** (kept rectangle's bottom/right bands 0.202/0.217 vs centre 0.245). At 50 % every
+  sub footprint also prints a rectangular seam across the interior. `background.final_gradient` (box 256) is
+  too coarse to touch a ~64-px rim, so **Auto's flatten does not remove it**. **Tried and not enough:**
+  `box_size=64` halves the rim (−14.5 / corner −24.5), reflect-padding the channel by half a box before
+  `_fit_bg2d_ladder` cuts it a quarter (−18.3 / −36.1). **Candidate fix (its own run):** fit a multiplicative
+  radial term about the sensor centre on the masked sky and divide it out before `Background2D` (a synthetic
+  flat — physically right, since vignetting dims stars too), skipped when a master flat was applied. Every stack
+  runs this, so measure it on stars/nebula/gradient frames before shipping, and keep it off where the fit is
+  unsure. **Gate:** the S30's real fall-off — the observer can answer as a shape (median sky of the outer 5 % vs
+  the centre 20 % across a few hundred of his raws, no headers). Under ~3 % it is not the owner's ring.
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
@@ -2474,9 +2499,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   a "Preparing your full-size picture…" toast above 4 MP; see SHIPPED). **Still open in (3):** the *first* render
   itself (measured 5000×7000: STF stats ~55 %, PNG encode ~25 %; `compress_level=1` saves only ~15 % of the
   encode for +3 % size — not worth it; a faster stretch must stay pixel-identical to the stored preview's look,
-  so it is an engine change for its own run). (4) **The dark ring**:
-  check whether Auto's background flatten removes it on `--mosaic`. If not, file it as a measured Bugs entry
-  (likely unflattened Seestar vignetting averaged at the canvas edge). Size **M** for (1), **S** for (2) and
+  so it is an engine change for its own run; *re-profiled 2026-10-30, `autostretch` alone on 5000×7000×3: 10.7 s = `nanpercentile` 1.3 s + `_robust_median_sigma` 1.1 s/channel (~44 %) + the per-pixel rolloff/MTF/clip ~1.5 s/channel, much of it first-touch of fresh full-size temporaries (~41 %) — an exact in-place rewrite buys ~20–30 %, not a step change*). (4) **The dark ring**: *checked 2026-10-30* — Auto does
+  **not** remove it; filed, measured, as the first Bugs entry (the per-frame flatten's rim on a vignetted sub). Size **M** for (1), **S** for (2) and
   (3) each; ship as separate commits.
 
 - ~~**⭐ OWNER-APPROVED (2026-10-14, "Yes go") — the Settings page redesign.**~~ — **✅ ALL FIVE SLICES SHIPPED
