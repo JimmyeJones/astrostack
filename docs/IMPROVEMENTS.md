@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- ⭐ entry (1), pre-v0.504.2 stored previews: a no-Auto border-trim backfill (`pipeline.backfill_unedited_preview_trims`) — Builder, branch `claude/relaxed-davinci-ti73cu`, 2026-10-30.
+*No live claims.*
 
 ---
 
@@ -2465,9 +2465,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   (1) **Trim on every surface of an unedited picture.** *Full-res PNG + full-size archive ✅ v0.503.23*
   (`pipeline.unedited_border_trim`, `render_run_full_res_png(trim_border=)`; `--mosaic` 7.9 %, see SHIPPED).
   *Stored preview, share JPEG, wallpaper ✅ v0.504.2* for every **new** stack (`pipeline.trim_unedited_stored_preview`,
-  `preview_crop` recorded; the native share render replays it). *(The menu hint's size ✅ v0.504.1.)* **Still open in
-  (1):** pictures stacked *before* v0.504.2 keep a whole-canvas stored preview (their remedy today is "Finish my
-  unedited pictures"; a no-Auto backfill is S). *(History's "Adjust → Save" ✅ v0.504.3, `render_stack_png(crop=)`.)* Never touch the FITS; a saved recipe's own crop always wins. (2) **Auto-edit, both halves.** New stacks: his
+  `preview_crop` recorded; the native share render replays it). *(The menu hint's size ✅ v0.504.1.)* *Pictures stacked before v0.504.2 ✅ v0.504.5* (a boot-time
+  job, `pipeline.backfill_unedited_preview_trims`, stamped per target; see SHIPPED). **(1) is done.** *(History's "Adjust → Save" ✅ v0.504.3, `render_stack_png(crop=)`.)* Never touch the FITS; a saved recipe's own crop always wins. (2) **Auto-edit, both halves.** New stacks: his
   "Finish" switch (`auto_edit_on_autostack`) is his to flip — never flip his stored value. Existing pictures:
   *✅ v0.504.0* "Finish my unedited pictures" (`webapp.finishunedited`, `submit_finish_unedited_pictures`; Settings →
   Maintenance, inside the existing re-finish card; see SHIPPED). (3) **Speed** — *✅ v0.503.24* (`pipeline.cached_run_full_res_png`,
@@ -3595,6 +3594,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.504.5 **Pictures stacked before v0.504.2 get the stored-preview border trim too — a one-off job the app queues at boot, per target, no Auto and no re-render** (`pipeline.backfill_unedited_preview_trims`, `submit_unedited_preview_trim_backfill`, job kind `unedited_preview_trim`; the last of slice (1) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.504.4 **A non-finite number in ASTAP's `.ini` (`nan`/`inf`) reads as missing, so the centre is recovered from the `.wcs` instead of being stored as NULL (NaN) or breaking the target's stats refresh (inf)** (`astap._parse_astap_ini`; Scout sweep (3))
 - ✅ v0.504.3 **History's "Adjust → Save" on an unedited mosaic keeps Auto's border rectangle and records it, instead of bringing the ragged fringe back** (`render_stack_png(crop=)`, `save_stack_preview` `border_trimmed`; part of slice (1) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.504.2 **A fresh unedited mosaic's stored preview — and so its thumbnail, share JPEG and wallpaper — is cut to Auto's border rectangle, with `preview_crop` recorded, and the share/wallpaper render at full size replays that trim** (`pipeline.trim_unedited_stored_preview`, `_render_reproduces_the_crop`; part of slice (1) of the owner's ⭐ 2026-10-28 entry)

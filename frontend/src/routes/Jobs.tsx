@@ -62,6 +62,7 @@ const KIND_LABEL: Record<string, string> = {
   pictures_archive: "Preparing your full-size pictures",
   refinish_pictures: "Giving back pictures a restack flattened",
   finish_unedited_pictures: "Finishing your unedited pictures with Auto",
+  unedited_preview_trim: "Trimming the ragged border off your older pictures",
 };
 
 /** Human-readable name for an engine job kind (pure, tested). */

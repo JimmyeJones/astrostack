@@ -316,3 +316,139 @@ def test_a_finished_stack_trims_its_stored_preview(client, solved_library, monke
 def test_an_ordinary_single_field_stack_is_untouched(client, solved_library):
     run = _stack(client)
     assert run["preview_crop"] is None
+
+
+# ---------------------------------------------------------------------------
+# Pictures stacked before v0.504.2: the boot-time backfill
+
+
+def _backfill(data_root) -> dict:
+    from webapp.pipeline import backfill_unedited_preview_trims, scan_unedited_trim_backfill
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        return backfill_unedited_preview_trims(lib, scan_unedited_trim_backfill(lib))
+    finally:
+        lib.close()
+
+
+def _scan(data_root) -> list[str]:
+    from webapp.pipeline import scan_unedited_trim_backfill
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        return scan_unedited_trim_backfill(lib)
+    finally:
+        lib.close()
+
+
+def test_an_older_untrimmed_preview_is_backfilled_once(client, solved_library):
+    """A run whose stored preview predates the trim gets exactly the crop a fresh
+    stack would have, recorded; the target is then stamped and never rescanned."""
+    from seestack.previewcrop import PreviewCrop, parse_preview_crop
+
+    safe = _safe(client)
+    run_id, preview_path = _add_mosaic_run(solved_library, safe)
+    before = Path(preview_path).read_bytes()
+    assert _scan(solved_library) == [safe]
+
+    out = _backfill(solved_library)
+
+    assert out["trimmed_targets"] == [safe] and not out["failed"]
+    after = Path(preview_path).read_bytes()
+    assert _size(after) != _size(before)
+    assert _speckle(after) < 0.01 * _speckle(before)
+    crop = parse_preview_crop(_row(solved_library, safe, run_id).preview_crop_json)
+    assert isinstance(crop, PreviewCrop)
+    assert crop.as_tuple() == tuple(_rect(_row(solved_library, safe, run_id).fits_path))
+    assert _scan(solved_library) == []
+    assert _backfill(solved_library)["trimmed_targets"] == []
+    assert Path(preview_path).read_bytes() == after
+
+
+def test_the_backfill_leaves_single_fields_and_edited_previews_alone(client, solved_library):
+    safe = _safe(client)
+    _, single = _add_mosaic_run(solved_library, safe, is_mosaic=False)
+    _, edited = _add_mosaic_run(solved_library, safe,
+                                options={"preview_display_space": True})
+    before = {p: Path(p).read_bytes() for p in (single, edited)}
+    _backfill(solved_library)
+    for p, b in before.items():
+        assert Path(p).read_bytes() == b
+
+
+def test_a_displaced_older_row_does_not_cut_the_shared_preview_twice(client, solved_library):
+    """A pre-v0.81.8 pair names one preview file; it is the later run's picture,
+    so it is cut once and the crop is recorded on that run alone."""
+    from seestack.edit.ops.geometry import crop_bounds
+
+    safe = _safe(client)
+    old_id, preview_path = _add_mosaic_run(solved_library, safe)
+    old = _row(solved_library, safe, old_id)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            new_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-02T00:00:00Z",
+                output_basename=old.output_basename, fits_path=old.fits_path,
+                tiff_path=None, preview_path=old.preview_path, n_frames_used=100,
+                canvas_h=old.canvas_h, canvas_w=old.canvas_w, coverage_min=0,
+                coverage_max=100, options_json="{}", is_mosaic=True,
+            ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    pw, ph = _size(Path(preview_path).read_bytes())
+
+    _backfill(solved_library)
+
+    rect = _rect(old.fits_path)
+    cx0, cx1, cy0, cy1 = crop_bounds(ph, pw, dict(zip(("x0", "y0", "x1", "y1"),
+                                                      rect, strict=True)))
+    assert _size(Path(preview_path).read_bytes()) == (cx1 - cx0, cy1 - cy0)
+    assert _row(solved_library, safe, new_id).preview_crop_json
+    assert not _row(solved_library, safe, old_id).preview_crop_json
+
+
+def test_with_the_trim_switched_off_nothing_is_queued(client, solved_library):
+    from webapp import deps
+    from webapp.pipeline import submit_unedited_preview_trim_backfill
+
+    safe = _safe(client)
+    _, preview_path = _add_mosaic_run(solved_library, safe)
+    before = Path(preview_path).read_bytes()
+    assert client.put("/api/settings", json={"auto_crop_border": False}).status_code == 200
+    app = client.app
+    settings = deps.get_settings(SimpleNamespace(app=app))
+    assert submit_unedited_preview_trim_backfill(settings, app.state.job_manager) is None
+    assert Path(preview_path).read_bytes() == before
+    assert _scan(solved_library) == [safe]          # still owed, if he turns it on
+
+
+def test_booting_the_app_trims_an_older_preview(solved_library, monkeypatch):
+    """End to end: an install upgraded in place, with a picture stacked before
+    v0.504.2 on disk, comes up and queues the trim with nobody pressing anything."""
+    from fastapi.testclient import TestClient
+
+    from tests.webapp_boot import disable_watcher_before_boot
+    from webapp.main import create_app
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = lib.list_targets()[0].safe_name
+    finally:
+        lib.close()
+    run_id, preview_path = _add_mosaic_run(solved_library, safe)
+    before = _size(Path(preview_path).read_bytes())
+    monkeypatch.setenv("ASTROSTACK_DATA", str(solved_library))
+    monkeypatch.setenv("ASTROSTACK_LOG_LEVEL", "WARNING")
+    disable_watcher_before_boot(solved_library)
+    with TestClient(create_app()) as c:
+        jobs = [j for j in c.get("/api/jobs").json()
+                if j["kind"] == "unedited_preview_trim"]
+        assert len(jobs) == 1
+        assert _wait_job(c, jobs[0]["id"])["state"] == "done"
+    assert _size(Path(preview_path).read_bytes()) != before
+    assert _row(solved_library, safe, run_id).preview_crop_json

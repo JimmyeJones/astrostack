@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## 2026-10-30 (Builder, branch `claude/relaxed-davinci-ti73cu`) — older unedited mosaics get the stored-preview border trim
+
+- **v0.504.5** — 🐞 TRUST / IMAGE QUALITY (the last of slice (1) of the owner's ⭐ 2026-10-28 entry). v0.504.2 trims a
+  fresh unedited mosaic's stored preview, but every picture stacked before it kept its whole-canvas preview — the
+  colour-confetti fringe on the thumbnail, share JPEG and wallpaper — beside a Full-res PNG that v0.503.23 already
+  trims: two pictures under one card. **New:** at boot, `webapp.main.lifespan` calls
+  `pipeline.submit_unedited_preview_trim_backfill`, which (with `auto_crop_border` on, and only when
+  `scan_unedited_trim_backfill` finds a target with a candidate run — read off the rows, no coverage map) queues one
+  `unedited_preview_trim` job ("Trimming the ragged border off your older pictures"). The job runs the existing
+  `trim_unedited_stored_preview` on each candidate — the same crop of the stored bytes, the same recorded
+  `preview_crop_json`; no Auto, no re-render, no recipe, never the FITS — then stamps the project meta
+  `unedited_preview_trim_backfill_v1` so the target is never read again. A job rather than a thread, so the single
+  worker serialises it with any stack. Skips single fields, edited (display-space), cropped or turned previews, and a
+  pre-v0.81.8 row whose preview file a later run owns — **without that skip the shared file was cut twice**
+  (measured 965×719 instead of 994×743; the test fails with the skip removed). With the switch off nothing is queued
+  and the target stays owed. Tests: 5 new in `tests/webapp/test_unedited_preview_trim.py` (incl. an end-to-end boot of
+  an upgraded library); `Jobs.test.tsx` pins the label. No schema, config, default or API-shape change (one additive
+  job kind, one project meta key).
+
 ## 2026-10-30 (Scout, branch `claude/exciting-wozniak-1xi45k`) — a non-finite number in ASTAP's `.ini` reads as missing
 
 - **v0.504.4** — 🐞 ROBUSTNESS (Scout QA sweep (3), Scout-fixed). `_parse_astap_ini` turned every `KEY=value` line

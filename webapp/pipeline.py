@@ -2924,6 +2924,145 @@ def trim_unedited_stored_preview(proj, run_id: int, *, enabled: bool) -> bool:  
         return False
 
 
+#: Project meta key stamped once a target's older stored previews have been
+#: offered :func:`trim_unedited_stored_preview` — so the next boot does not read
+#: the same coverage maps again for runs whose trim declined.
+UNEDITED_TRIM_BACKFILL_META = "unedited_preview_trim_backfill_v1"
+
+
+def _unedited_trim_backfill_candidates(proj) -> list[int]:  # noqa: ANN001
+    """Run ids whose stored preview *could* still need the border trim — read off
+    the rows alone, never a coverage map, so the boot-time scan stays cheap.
+
+    A run already cropped or turned, a display-space (edited) preview, a run the
+    stacker recorded as a single field, and a pre-v0.81.8 row whose
+    ``preview_path`` a later run also names (that file is the later run's
+    picture; trimming it through the older row would record the crop on the
+    wrong row and let the owner's own pass cut it a second time) are skipped.
+    :func:`trim_unedited_stored_preview` re-checks everything that remains."""
+    from webapp.displacedpicture import preview_owner_by_run_id
+    from webapp.routers.stack import _preview_is_display_space
+
+    runs = list(proj.iter_stack_runs())
+    displaced = preview_owner_by_run_id(runs)
+    out: list[int] = []
+    for r in runs:
+        if r.id is None or r.id in displaced or r.is_mosaic is False:
+            continue
+        if not r.preview_path or not r.fits_path or r.preview_crop_json:
+            continue
+        if baked_north_up_deg(r) or _preview_is_display_space(r.options_json):
+            continue
+        out.append(r.id)
+    return out
+
+
+def scan_unedited_trim_backfill(lib: Library) -> list[str]:
+    """Targets whose pre-v0.504.2 stored previews have not yet been offered the
+    border trim and have at least one candidate run. Read-only; fail-soft per
+    target."""
+    out: list[str] = []
+    for entry in lib.list_targets():
+        try:
+            proj = lib.open_target(entry.safe_name)
+        except Exception:  # noqa: BLE001
+            log.warning("preview-trim scan: cannot open %s", entry.safe_name,
+                        exc_info=True)
+            continue
+        try:
+            if (not proj.get_meta(UNEDITED_TRIM_BACKFILL_META)
+                    and _unedited_trim_backfill_candidates(proj)):
+                out.append(entry.safe_name)
+        except Exception:  # noqa: BLE001
+            log.warning("preview-trim scan: %s failed", entry.safe_name, exc_info=True)
+        finally:
+            proj.close()
+    return out
+
+
+def backfill_unedited_preview_trims(lib: Library, safes: list[str], *,
+                                    should_stop=None, on_progress=None  # noqa: ANN001
+                                    ) -> dict[str, Any]:
+    """Give pictures stacked **before** v0.504.2 the border trim a fresh stack's
+    stored preview gets (the owner's ⭐ 2026-10-28 entry, the last of slice (1)).
+
+    v0.504.2 trims an unedited mosaic's stored preview the moment it is made, so
+    the thumbnail, share JPEG and wallpaper match the trimmed Full-res PNG — but
+    every picture he already had kept its whole-canvas preview, colour-confetti
+    fringe and all, while its Full-res PNG came out trimmed: two different
+    pictures under one card. This runs :func:`trim_unedited_stored_preview` — the
+    same crop, the same recorded ``preview_crop_json`` — on each candidate run of
+    each named target, then stamps :data:`UNEDITED_TRIM_BACKFILL_META` so the
+    target is never read again. No Auto, no re-render, no recipe touched, never
+    the FITS. Idempotent: an already-trimmed run declines. One target failing
+    never stops the rest; a target is stamped only once it was fully offered."""
+    trimmed: list[str] = []
+    failed: list[str] = []
+    cancelled = False
+    for i, safe in enumerate(safes):
+        if should_stop is not None and should_stop():
+            cancelled = True
+            break
+        try:
+            proj = lib.open_target(safe)
+        except Exception:  # noqa: BLE001
+            log.warning("preview-trim backfill: cannot open %s", safe, exc_info=True)
+            failed.append(safe)
+            continue
+        try:
+            n = 0
+            for run_id in _unedited_trim_backfill_candidates(proj):
+                if trim_unedited_stored_preview(proj, run_id, enabled=True):
+                    n += 1
+            proj.set_meta(UNEDITED_TRIM_BACKFILL_META, "1")
+            if n:
+                trimmed.append(safe)
+        except Exception:  # noqa: BLE001
+            log.warning("preview-trim backfill: %s failed", safe, exc_info=True)
+            failed.append(safe)
+        finally:
+            proj.close()
+        if on_progress is not None:
+            on_progress(i + 1, len(safes))
+    return {"trimmed_targets": trimmed, "failed": failed, "cancelled": cancelled}
+
+
+def submit_unedited_preview_trim_backfill(settings: Settings, jm: JobManager
+                                          ) -> Job | None:
+    """Queue :func:`backfill_unedited_preview_trims` when anything needs it — the
+    boot-time call from :func:`webapp.main.lifespan`. ``None`` (nothing queued)
+    with the owner's ``auto_crop_border`` off (he keeps his full frame, exactly
+    as a fresh stack would), when no target has a candidate, or when one is
+    already queued. A job, not a thread, so it is serialised with any stack the
+    single worker runs and can never race a fresh run's own trim."""
+    if not settings.auto_crop_border or jm.active_of_kind("unedited_preview_trim"):
+        return None
+    lib = Library.open_or_create(settings.resolved_library_root)
+    try:
+        safes = scan_unedited_trim_backfill(lib)
+    finally:
+        lib.close()
+    if not safes:
+        return None
+
+    def body(job: Job) -> dict[str, Any]:
+        lib = Library.open_or_create(settings.resolved_library_root)
+        try:
+            job.set_progress("trim", 0, len(safes), f"0/{len(safes)} targets")
+            jm.maybe_flush(job)
+
+            def progress(done: int, total: int) -> None:
+                job.set_progress("trim", done, total, f"{done}/{total} targets")
+                jm.maybe_flush(job)
+
+            return backfill_unedited_preview_trims(
+                lib, safes, should_stop=job.cancel_requested, on_progress=progress)
+        finally:
+            lib.close()
+
+    return jm.submit("unedited_preview_trim", body)
+
+
 def _capped_size(w: int, h: int, max_long_edge: int) -> tuple[int, int]:
     """The ``(w, h)`` the Full-res renderers' final ``max_long_edge`` resize
     leaves — the same arithmetic, so the prediction is the file's own."""
