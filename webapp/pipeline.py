@@ -2794,9 +2794,10 @@ def render_run_full_res_png(
     away (:func:`unedited_border_trim`), the same rectangle the editor's Auto
     would trim: an unedited picture used to come out with the whole low-coverage
     fringe — the colour-confetti band the owner took for his sensor — because
-    only Auto ever asked for the trim. A saved recipe's framing always wins, and
-    the default ``False`` keeps the share/wallpaper source (which must match the
-    un-cropped stored preview it stands in for) exactly as it was.
+    only Auto ever asked for the trim. A saved recipe's framing always wins. The
+    share/wallpaper source passes it only when the stored preview it stands in
+    for was itself trimmed (:func:`trim_unedited_stored_preview`), so the two
+    stay one picture; the default ``False`` is the whole canvas.
     """
     recipe_dict = None
     if recipe_json:
@@ -2851,6 +2852,76 @@ def unedited_border_trim(run) -> tuple[float, float, float, float] | None:  # no
         log.warning("unedited border trim failed for run %s", getattr(run, "id", "?"),
                     exc_info=True)
         return None
+
+
+def trim_unedited_stored_preview(proj, run_id: int, *, enabled: bool) -> bool:  # noqa: ANN001
+    """Cut a fresh unedited mosaic's **stored preview** to the rectangle Auto would
+    trim, and record that crop on the run. True when it did.
+
+    The rest of slice (1) of the owner's ⭐ 2026-10-28 entry. v0.503.23 trimmed
+    the Full-res PNG and the archive, but the thumbnail, the big view, the share
+    JPEG and the wallpaper all serve the stored preview (or a native render that
+    must match it), so the colour-confetti fringe was still on every one of them.
+    The bytes are *cropped*, not re-rendered: the tone is the STF measured on the
+    whole canvas, which is what the trimmed Full-res PNG keeps too, so the two
+    stay one picture. The rectangle is :func:`unedited_border_trim`'s — Auto's own
+    rule, mosaic only — and goes through ``crop_bounds``, the editor's arithmetic.
+
+    The crop is recorded in ``stack_runs.preview_crop_json`` exactly as the
+    one-click auto-edit records its trim, so every surface that lines up with the
+    stored preview (Sky map, pins, scale bar, compare, wallpaper target) composes
+    it through code that already handles a trimmed picture.
+
+    Declines — the bytes untouched — with ``enabled`` (``auto_crop_border``) off,
+    on a processed (display-space) preview, on one already cropped or turned, or
+    on one that is not a plain downscale of its canvas. So it is safe to call
+    twice. Best-effort: any failure leaves the preview whole.
+    """
+    import io
+
+    from PIL import Image
+
+    from seestack.edit.ops.geometry import crop_bounds
+    from seestack.previewcrop import make_crop, preview_crop_json
+    from webapp.preview_orient import recovered_preview_crop
+    from webapp.routers.stack import _preview_is_display_space
+
+    if not enabled or run_id is None:
+        return False
+    try:
+        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        if run is None or not run.preview_path or not run.fits_path:
+            return False
+        preview = Path(run.preview_path)
+        if not preview.exists() or _preview_is_display_space(run.options_json):
+            return False
+        if run.preview_crop_json or baked_north_up_deg(run):
+            return False
+        if recovered_preview_crop(run) is not None:
+            return False
+        rect = unedited_border_trim(run)
+        crop = make_crop(*rect) if rect is not None else None
+        if crop is None or crop.is_full:
+            return False
+        with Image.open(preview) as im:
+            img = im.convert("RGB")
+        w, h = img.size
+        box = crop_bounds(h, w, {"x0": crop.x0, "y0": crop.y0,
+                                 "x1": crop.x1, "y1": crop.y1})
+        if box is None:
+            return False
+        cx0, cx1, cy0, cy1 = box
+        buf = io.BytesIO()
+        img.crop((cx0, cy0, cx1, cy1)).save(buf, format="PNG")
+        tmp = preview.with_name(f"{preview.name}.trim.tmp")
+        tmp.write_bytes(buf.getvalue())
+        tmp.replace(preview)
+        proj.set_stack_preview_crop(run_id, preview_crop_json(crop))
+        return True
+    except Exception:  # noqa: BLE001 — a trim is never worth failing a stack over
+        log.warning("stored-preview border trim failed for run %s", run_id,
+                    exc_info=True)
+        return False
 
 
 def _capped_size(w: int, h: int, max_long_edge: int) -> tuple[int, int]:
@@ -5179,6 +5250,12 @@ def _stack_target(
                     proj.set_meta(
                         f"{CALIBRATION_WARNINGS_META_PREFIX}{result.run_id}",
                         json.dumps(_cal_warnings))
+        # An unedited mosaic's stored preview loses its ragged border the moment
+        # it is made, so the thumbnail, the share JPEG and the wallpaper are the
+        # same trimmed picture as the Full-res PNG. An auto-edit that follows
+        # re-renders the preview from the FITS and records its own crop.
+        trim_unedited_stored_preview(proj, result.run_id,
+                                     enabled=settings.auto_crop_border)
         # How many single-frame field-fulls of sky this run's canvas covers, so
         # the Jobs summary's thin-stack heads-up is a claim about a *pixel*
         # rather than about the target's frame count (see

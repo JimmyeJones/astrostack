@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## 2026-10-30 (Builder, branch `claude/relaxed-davinci-6iepcu`) — an unedited mosaic's stored preview, share JPEG and wallpaper lose the ragged border
+
+- **v0.504.2** — 🐞 TRUST / IMAGE QUALITY (part of slice (1) of the owner's ⭐ 2026-10-28 entry). v0.503.23 trimmed an
+  unedited mosaic's Full-res PNG and archive picture, but the thumbnail, the big view, the share JPEG and the wallpaper
+  all serve the **stored preview** (or a native render that must match it), so the colour-confetti fringe was still on
+  every one of them. **New:** `pipeline.trim_unedited_stored_preview`, called by `_stack_target` on every finished
+  stack, crops the stored preview's own bytes to `unedited_border_trim(run)` (Auto's rectangle, mosaic only, through
+  `crop_bounds`) and records it in `stack_runs.preview_crop_json` — the column every preview-aligned surface (Sky map,
+  pins, scale bar, compare, wallpaper target) already composes for an Auto-trimmed picture. A crop, not a re-render, so
+  the tone is unchanged and the picture stays the trimmed Full-res PNG's. Declines with `auto_crop_border` off, on a
+  single field, a display-space preview, a preview already cropped/turned or not a plain downscale — so it is idempotent;
+  an auto-edit that follows re-renders and records its own crop. `routers.stack._render_reproduces_the_crop` now says yes
+  for a linear run whose recorded crop is the border rule's rectangle today, and `_build_or_get_share_source` renders it
+  with `trim_border` (signature keyed on it), so the share/wallpaper stay full-size instead of re-encoding the 1024 px
+  preview. Measured on the `--mosaic` dogfood run reset to unedited: stored preview **907×615 with 26,801 no-coverage
+  px → 875×587 with 0**, the same rectangle Auto records. Tests: new `tests/webapp/test_unedited_preview_trim.py` (10);
+  the share-gate fail-before served the 994×743 trimmed preview where the Full-res PNG is 2331×1741. Existing runs are
+  untouched (no backfill); no schema, config, default or API-shape change.
+
 ## 2026-10-29 (Builder, branch `claude/relaxed-davinci-qovgg5`) — the Full-res PNG hint prints the file's own size
 
 - **v0.504.1** — 🐞 FRIENDLINESS (part of slice (1) of the owner's ⭐ 2026-10-28 entry). Since v0.503.23 an unedited
