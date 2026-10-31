@@ -1116,6 +1116,48 @@ def test_settings_put_rejects_a_bad_default_stack_option(client):
     assert stored["sigma_kappa"] == 2.5 and stored["mosaic_canvas"] == "reference"
 
 
+def test_settings_save_is_not_blocked_by_a_bad_value_already_stored(client):
+    # Regression (Scout 2026-10-31, sweep (4)): the Settings page PUTs its whole
+    # form, so the stored default_stack_options rides along on every save. The
+    # loader keeps that dict opaque, so an out-of-range value already in
+    # config.json (hand-edited, or written before this path validated) made
+    # *every* Settings save 422 — even one that only changed the site latitude.
+    store = client.app.state.settings_store
+    store._settings = store.get().model_copy(
+        update={"default_stack_options": {"sigma_kappa": 50.0,
+                                          "mosaic_canvas": "reference"}})
+    store.save()
+    form = client.get("/api/settings").json()
+    form["site_lat"] = 10.0
+    r = client.put("/api/settings", json=form)
+    assert r.status_code == 200, r.text
+    got = client.get("/api/settings").json()
+    assert got["site_lat"] == 10.0
+    # The stored value is kept exactly as it was — nothing of his is rewritten.
+    assert got["default_stack_options"]["sigma_kappa"] == 50.0
+    # A value the save *changes* is still judged: a new bad one is refused …
+    form = dict(got)
+    form["default_stack_options"] = {**got["default_stack_options"],
+                                     "mosaic_canvas": "garbage"}
+    assert client.put("/api/settings", json=form).status_code == 422
+    # … and so is changing the stored bad value to another bad one.
+    form["default_stack_options"] = {**got["default_stack_options"],
+                                     "sigma_kappa": 60.0}
+    assert client.put("/api/settings", json=form).status_code == 422
+    # Fixing it is an ordinary save.
+    form["default_stack_options"] = {**got["default_stack_options"],
+                                     "sigma_kappa": 2.5}
+    assert client.put("/api/settings", json=form).status_code == 200
+    # The import path shares the rule: restoring the same stored dict passes.
+    store._settings = store.get().model_copy(
+        update={"default_stack_options": {"sigma_kappa": 50.0}})
+    store.save()
+    r = client.post("/api/settings/import",
+                    json={"default_stack_options": {"sigma_kappa": 50.0},
+                          "site_lat": 11.0})
+    assert r.status_code == 200, r.text
+
+
 def test_settings_import_rejects_a_bad_default_stack_option(client):
     # The import path shares _sanitize_patch, so a backup carrying a poisoned
     # default_stack_options is rejected with a 422 rather than restored.
