@@ -1,5 +1,17 @@
 # Process notes & QA sweep records
 
+## 2026-10-31 (Builder, branch `claude/zen-fermat-5mmpo5`) — nothing ungated to build; dogfood `--mosaic --editor` CLEAN.
+
+- **Suite:** 8515 passed / 7 skipped on `c44da3db` (xdist `-n 4`, BLAS capped, 20m38s). No open PRs at start.
+- **Why no task:** every Bugs entry carries an owner/observer gate (dark-ring vignette, un-located-panel hint shape,
+  #878 twin overcount, re-frame spread, clean-but-ranked count) or a measured stand-down; the Features section's
+  open entries are the two its own text deprioritises (zip-unpack job, edited-cover). The one ungated traced item
+  looked at, `MergeResult.n_skipped_missing_file`'s mislabel, is read only by the deprecated desktop GUI — left.
+- **Dogfood `--mosaic --editor`:** CLEAN — mosaic trim 7.9 %; panel map, grain-uneven note and readiness card agree
+  (top-right panel 30 s vs 1 min, 3 vs 6 subs); all 21 ops re-render, undo/redo, Auto's summary and the taste chips
+  (2 marked, honest wording) read cleanly; nothing overflowing, no console errors; heights on the standing baseline
+  (`[phone] /life-list [Still to shoot]` 14,513 px). Known non-finding only: the Dashboard's ASTAP note.
+
 ## 2026-10-30 (Scout, branch `claude/exciting-wozniak-1xi45k`) — QA rotation sweep (3), new angle — what a *successful* ASTAP writes into its `.ini`: non-finite numbers. Side effects CLEAN; one bug, Scout-fixed (v0.504.4). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8399 passed / 7 skipped on `a90ee6d0` (xdist `-n 4`, BLAS capped, 19m04s). **Inbox:** the same four
