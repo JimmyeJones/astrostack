@@ -8,6 +8,7 @@ import { api } from "../../api/client";
 import { NO_SHRINK } from "../../badgeFit";
 import {
   closingRowFor, closingWeekNote, framingBadgeNights, nightInProgressDate, otherTargetNights,
+  returningWeekNote,
   targetNightPhrase, weekDarkPhrase, weekEmptyReason, weekHeadline, weekMoonNote,
   weekMoonParts,
   weekNightLabel,
@@ -58,6 +59,7 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
   const closing = closingQ.data ?? null;
   const headline = weekHeadline(plan, now);
   const closingNote = closingWeekNote(plan, closing, now);
+  const returningNote = returningWeekNote(plan, now);
   const empty = weekEmptyReason(plan);
   const placed = plan.nights.filter((n) => n.best !== null);
   const others = otherTargetNights(plan, undefined, closing);
@@ -85,7 +87,7 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
       </Group>
 
       {headline ? (
-        <Text size="sm" fw={600} mb={closingNote ? 4 : "sm"}>{headline}</Text>
+        <Text size="sm" fw={600} mb={closingNote || returningNote ? 4 : "sm"}>{headline}</Text>
       ) : (
         <Text size="sm" c="dimmed">{empty}</Text>
       )}
@@ -94,8 +96,19 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
           is a correction to it, not an extra fact — and self-hiding, so on the
           ordinary week where nothing is leaving this card is unchanged. */}
       {closingNote ? (
-        <Text size="xs" c="orange.7" mb="sm" data-testid="plan-week-closing">
+        <Text size="xs" c="orange.7" mb={returningNote ? 4 : "sm"}
+          data-testid="plan-week-closing">
           {closingNote}
+        </Text>
+      ) : null}
+
+      {/* "It's back" — the other end of a season: a target of his returning to
+          the dark hours after two months away. One self-hiding line in this
+          card rather than a card of its own (the UI rule), silent on the
+          ordinary week. */}
+      {returningNote ? (
+        <Text size="xs" c="teal.7" mb="sm" data-testid="plan-week-returning">
+          {returningNote}
         </Text>
       ) : null}
 

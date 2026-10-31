@@ -1727,6 +1727,33 @@ class TargetBestNight:
 
 
 @dataclass
+class ReturningTarget:
+    """One of your own targets that is **back** in your dark hours this week.
+
+    "It's back": a target that spent the last :data:`RETURN_LOOKBACK_NIGHTS`
+    nights out of reach (behind the Sun, or set before dark) and clears the
+    altitude floor again on a night of the week ahead — the moment a beginner
+    with a seasonal library forgets he has hours waiting on it. Read from the
+    ephemeris, never from capture dates: a target he simply skipped is not
+    "back" (see :func:`_returning_targets`).
+    """
+
+    safe: str
+    name: str
+    #: Local evening date (``"2026-11-05"``) of the first night of the week it
+    #: is usable on — one of :attr:`WeekPlan.nights`' own labels.
+    date: str
+    #: Usable dark minutes above the floor on that night.
+    minutes_above_min_alt: float
+    #: What he already has on it, plus the per-part scale pair the closing card
+    #: reads it by (:attr:`ClosingTarget.field_fulls` / ``depth_fulls``) — so a
+    #: mosaic's total is never quoted as though one panel held it.
+    total_exposure_s: float
+    field_fulls: float | None = None
+    depth_fulls: float | None = None
+
+
+@dataclass
 class WeekPlan:
     """The output of :func:`plan_week` — the whole library, over the nights ahead."""
 
@@ -1745,6 +1772,89 @@ class WeekPlan:
     #: say honestly that it looked at some but not all of a big library.
     n_targets_considered: int = 0
     n_targets_with_position: int = 0
+    #: Targets **back** in the sky this week after two months away
+    #: (:class:`ReturningTarget`), soonest night first. Empty on the ordinary
+    #: week — and on an older backend, which never sent the key.
+    returning: list[ReturningTarget] = field(default_factory=list)
+
+
+#: How many nights a target must have spent out of reach before its first
+#: usable night this week reads as a *return*. Two months: long enough that a
+#: Moon-week gap or a week of low placement never qualifies, short enough that
+#: the ordinary seasonal absence (a target behind the Sun, typically three to
+#: six months) always does.
+RETURN_LOOKBACK_NIGHTS = 60
+
+#: Days between the look-back samples. A target's placement moves about four
+#: minutes a night, so a week cannot step over a usable stretch except at the
+#: very edge of a season — where the motion is one-way and the next sample sees
+#: it — the same argument as :data:`SEASON_STEP_DAYS`.
+RETURN_STEP_DAYS = 7
+
+
+def _returning_targets(
+    observer: Observer,
+    first_usable: list[tuple[LibraryTarget, str, float]],
+    *,
+    first_evening: str,
+    min_altitude_deg: float,
+    horizon: HorizonProfile | None,
+    min_usable_minutes: float,
+) -> list[ReturningTarget]:
+    """Which of ``first_usable`` (target, first usable night, its minutes) are
+    *back* — not usable on any night sampled across the previous
+    :data:`RETURN_LOOKBACK_NIGHTS`.
+
+    Samples the evening before ``first_evening`` and then one a week further
+    back, each anchored at local solar noon the way :func:`season_closing`
+    anchors its samples (a whole night, never one clipped to "now"). Nearest
+    first, dropping a candidate the moment a sample finds it usable, and
+    stopping as soon as none is left — so on the ordinary week, when every
+    target up this week was up last night too, this costs one dark-window
+    search rather than ten.
+
+    **Silent rather than wrong** when a sampled night has no darkness at all:
+    at high latitude the summer takes the nights away, not the targets, and the
+    first dark week of autumn would otherwise report the whole library as
+    "back". Deterministic, offline and read-only.
+    """
+    candidates = [(t, d, m) for t, d, m in first_usable
+                  if (t.total_exposure_s or 0.0) > 0.0]
+    if not candidates:
+        return []
+    base = datetime.fromisoformat(first_evening).date()
+    offsets = list(range(1, RETURN_LOOKBACK_NIGHTS + RETURN_STEP_DAYS, RETURN_STEP_DAYS))
+    # The furthest sample must reach the look-back's far end, or "two months
+    # away" would be a claim about fewer nights than it names.
+    while offsets[-1] < RETURN_LOOKBACK_NIGHTS:
+        offsets.append(offsets[-1] + RETURN_STEP_DAYS)
+    for off in offsets:
+        sampled = base - timedelta(days=off)
+        anchor = datetime(sampled.year, sampled.month, sampled.day, 12, 0, 0,
+                          tzinfo=timezone.utc) - timedelta(hours=observer.lon_deg / 15.0)
+        window = _find_dark_window(observer, anchor)
+        if window is None:
+            return []                   # the nights were away, not the targets
+        illum = moon_illumination(window.start + (window.end - window.start) / 2)
+        obs = _observability_batch(
+            [float(t.ra_deg) for t, _, _ in candidates],
+            [float(t.dec_deg) for t, _, _ in candidates],
+            observer, window, min_altitude_deg, illum, horizon=horizon)
+        candidates = [c for c, o in zip(candidates, obs, strict=True)
+                      if o.minutes_above_min_alt < min_usable_minutes]
+        if not candidates:
+            return []
+    out = [
+        ReturningTarget(
+            safe=t.safe, name=t.name, date=d,
+            minutes_above_min_alt=round(float(m), 1),
+            total_exposure_s=float(t.total_exposure_s or 0.0),
+            field_fulls=t.field_fulls, depth_fulls=t.depth_fulls,
+        )
+        for t, d, m in candidates
+    ]
+    out.sort(key=lambda r: (r.date, -r.total_exposure_s, r.safe))
+    return out
 
 
 def _same_sky_pick(
@@ -1846,8 +1956,14 @@ def plan_week(
     decs = [float(t.dec_deg) for t in considered]
     # safe → its best showing so far, as (score, minutes, date, name).
     best_by_target: dict[str, TargetBestNight] = {}
+    # safe → (target, its first usable night, minutes that night), in night
+    # order — what "It's back" (:func:`_returning_targets`) is read from.
+    first_usable: dict[str, tuple[LibraryTarget, str, float]] = {}
+    first_evening: str | None = None
 
     for label, window in upcoming_dark_windows(observer, start_utc, nights):
+        if first_evening is None:
+            first_evening = label
         illum = moon_illumination(window.start + (window.end - window.start) / 2)
         obs = _observability_batch(ras, decs, observer, window, min_altitude_deg,
                                    illum, horizon=horizon)
@@ -1858,6 +1974,7 @@ def plan_week(
         usable.sort(key=lambda p: (-p[1].score, -p[1].minutes_above_min_alt, p[0].safe))
 
         for t, o in usable:
+            first_usable.setdefault(t.safe, (t, label, o.minutes_above_min_alt))
             prev = best_by_target.get(t.safe)
             if prev is None or (o.score, o.minutes_above_min_alt) > (
                     prev.score, prev.minutes_above_min_alt):
@@ -1905,6 +2022,13 @@ def plan_week(
     plan.targets = sorted(
         best_by_target.values(),
         key=lambda b: (b.date, -b.score, -b.minutes_above_min_alt, b.safe))
+    if first_evening is not None and first_usable:
+        plan.returning = _returning_targets(
+            observer, list(first_usable.values()),
+            first_evening=first_evening,
+            min_altitude_deg=min_altitude_deg, horizon=horizon,
+            min_usable_minutes=min_usable_minutes,
+        )
     return plan
 
 

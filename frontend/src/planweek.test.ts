@@ -6,7 +6,7 @@ import type {
 import {
   bestNightOfWeek, closingRowFor, closingWeekNote, framingBadgeNights,
   nightInProgressDate,
-  otherTargetNights, targetNightPhrase, weekDarkPhrase, weekEmptyReason,
+  otherTargetNights, returningWeekNote, targetNightPhrase, weekDarkPhrase, weekEmptyReason,
   weekHeadline, weekMoonNote, weekMoonParts, weekNightLabel, weekNightLabelInline,
 } from "./planweek";
 
@@ -511,5 +511,43 @@ describe("framingBadgeNights", () => {
     ]);
     expect([...got]).toEqual(["2026-09-03"]);
     expect(framingBadgeNights([])).toEqual(new Set());
+  });
+});
+
+describe("returningWeekNote — \"It's back\"", () => {
+  const nights = ["2026-09-02", "2026-09-03", "2026-09-04"].map((date) => night({ date }));
+  const row = {
+    safe: "M_42", name: "M 42", date: "2026-09-04", minutes_above_min_alt: 70,
+    total_exposure_s: 6.1 * 3600,
+  };
+
+  it("is silent on the ordinary week and on an older backend", () => {
+    expect(returningWeekNote(plan({ nights }), NOW)).toBeNull();
+    expect(returningWeekNote(plan({ nights, returning: [] }), NOW)).toBeNull();
+  });
+
+  it("names the returning target, its night and what he already has on it", () => {
+    expect(returningWeekNote(plan({ nights, returning: [row] }), NOW)).toBe(
+      "Back in your sky from Friday: M 42 — it hasn't been up in your dark hours"
+      + " for over two months, and you have 6.1 h on it.");
+    expect(returningWeekNote(plan({ nights, returning: [{ ...row, date: "2026-09-02" }] }), NOW))
+      .toMatch(/^Back in your sky tonight: M 42/);
+  });
+
+  it("reads a mosaic per part, in the closing card's own words", () => {
+    const line = returningWeekNote(plan({
+      nights, returning: [{ ...row, total_exposure_s: 8 * 3600, field_fulls: 4, depth_fulls: 4 }],
+    }), NOW)!;
+    expect(line).toContain("you have about 2.0 h on a typical part of it (8.0 h in total");
+    expect(line).not.toContain("you have 8.0 h on it");
+  });
+
+  it("stays one line however many come back at once", () => {
+    const line = returningWeekNote(plan({
+      nights,
+      returning: [row, { ...row, safe: "M_78", name: "M 78" }, { ...row, safe: "IC_434", name: "IC 434" }],
+    }), NOW)!;
+    expect(line).toMatch(/^Back in your sky from Friday: M 42 — /);
+    expect(line).toMatch(/Also back this week: M 78, IC 434\.$/);
   });
 });
