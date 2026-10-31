@@ -1,5 +1,274 @@
 # Shipped — the record
 
+## 2026-10-31 (Scout, branch `claude/exciting-wozniak-rg2y6y`) — a stored bad stacking default no longer blocks every Settings save; Features section curated
+
+- **v0.504.7** — 🐛 FIX (Scout sweep (4), new angle: does the Settings page's GET → PUT of its own whole form
+  round-trip?). Every `Settings` field at each of its 49 bounds and every stack-option descriptor at min/max round-
+  tripped cleanly. The one break: the store keeps `default_stack_options` as an opaque dict the loader never
+  validates, while `_sanitize_patch` validated the **whole** dict on every PUT — and the page sends the whole form.
+  So one out-of-range value already in `config.json` (hand-edited, or written before v0.131.4 validated this path)
+  made **every** Settings save 422 with "invalid default stack option: Sigma κ: 50.0 is above the maximum of 5.0",
+  even a save that only changed the site latitude — no way to save anything. Now only values that differ from the
+  stored ones (after the same strip/retired-value normalisation) are validated; a value carried back unchanged
+  passes through as it was, so nothing of his is rewritten, and any new or changed bad value is still a 422. The
+  import path shares the rule. Exposure is latent (validation has guarded this path since 2026-07-16; no descriptor
+  bound has ever been tightened), severity low, confidence high. Test:
+  `test_settings_save_is_not_blocked_by_a_bad_value_already_stored` (fails before, passes after). No config,
+  schema, on-disk, default or API-shape change.
+- **Backlog curation — the closed entries of "Features that serve real workflows", cut here whole:**
+
+  - ~~**⭐ OWNER-APPROVED (2026-10-14, "Yes go") — the Settings page redesign.**~~ — **✅ ALL FIVE SLICES SHIPPED
+    (v0.496.0–v0.500.0).** Spec stays at [`docs/design/settings-redesign.md`](design/settings-redesign.md); each
+    slice's record, including every spec-vs-code correction, is in [`SHIPPED.md`](SHIPPED.md). Do not re-pick it.
+
+  - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-30) — "Bring my pictures up to date": re-stack only the
+    targets that have new light, in one click.**~~ — **✅ SHIPPED v0.492.0** (Builder 2026-09-30). Entry cut to
+    [`SHIPPED.md`](SHIPPED.md); one-liner under "Shipped" below. **The entry's one open question is answered, so
+    do not re-file it as a sign-off item:** reversing the new-subs card's read-only stance was judged *not* to
+    need the owner's word, because the batch stacker already exists and he already presses it (this only
+    *narrows* its scope — strictly less CPU than the button he has), and because the note still never acts: the
+    entry point is a **link**, and its own "every action here is a link, the only button is Not now" test passes
+    unchanged. All three constraints the entry named are met and recorded in `SHIPPED.md`.
+
+  - ~~**OWNER-APPROVED 2026-09-25 — a noise-delta *picture* beside the "Did it get better?" sentence.**~~ —
+    **✅ SHIPPED v0.479.0** (Builder 2026-09-26). Entry cut to [`SHIPPED.md`](SHIPPED.md); one-liner under
+    "Shipped" below. One finding came out of sizing its sibling: the third owner-approved item in this section
+    (auto-*apply* the classified preset) cannot be built the way it reads — that entry is now **closed with the
+    measurement** it was gated on (Builder 2026-09-29), in [`SHIPPED.md`](SHIPPED.md).
+  - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-25) — "Was the moon out?": a retrospective moon note.**~~ —
+    **⚪ CLOSED: ALREADY BUILT END TO END; do not re-file** *(Builder 2026-09-25; condensed 2026-09-30 Scout).*
+    `SessionMoon` already writes a retrospective per-night verdict (`seestack/nightplan.py::session_moon` →
+    `SessionRecapOut.moon_note` on the "Last night" card and `NightSummaryOut.moon` on every Nights-card night),
+    offline and self-hiding, and it is *better* than the entry's shape — it also requires the Moon to be **close to
+    the target**, not just up and lit. The one unbuilt piece — a site-less two-stage degrade ("you can still say
+    the Moon was 87 % lit") — is **DECLINED**: without a site you know neither *up* nor *close*, so the sentence
+    could describe a Moon that never rose, the exact nag the "quiet by design" contract prevents. Re-open only with
+    a shape that does not guess at those two facts.
+
+  *(The Scout's 2026-09-09 "shareable labelled picture" entry shipped as v0.407.0 and was cut to
+  [`SHIPPED.md`](SHIPPED.md) — the engine render and the endpoint flag already existed; only the download was
+  missing. Don't re-file it.)*
+
+  *(The Scout's 2026-09-12 "draw the full Moon to scale" entry shipped as v0.432.0 and was cut to
+  [`SHIPPED.md`](SHIPPED.md) — `ScaleBar.moon_fraction` + `skymarks._moon_disc_box` + `frontend/src/moonDisc.ts`,
+  off by default. Don't re-file it.)*
+
+  - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-17) — a ready-to-paste, copy-to-clipboard caption for a shared
+    picture.**~~ — **✅ MOSTLY ALREADY BUILT; the one genuinely missing half shipped as v0.451.0. Entry cut to
+    [`SHIPPED.md`](SHIPPED.md); do not re-pick it.** *(Builder 2026-09-17, grepped before building.)* "Copy
+    caption" has existed since **v0.385.0** (`frontend/src/components/postCaption.ts`, in `SavePictureMenu` on the
+    Target hero and every History run card), already carrying identity, subs, integration, capture window, nights
+    and scale bar, degrading exactly as the entry asks; the entry's grep had landed on `sharePictureText`, the OS
+    share sheet's title/filename helper. What was missing was the entry's middle term — *what the object is* — and
+    v0.451.0 tells the catalogue's own sentence (`ObjectInfo.blurb`, 157/157 bundled objects) in place of the bare
+    type word. One piece is still open: the lead below.
+
+  - ~~**LEAD (Builder 2026-09-17, the one piece of the caption entry above that is still open) — the Gallery
+    lightbox shares a picture with the thin `sharePictureText` caption, not the ready-to-post one.**~~ —
+    **✅ SHIPPED v0.453.0** (Builder 2026-09-17), built as the lead's own shape **(a)**. Entry cut to
+    [`SHIPPED.md`](SHIPPED.md), one-liner under "Shipped" below. Two things the lead had not checked and the
+    build did: the viewer **already** fetches the annotations when a picture opens (for the North-up offer), so
+    the scale datum was in hand all along and the gate was only ever the run's *geometry*; and the three fields
+    are now served by one shared `preview_orient.preview_geometry_out` that the run listing uses too, so the
+    page that draws the picture and the page that captions it cannot describe it differently.
+
+  - ~~**NEXT SLICES of the "finished / not stretched / thin" card signal**~~ — **⚪ CLOSED: all three slices
+    shipped** (a) v0.448.2, (b) v0.450.0, (c) v0.448.2 + v0.471.0, on top of the wall itself (v0.448.0). Full
+    entries, including the two shape changes worth not undoing — the chip appears only on cards that need
+    something, and the Gallery's chip is per-*run* rather than per-target — are in [`SHIPPED.md`](SHIPPED.md).
+    Nothing here is open.
+  - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
+    v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
+    *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
+    (a) ~~**The Gallery lightbox and the Target hero.**~~ — **✅ SHIPPED v0.312.0** (Builder 2026-08-30, branch
+    `claude/compassionate-galileo-6jgh4j`), on both surfaces, with the entry's "ship the gate before the feature"
+    taken seriously and then found to be **unnecessary** — which is the design call worth carrying forward.
+
+    **The stand-down the entry demanded doesn't apply here, and checking that first is what kept this small.**
+    The History card has to withdraw the tint because *its* picture can become something else: opening **Adjust**
+    swaps in a live render of the linear master at full canvas, which the tint was never measured against. Neither
+    of these two surfaces has such a state — both show the **stored preview bytes** and nothing else, and the one
+    variation they do offer (the v0.308.0 North-up *view*) is a turn the overlay endpoint already composes, since
+    v0.308.2, from the same `preview_north_up_remainder_deg` the picture itself goes through. So the tint follows
+    the picture instead of standing aside, and a test on each surface pins that both URLs pick up `north_up=true`
+    together. The share JPEG and the full-res PNG the entry worried about are **downloads**, not what the viewer
+    draws.
+
+    **The one real piece of work was the geometry, and it is a CSS trap worth recording.** `ImageLightbox` fits its
+    picture with `max-width/max-height: 100%` inside a flex-centred surface and then applies the zoom/pan transform
+    to the `<img>` itself. Wrapping the picture and the overlay in a shared positioned box — the obvious way to
+    make two images move together — makes the picture's `max-height: 100%` resolve against an **auto-height**
+    ancestor, i.e. indefinite, i.e. no cap, and a tall picture then overflows the viewer. The overlay is therefore
+    a **sibling**, absolutely positioned with `inset: 0` + `margin: auto` (which centres a replaced element on
+    exactly the box `align-items/justify-content: center` puts the picture in), sharing one `imgFit` object and one
+    `transform` string with the picture so the two cannot be fitted or moved differently. A test asserts the fitted
+    style *and* the transform are byte-identical on both elements, **after a zoom** — the case a separately-computed
+    transform would silently get wrong.
+
+    **The gate, and what it cost.** The Target hero needed no new request: `StackRun.has_rejection_map` is already
+    on the run it draws. The Gallery drew its cards from `/api/gallery`, which didn't carry the fact — so
+    `GalleryItem` gained `has_rejection_map`, computed by the *same* one-line stat beside the
+    `has_fits`/`has_preview`/`has_tiff` sweep the item already does (additive, `False` default), rather than a
+    per-picture run-info fetch on every lightbox open. That matters because `record_rejection_map` is **off by
+    default**: on an ordinary library the control is simply absent, and opening a picture costs nothing extra. The
+    run-info fetch that supplies the caption's measured fraction happens only once the tint is actually switched
+    on, and the caption's lead sentence never depends on it — an uncaptioned cyan speckle reads as damage, so it is
+    captioned even when the number can't be read.
+
+    `removedOverlayCaption` moved out of `routes/History.tsx` into a shared `frontend/src/removed.ts` (the
+    `fullres.ts` pattern: one place owns the wording so three surfaces can't drift into three claims about one
+    picture), re-exported from History so its existing readers are untouched. The toggle itself is a shared
+    `ShowRemovedToggle`, so the two lightboxes offer the identical control.
+
+    **Upgrade-safe (§9):** one additive, defaulted response field; no config, schema, on-disk or default change;
+    an older frontend ignores the field and an older backend omitting it reads as "no overlay for this one", which
+    is the right answer for every run that never recorded a map.
+
+    **Tests (+12):** 5 in `ImageLightbox.test.tsx` (no overlay unless given; decorative — `aria-hidden`, empty
+    `alt`, `pointer-events: none` so it can't eat a drag; identical fit *and* transform at 100 % and after a zoom;
+    the caption shown, and not shown when there are no marks), 4 in `LatestPictureCard.test.tsx` and 2 in
+    `Gallery.test.tsx` (nothing offered and nothing fetched on a run with no map; the tint and the measured caption
+    on request; the tint turning with the picture; and — hero — the caption still appearing when the run-info
+    fetch fails), and 1 in `tests/webapp/test_rejection_overlay.py` asserting the Gallery listing's answer both
+    ways *and* that it agrees with the run listing's on the same run.
+    (b) **"N spots", instead of a percentage (S–M, engine + one response field).** The caption today reuses the
+    run's `REJFRAC` — *"that was about 0.4% of your samples"* — because that number already exists. What the
+    Scout's entry actually asked for is more human: *"stacking removed 14 streaks and hot spots"*. That needs a
+    connected-component pass over the `_rejected.fits` map (scipy's `ndimage.label`, already a dependency), with
+    a minimum blob size so the noise-tail speckle isn't counted as 8,000 "spots" — which is the whole difficulty,
+    and the reason it was left out rather than guessed at. Compute it **once, at write time**, into a header card
+    beside `REJMAP` (not per-request over a canvas-sized file), and surface it on the run-info the caption already
+    reads. Measure the threshold against a real map before picking it.
+
+    **⚠️ MEASURED AND STOOD DOWN (Builder 2026-08-30, branch `claude/compassionate-galileo-6jgh4j`) — do NOT
+    build this from the summed map; the threshold this entry asks for does not exist.** I did exactly what it
+    demanded — measured against real `run_stack` output before picking anything — and the measurement closes the
+    idea rather than sizing it.
+
+    **What a blob count actually reads on real maps.** Connected components (8-connectivity) over the planted
+    satellite-trail scene at 16 subs: **1,296 blobs**, of which the trail is one (1,453 px). The *same scene with
+    no trail at all*: **1,323 blobs**. So counting blobs would tell a user with a perfectly clean night that
+    stacking removed 1,323 things. A minimum area does separate them at 16 subs — the largest pure-noise blob was
+    4 px against the trail's 1,453, and area ≥ 5 px gives **1 blob on the trail scene and 0 on the clean one**.
+
+    **And that separation dies with the sub count, which is the killer.** A pixel is marked if it lost a sample in
+    *any* frame, so the map densifies: non-empty share **1.9 % at 16 subs → 11.5 % at 32 → 31.2 % at 64**, and
+    blobs of ≥ 5 px go **1 → 532 → 2,013**, all noise, with the trail starting to percolate into the speckle
+    (largest blob 1,453 → 2,762 px). Extrapolated to the owner's 500–800-sub stacks the map is effectively
+    saturated and the honest count is a five-figure number. **No minimum area works across the sub counts this app
+    is for**, because the discriminator the entry assumes — a mark is dense, noise is sparse — is a property of the
+    *per-frame* rejection, and the summed map has thrown it away: a satellite crossing one sub contributes a drop
+    count of **1** along its path, pointwise indistinguishable from a noise-tail clip.
+
+    **If anyone ever wants this, the only honest shape is to count it where the information still exists** — at
+    combine time, per frame, before the counts are summed — which is a change inside the memory-bounded hot path,
+    not "a connected-component pass over the sibling". That is an L with real OOM risk, for a caption tweak. **The
+    percentage stays.**
+
+    **The measurement was not wasted:** applied to the *tint* rather than to a count it found a real bug — the
+    overlay washed the whole picture cyan on exactly these dense maps — fixed as **v0.312.1**, at the top of
+    "Bugs (fix these first)".
+
+  - **NEW IDEA (Builder 2026-08-29, the follow-ups deliberately left out of "Your universe" v0.296.0) — "fly to
+    it", and tell the reader what they're looking at.** *(Pillar: enjoy + understand — PRIORITY 3; size S each;
+    frontend-only, no new data.)* Three cheap taps on the shipped page, in value order:
+    (a) ~~**Fly to this object.**~~ — **✅ SHIPPED v0.302.0** (Builder 2026-08-30, branch
+    `claude/compassionate-galileo-lcagow`), with the filed caution honoured exactly: OrbitControls' target stays
+    at the origin and only the camera position moves. The trick that makes those two compatible is that the
+    destination sits on the object's **own radial line**, just outside it (`flyToCameraPosition` in
+    `sky/universe.ts`) — with the object *between* camera and origin, looking at the origin frames it dead
+    centre anyway. A `<FlyTo>` component eases the camera there (a fixed fraction of the remaining gap per
+    second, `delta` clamped so a backgrounded tab doesn't teleport on its first frame back) and stands down the
+    instant someone grabs the controls. The controls' own `update()` runs at frame priority **-1**, i.e. before
+    this write, so they follow the camera rather than fight it; the destination is clamped to their own
+    `min`/`maxDistance` so the arrival can't visibly snap.
+    **Tests (5, in `sky/universe.test.ts`):** the destination is on the object's line and outside it; the
+    camera-past-object property on an off-axis object (a unit-dot check, not just an axis case); every placed
+    depth **and** both extremes land inside the orbit limits; a degenerate/non-finite position declines with
+    `null` rather than flying to NaN; and a further object really does end up further out. The `<FlyTo>`
+    component itself is untested, like the rest of the WebGL scene — the maths it runs on is not.
+    (b) ~~**The blurb is already there.**~~ — **✅ SHIPPED v0.302.0** (Builder 2026-08-30, branch
+    `claude/compassionate-galileo-lcagow`), exactly as filed and at the filed size. `UniverseObject` gained a
+    `blurb: str = ""` carried straight off `identify_object`'s `ObjectInfo.blurb` (grepped first — the lookup
+    already loads it), `UniverseObjectOut` an additive field defaulting to `""`, and the object card one
+    `<Text>` rendered only when the sentence is non-empty. So the read-out is now *about the object* rather
+    than two numbers about something the reader may not recognise. **Tests:** three in
+    `tests/test_universemap.py` (the blurb travels; a catalog entry without one yields `""`, never `None`, so
+    no read site needs a guard; and — the measurement, not an assumption — the **real bundled catalog** does
+    carry blurbs for the popular targets), one in `tests/webapp/test_sky_universe.py` pinning the field on the
+    response, and two in `Universe.test.tsx` (shown when present; nothing at all for `""` *and* for a missing
+    field, so an older backend degrades cleanly).
+      *(Original spec: `CatalogObject.blurb` — the plain-language "what am I looking at?" one-liner the object
+      card on the Target page already shows — is loaded by `identify_object` and simply not carried onto
+      `UniverseObjectOut`. One additive field and one `<Text>`. **Grep first**, don't re-derive the lookup.)*
+    (c) **Constellation lines at the backdrop radius.** The star backdrop is a bare point cloud at r=420; the
+    offline Sky viewer's recognisable-star labelling is the precedent. Only worth it if a constellation-line
+    dataset is already bundled — check before scoping, and do **not** add one as a dependency for this.
+    **⚪ GATE CHECKED AND CLOSED — nothing to build (Builder 2026-10-12).** The answer is no: `seestack/data/`
+    holds `messier.json`, `deepsky_popular.json` and `glossary.md` and nothing else, and the only
+    "constellation" in the tree is a **name string** carried on a catalog row (`lifelist.py`,
+    `nightplan.py`) — there is no line/segment dataset anywhere, bundled or vendored. So this entry's own
+    condition fails, and its own instruction is not to add one. **Do not re-run this check**; reopen only if a
+    constellation-line dataset arrives for some other reason.
+
+  - ~~**NEW IDEA (Builder 2026-07-25) — plateaued target nudges "shoot something fresh".**~~ **✅ SHIPPED
+    v0.425.0** — full body cut to the Shipped one-liner below (three-file rule); `IntegrationTrendBadge` now
+    names the planner's best fresh pick under the plateau verdict.
+
+  - ~~**Data-driven target difficulty** (optional `mag`/surface-brightness in the catalog instead of the curated
+    table).~~ **⚪ CLOSED — measured at zero, do not build** (Builder 2026-09-07; full write-up moved to
+    [`SHIPPED.md`](SHIPPED.md), search "data-driven target difficulty"). The gap it fills is empty: 157/157 bundled
+    objects already get a verdict from `_CURATED` + the cluster type-rule, pinned by
+    `tests/test_target_difficulty.py::test_the_bundled_catalog_is_covered_end_to_end_today`. Reopen only with a real
+    magnitude source, never from recall.
+  - **NEW (Builder 2026-07-21, follow-up to "Your sky, so far" v0.142.0) — add the "clearest night" stat + a
+    compose-to-one-image share button.** The v0.142.0 first slice is registry-only, so it omits two nice-to-haves from
+    the original idea: **(a)** a "your clearest night" tally (best median FWHM / lowest sky background) — needs a
+    per-target frame read (open each `project.sqlite`), so add it as a *separately-cached* enrichment behind the same
+    endpoint (or a sibling `?deep=1`), guarded so it never opens every project on a hot render; **(b)** a single
+    **"Share this summary"** button that composes the tallies + hero grid into one social-ready PNG, reusing the
+    existing share-card/PNG export path (`seestack/sharecard.py`) so the whole "year in review" can go out as one
+    image. Both additive/read-only. *(S–M each, friendliness/enjoy-share — PRIORITY 3.)*
+    **▶ BOTH SLICES ARE NOW DONE — (b) was already shipped, (a) SHIPPED v0.268.2** (Builder 2026-08-18, branch
+    `claude/relaxed-franklin-i98kvb`).
+    **(b), verified in the code rather than assumed:** `GET /api/recap.jpg` (`webapp/routers/stats.py`) already
+    rendered exactly the filed idea — the recap's own figures drawn over the user's best picture by
+    `seestack.recap.draw_recap_poster`, downloaded as `my-sky-so-far.jpg`, with `GET /api/recap` serving the same
+    numbers plus a copy-paste caption, and nothing written to the library.
+    **(a) "your best night", shipped — and the entry's own caution ("needs a per-target frame read… guard it so it
+    never opens every project on a hot render") is answered by not adding a walk at all.** The trick is that
+    `/api/activity-calendar` **already** opens every project and reads every accepted frame row for the Dashboard
+    heatmap, behind an app-level cache. So the star size rides along as an **optional 4th element** of the tuples
+    the webapp already streams into `accumulate_nights` — same walk, same cache, no second pass and no new
+    endpoint. Every existing 3-tuple caller folds byte-for-byte as before.
+    **What it says.** A new self-hiding card on "Your sky, so far": *"Your best night · 12 Jan 2026 — 2.4 px
+    stars — Your steadiest sky yet on M 42 — 1.5 h captured, 180 subs measured."* It is the first thing on that
+    page that **ranks** a night rather than adding it up, which is the question a beginner actually asks after a
+    few sessions. It ranks by **median star size in pixels** — the same measure the session recap's sharp/soft
+    verdict and the Target page's Nights card already use, so the app speaks in one voice rather than inventing a
+    second definition of "a good night". (Sky background, the entry's other suggestion, was deliberately left out:
+    it tracks the Moon and light pollution as much as the night, so "lowest sky" would rank a new-Moon night above
+    a genuinely steadier one.)
+    **Honest by construction, silent rather than wrong** (`seestack/activity_calendar.py::sharpest_night`): a night
+    needs `SHARPEST_MIN_MEASURED` (5) measured subs to qualify — a one-frame median describes the frame, not the
+    night — and at least `SHARPEST_MIN_NIGHTS` (2) nights must qualify, because naming the best of one is not a
+    fact about the sky. A failed measurement stored as 0, a negative or a NaN is not counted as a measurement (a
+    fabricated 0 px would win every comparison). Ties break on the earlier date. Only nights inside the window are
+    considered, so a brilliant night two years ago isn't "your best night" on a 12-month page.
+    **Upgrade-safe:** additive optional response fields (`median_fwhm_px`, `n_measured`, `sharpest_night`) on an
+    existing endpoint; the frontend types them optional and the card renders **nothing** against a backend that
+    doesn't send them, so old/new mix in either direction. No config, DB-schema, on-disk or default change, and no
+    new endpoint. **Verified in a real browser as well as jsdom** (`scripts/agent-dogfood.sh` + a probe that serves
+    the card a sharpest night): it renders inside the viewport at 1440 px **and** 420 px with no console errors.
+    **Tests (+21):** `tests/test_activity_calendar.py` (+8 — the sharpest night is the smallest-star one, a thinly
+    measured night can't win, silence on one qualifying night, silence with nothing measured, unmeasurable values
+    aren't counted, 3-tuple callers fold exactly as before, ties break earlier, and the window is respected),
+    `tests/webapp/test_activity_calendar.py` (+3 — per-night medians on the wire, silence without measurements,
+    and the sharpest night serialised whole), `bestNight.test.ts` (+5) and `BestNightCard.test.tsx` (+4 — named,
+    silent on null, silent against an older backend, silent on a failed fetch), plus `SkySoFar.test.tsx` (+1 —
+    the card is on the page).
+
+
 ## 2026-10-31 (Builder, branch `claude/relaxed-davinci-e0cu7i`) — a first Full-res PNG renders faster, byte-identical
 
 - **v0.504.6** — ⚡ SPEED (the last open part, (3), of the owner's ⭐ 2026-10-28 entry: "the Full-res PNG takes a
