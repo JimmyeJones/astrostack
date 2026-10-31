@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- Dashboard sample card offers "Stack it" after the sample is already stacked (`SampleImageCard`) — branch `claude/zen-fermat-0zsxqf` (Builder 2026-10-31).
 
 ---
 
