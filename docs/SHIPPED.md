@@ -1,5 +1,54 @@
 # Shipped — the record
 
+## 2026-10-31 (Builder, branch `claude/relaxed-davinci-e0cu7i`) — a first Full-res PNG renders faster, byte-identical
+
+- **v0.504.6** — ⚡ SPEED (the last open part, (3), of the owner's ⭐ 2026-10-28 entry: "the Full-res PNG takes a
+  super long time"). v0.503.24 cached the *repeat* download; the *first* render still spent most of its time in
+  `thumbnail.autostretch`, and much of that allocating fresh channel-sized temporaries (~140 MB each at 5000×7000)
+  and in six full `np.median` partitions. **New, all exact:** each channel's covered pixels are gathered **once**
+  and the shadow/normalise/rolloff/MTF/clip steps run on that one array in place (`_mtf(in_place=)`,
+  `_highlight_rolloff(in_place=)`), in both `autostretch` and `asinh_stretch`; the whole-image normalise of
+  `asinh_stretch` is in place; the `any(axis=2)` coverage map that was only ever asked `.any()` is one reduction;
+  `_robust_median_sigma` takes its deviations in place, and every median goes through new `_exact_median`, which
+  guesses a value bracket from a 65 k evenly spaced sample, counts what lies below/above, and partitions only the
+  ~4 % inside — falling back to `np.median` itself whenever the bracket misses the wanted ranks, a NaN breaks the
+  count, or the array is not floating point, and averaging the middle pair with `np.mean` exactly as `np.median`
+  does. **Measured, 5000×7000×3 float32 with a ragged NaN border:** the export stretch **10.0 s → 5.4 s**, its
+  transient allocation beyond input + output **830 → 479 MB**; the whole `render_preview_png_full_res` of a FITS
+  ~18.7 s → ~14.5 s with **the identical PNG bytes** (sha256 equal). What is left is the PNG encode (~5.5 s;
+  `compress_level=1` already measured not worth it) and reading the FITS. Tests: new
+  `tests/test_stretch_inplace_parity.py` (104) keeps the pre-rewrite loops verbatim and asserts `array_equal` across
+  mosaic / all-finite / float64 / mono / empty-channel / flat / quantised scenes × the export, hard-clip, highlight
+  and pinned-stats paths, and checks `_exact_median` equals `np.median` bit for bit (odd/even, ties, sorted, NaN,
+  inf, ints, a sample built to miss) with a guard that the fast path really runs and the fallback is reachable;
+  returning the lower middle element instead of the pair's mean fails three of them. No config, schema, on-disk,
+  default or API change; the picture is unchanged.
+- **The entry it closes, cut here whole (AGENTS.md three-file rule):**
+
+  - **⭐ OWNER-ANSWERED (2026-10-28) — a picture he never edited comes out with a ragged, colour-confetti border,
+    and its "Full-res PNG" takes "a super long time".** He sent two full-res PNGs (an IC 1396 field and a star
+    field, both tall multi-night canvases with stepped, rotated edges): a band of per-pixel colour speckle all
+    round, the low-coverage strip where only a few rotated subs land, and a darker ring just inside it. "About
+    25 % of my images" look like this, and he could not tell whether it was his sensor or the app. **It is the
+    app.** Asked by multiple choice: the download was **one picture's Full-res PNG**, the pictures were **never
+    edited**, and the fix is **"Both"**. The cause: `pipeline.render_run_full_res_png` with no recipe goes to
+    `thumbnail.render_preview_png_full_res`, a plain STF of the whole master with no border trim. **Spec:**
+    (1) **Trim on every surface of an unedited picture.** *Full-res PNG + full-size archive ✅ v0.503.23*
+    (`pipeline.unedited_border_trim`, `render_run_full_res_png(trim_border=)`; `--mosaic` 7.9 %, see SHIPPED).
+    *Stored preview, share JPEG, wallpaper ✅ v0.504.2* for every **new** stack (`pipeline.trim_unedited_stored_preview`,
+    `preview_crop` recorded; the native share render replays it). *(The menu hint's size ✅ v0.504.1.)* *Pictures stacked before v0.504.2 ✅ v0.504.5* (a boot-time
+    job, `pipeline.backfill_unedited_preview_trims`, stamped per target; see SHIPPED). **(1) is done.** *(History's "Adjust → Save" ✅ v0.504.3, `render_stack_png(crop=)`.)* Never touch the FITS; a saved recipe's own crop always wins. (2) **Auto-edit, both halves.** New stacks: his
+    "Finish" switch (`auto_edit_on_autostack`) is his to flip — never flip his stored value. Existing pictures:
+    *✅ v0.504.0* "Finish my unedited pictures" (`webapp.finishunedited`, `submit_finish_unedited_pictures`; Settings →
+    Maintenance, inside the existing re-finish card; see SHIPPED). (3) **Speed** — *✅ v0.503.24* (`pipeline.cached_run_full_res_png`,
+    `<stem>_fullres.cache`; repeat download 26 s → 0.1 s at 5000×7000; a second click waits for the running render;
+    a "Preparing your full-size picture…" toast above 4 MP; see SHIPPED). **Still open in (3):** the *first* render
+    itself (measured 5000×7000: STF stats ~55 %, PNG encode ~25 %; `compress_level=1` saves only ~15 % of the
+    encode for +3 % size — not worth it; a faster stretch must stay pixel-identical to the stored preview's look,
+    so it is an engine change for its own run; *re-profiled 2026-10-30, `autostretch` alone on 5000×7000×3: 10.7 s = `nanpercentile` 1.3 s + `_robust_median_sigma` 1.1 s/channel (~44 %) + the per-pixel rolloff/MTF/clip ~1.5 s/channel, much of it first-touch of fresh full-size temporaries (~41 %) — an exact in-place rewrite buys ~20–30 %, not a step change*). (4) **The dark ring**: *checked 2026-10-30* — Auto does
+    **not** remove it; filed, measured, as the first Bugs entry (the per-frame flatten's rim on a vignetted sub). Size **M** for (1), **S** for (2) and
+    (3) each; ship as separate commits.
+
 ## 2026-10-30 (Builder, branch `claude/relaxed-davinci-ti73cu`) — older unedited mosaics get the stored-preview border trim
 
 - **v0.504.5** — 🐞 TRUST / IMAGE QUALITY (the last of slice (1) of the owner's ⭐ 2026-10-28 entry). v0.504.2 trims a

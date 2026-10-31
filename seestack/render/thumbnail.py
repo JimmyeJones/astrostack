@@ -1096,8 +1096,9 @@ def asinh_stretch(
     if img.ndim == 2:
         img = np.stack([img, img, img], axis=-1)
 
-    finite_any = np.isfinite(img).any(axis=2)
-    if not finite_any.any():
+    # One reduction, not a per-pixel ``any(axis=2)`` map that was only ever
+    # asked ``.any()`` — the same answer for a fraction of the pass.
+    if not np.isfinite(img).any():
         return np.zeros_like(np.nan_to_num(img))
 
     # Normalize over covered pixels only; keeps per-channel scales intact.
@@ -1106,7 +1107,10 @@ def asinh_stretch(
     if bounds is None:
         return np.zeros_like(np.nan_to_num(img))
     lo, hi = bounds
-    img = (img - lo) / (hi - lo)
+    # In place — ``img`` is this function's own copy. Same arithmetic, same
+    # order, so the pixels are identical; see the per-channel note below.
+    np.subtract(img, lo, out=img)
+    np.divide(img, hi - lo, out=img)
 
     # asinh softening `a`: geometric sweep from 1.0 (≈linear) at stretch=0 down
     # to 0.004 (very aggressive) at stretch=1.
@@ -1125,7 +1129,10 @@ def asinh_stretch(
         # measurement `measure_asinh_stats` performs is deliberately the same
         # two lines, over the same normalised array).
         supplied = stats.channels[c] if stats is not None and c < len(stats.channels) else None
-        med, sigma = supplied if supplied is not None else _robust_median_sigma(chan[finite])
+        # The covered pixels, gathered once — every step below works on this one
+        # array in place (see :func:`autostretch`'s note).
+        v = chan[finite]
+        med, sigma = supplied if supplied is not None else _robust_median_sigma(v)
         # Black point anchored to the sky median: black=0 keeps almost
         # everything (median − 2σ), black≈0.33 sits at the sky median, black=1
         # cuts well into the signal (median + 4σ).
@@ -1136,9 +1143,14 @@ def asinh_stretch(
         # clip to a flat white blob, exactly the STF blow-out fixed in v0.119.1.
         # The rolloff leaves the sky/mid-tones untouched, so it only recovers
         # core detail; `protect_highlights=False` restores the old hard clip.
-        xr = (chan[finite] - shadows) / rng
-        x = _highlight_rolloff(xr, knee) if protect_highlights else np.clip(xr, 0.0, 1.0)
-        vals = np.clip(np.arcsinh(x / a) / denom, 0.0, 1.0)
+        np.subtract(v, shadows, out=v)
+        np.divide(v, rng, out=v)
+        x = (_highlight_rolloff(v, knee, in_place=True) if protect_highlights
+             else np.clip(v, 0.0, 1.0, out=v))
+        np.divide(x, a, out=x)
+        np.arcsinh(x, out=x)
+        np.divide(x, denom, out=x)
+        vals = np.clip(x, 0.0, 1.0, out=x)
         if headroom > 0.0 and protect_highlights:
             # …and then give that shoulder room the asinh curve above it may have
             # squeezed out of it — see `_reanchor_highlights`. At the default
@@ -1227,8 +1239,9 @@ def autostretch(
     # the per-channel median to ~0 and the stretch goes haywire (colour cast,
     # wrong black point). We compute all stats over the finite pixels only and
     # set uncovered pixels to 0 (black) in the output.
-    finite_any = np.isfinite(img).any(axis=2)
-    if not finite_any.any():
+    # One reduction, not a per-pixel ``any(axis=2)`` map that was only ever
+    # asked ``.any()`` — the same answer for a fraction of the pass.
+    if not np.isfinite(img).any():
         return np.zeros_like(np.nan_to_num(img))
 
     # Normalize the *whole image* to 0..1 first — keeps per-channel scales
@@ -1262,23 +1275,34 @@ def autostretch(
         if not finite.any():
             continue
         pinned = stats.channels[c] if stats is not None else None
-        med, sigma = pinned if pinned is not None else _robust_median_sigma(chan[finite])
+        # The covered pixels, gathered **once**, and every step below runs on
+        # that one array in place. Written as expressions, each of the ~eight
+        # steps allocated (and first-touched) a fresh channel-sized temporary —
+        # ~140 MB apiece on a 5000×7000 master, the bulk of a first Full-res PNG
+        # (the ⭐ 2026-10-28 entry's part 3). Same operations on the same values
+        # in the same order, so the picture is identical bit for bit —
+        # ``tests/test_stretch_inplace_parity.py`` keeps the old loop and checks.
+        v = chan[finite]
+        med, sigma = pinned if pinned is not None else _robust_median_sigma(v)
         # Black point = median - 2σ (clipped at 0).
         shadows = max(0.0, med + sigma_factor * sigma)
         rng = max(1.0 - shadows, 1e-6)
         # Apply the stretch only to covered pixels; uncovered stay 0.
-        xr = (chan[finite] - shadows) / rng
+        np.subtract(v, shadows, out=v)
+        np.divide(v, rng, out=v)
         # Soft-shoulder the highlights instead of hard-clipping them to flat
         # white — otherwise a bright HDR core (which sits above the 99.5th-pct
         # ceiling, so xr > 1) clips to a featureless white blob. The rolloff
         # leaves the sky/mid-tones untouched (they're far below the knee), so it
         # only recovers core detail. `protect_highlights=False` restores the old
         # hard-clip behaviour for callers that want it.
-        x = _highlight_rolloff(xr, knee) if protect_highlights else np.clip(xr, 0.0, 1.0)
+        x = (_highlight_rolloff(v, knee, in_place=True) if protect_highlights
+             else np.clip(v, 0.0, 1.0, out=v))
         norm_med = max((med - shadows) / rng, 1e-6)
         m = _midtones_for(norm_med, target_bg)
         out_chan = out[..., c]
-        vals = np.clip(_mtf(x, m), 0.0, 1.0)
+        x = _mtf(x, m, in_place=True)
+        vals = np.clip(x, 0.0, 1.0, out=x)
         if headroom > 0.0 and protect_highlights:
             # …and then give that shoulder room the midtones transfer above it
             # may have squeezed out of it — see `_reanchor_highlights`. At the
@@ -1296,6 +1320,64 @@ def autostretch(
     return out
 
 
+#: Below this many values :func:`_exact_median` just calls :func:`numpy.median`
+#: — the bracketing only pays for itself on a full-resolution channel.
+_BRACKET_MEDIAN_MIN = 1 << 20
+
+#: How many evenly spaced values :func:`_exact_median` reads to guess its bracket.
+_BRACKET_MEDIAN_SAMPLE = 1 << 16
+
+#: Half-width of the guessed bracket, as a share of the ranks. A 65 k sample puts
+#: the true median within ~0.4 % of the ranks of the sample's own almost always;
+#: 2 % keeps a miss (which only costs the plain :func:`numpy.median`) rare even on
+#: a structured picture, while the bracket stays ~4 % of the values.
+_BRACKET_MEDIAN_HALF_WIDTH = 0.02
+
+
+def _exact_median(values: np.ndarray, *, overwrite_input: bool = False) -> float:
+    """``float(np.median(values))`` — the identical number — without partitioning
+    the whole array.
+
+    A full-resolution stretch takes six medians of 35 M-pixel channels on a
+    5000×7000 master (a median and a MAD each), and each :func:`numpy.median`
+    copies and partitions every value: the largest single cost of a first
+    Full-res PNG after the per-pixel temporaries. The median is only ever *one
+    or two order statistics*, so this guesses a narrow value bracket from an
+    evenly spaced sample, counts what falls below and above it (two cheap
+    comparisons), and partitions only the values inside. When the bracket holds
+    the wanted ranks the answer is those exact elements, averaged exactly as
+    :func:`numpy.median` averages them; when it does not — a lumpy sample, a
+    NaN, an integer array — it falls back to :func:`numpy.median` itself. So the
+    result is never an estimate: it is the same order statistic either way, and
+    ``tests/test_stretch_inplace_parity.py`` checks it against
+    :func:`numpy.median` bit for bit.
+    """
+    v = np.asarray(values).ravel()
+    n = v.size
+    if n < _BRACKET_MEDIAN_MIN or v.dtype.kind != "f":
+        return float(np.median(v, overwrite_input=overwrite_input))
+    ranks = (n // 2 - 1, n // 2) if n % 2 == 0 else (n // 2,)
+    sample = np.sort(v[:: max(1, n // _BRACKET_MEDIAN_SAMPLE)])
+    m = sample.size
+    lo = sample[max(0, int(m * (0.5 - _BRACKET_MEDIAN_HALF_WIDTH)))]
+    hi = sample[min(m - 1, int(m * (0.5 + _BRACKET_MEDIAN_HALF_WIDTH)))]
+    if not (np.isfinite(lo) and np.isfinite(hi)):
+        return float(np.median(v, overwrite_input=overwrite_input))
+    below = int(np.count_nonzero(v < lo))
+    above = int(np.count_nonzero(v > hi))
+    inside = v[(v >= lo) & (v <= hi)]
+    # Every value is below, inside or above — unless one is NaN, which no
+    # comparison admits; then let numpy say what the median of that is.
+    if below + above + inside.size != n or not (
+            below <= ranks[0] and ranks[-1] < below + inside.size):
+        return float(np.median(v, overwrite_input=overwrite_input))
+    local = [r - below for r in ranks]
+    inside.partition(local)
+    # ``np.median`` averages the middle element(s) with ``np.mean`` in the
+    # array's own dtype; doing the same on the same elements is the same number.
+    return float(np.mean(inside[local[0]:local[-1] + 1]))
+
+
 def _robust_median_sigma(values: np.ndarray) -> tuple[float, float]:
     """
     Median and MAD-based sigma — resistant to bright stars.
@@ -1303,17 +1385,33 @@ def _robust_median_sigma(values: np.ndarray) -> tuple[float, float]:
     ``values`` should already be the finite (covered) pixels; callers strip
     NaN before passing it in.
     """
-    med = float(np.median(values))
-    mad = float(np.median(np.abs(values - med)))
+    med = _exact_median(values)
+    # The deviations are this function's own scratch array, so take them in
+    # place and let the second median partition them where they lie: one
+    # temporary instead of three, and the identical numbers.
+    dev = np.subtract(values, med)
+    np.abs(dev, out=dev)
+    mad = _exact_median(dev, overwrite_input=True)
+    del dev
     sigma = 1.4826 * mad if mad > 0 else float(values.std() or 1e-3)
     return med, sigma
 
 
-def _mtf(x: np.ndarray, m: float) -> np.ndarray:
-    """PixInsight midtones transfer function. ``m`` in (0, 1)."""
+def _mtf(x: np.ndarray, m: float, *, in_place: bool = False) -> np.ndarray:
+    """PixInsight midtones transfer function. ``m`` in (0, 1).
+
+    ``in_place=True`` writes the result into ``x`` (an array the caller owns)
+    and holds one temporary instead of four; the values are identical.
+    """
     if abs(m - 0.5) < 1e-9:
         return x
-    return (m - 1.0) * x / ((2.0 * m - 1.0) * x - m)
+    if not in_place or not isinstance(x, np.ndarray):
+        return (m - 1.0) * x / ((2.0 * m - 1.0) * x - m)
+    den = np.multiply(x, 2.0 * m - 1.0)
+    np.subtract(den, m, out=den)
+    np.multiply(x, m - 1.0, out=x)
+    np.divide(x, den, out=x)
+    return x
 
 
 #: Where the STF highlight rolloff starts, in the per-channel shadow-normalized
@@ -1348,7 +1446,9 @@ def highlight_knee_for(protect: float = 0.0) -> float:
     return float(_HIGHLIGHT_KNEE + (_HIGHLIGHT_KNEE_MIN - _HIGHLIGHT_KNEE) * p)
 
 
-def _highlight_rolloff(x: np.ndarray, knee: float = _HIGHLIGHT_KNEE) -> np.ndarray:
+def _highlight_rolloff(
+    x: np.ndarray, knee: float = _HIGHLIGHT_KNEE, *, in_place: bool = False,
+) -> np.ndarray:
     """Soft-shoulder the highlights of a shadow-normalized channel.
 
     Without this the STF stretch hard-clips every value above the 99.5th-
@@ -1361,7 +1461,21 @@ def _highlight_rolloff(x: np.ndarray, knee: float = _HIGHLIGHT_KNEE) -> np.ndarr
     and only the very brightest pixel approaches (but never reaches) pure white.
     The sky/mid-tones — which sit far below the knee — are bit-for-bit unchanged,
     so this only ever *adds* highlight detail, never shifts the background.
+
+    ``in_place=True`` overwrites ``x`` (an array the caller owns) instead of
+    allocating a second one; the values are identical.
     """
+    if in_place:
+        over = x > knee
+        shoulder = None
+        if np.any(over):
+            span = 1.0 - knee
+            t = (x[over] - knee) / span
+            shoulder = knee + span * (t / (1.0 + t))
+        np.clip(x, 0.0, knee, out=x)
+        if shoulder is not None:
+            x[over] = shoulder
+        return x
     out = np.clip(x, 0.0, knee)                     # below-knee unchanged; floor at 0
     over = x > knee
     if np.any(over):
