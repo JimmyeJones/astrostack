@@ -2479,30 +2479,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-ANSWERED (2026-10-28) — a picture he never edited comes out with a ragged, colour-confetti border,
-  and its "Full-res PNG" takes "a super long time".** He sent two full-res PNGs (an IC 1396 field and a star
-  field, both tall multi-night canvases with stepped, rotated edges): a band of per-pixel colour speckle all
-  round, the low-coverage strip where only a few rotated subs land, and a darker ring just inside it. "About
-  25 % of my images" look like this, and he could not tell whether it was his sensor or the app. **It is the
-  app.** Asked by multiple choice: the download was **one picture's Full-res PNG**, the pictures were **never
-  edited**, and the fix is **"Both"**. The cause: `pipeline.render_run_full_res_png` with no recipe goes to
-  `thumbnail.render_preview_png_full_res`, a plain STF of the whole master with no border trim. **Spec:**
-  (1) **Trim on every surface of an unedited picture.** *Full-res PNG + full-size archive ✅ v0.503.23*
-  (`pipeline.unedited_border_trim`, `render_run_full_res_png(trim_border=)`; `--mosaic` 7.9 %, see SHIPPED).
-  *Stored preview, share JPEG, wallpaper ✅ v0.504.2* for every **new** stack (`pipeline.trim_unedited_stored_preview`,
-  `preview_crop` recorded; the native share render replays it). *(The menu hint's size ✅ v0.504.1.)* *Pictures stacked before v0.504.2 ✅ v0.504.5* (a boot-time
-  job, `pipeline.backfill_unedited_preview_trims`, stamped per target; see SHIPPED). **(1) is done.** *(History's "Adjust → Save" ✅ v0.504.3, `render_stack_png(crop=)`.)* Never touch the FITS; a saved recipe's own crop always wins. (2) **Auto-edit, both halves.** New stacks: his
-  "Finish" switch (`auto_edit_on_autostack`) is his to flip — never flip his stored value. Existing pictures:
-  *✅ v0.504.0* "Finish my unedited pictures" (`webapp.finishunedited`, `submit_finish_unedited_pictures`; Settings →
-  Maintenance, inside the existing re-finish card; see SHIPPED). (3) **Speed** — *✅ v0.503.24* (`pipeline.cached_run_full_res_png`,
-  `<stem>_fullres.cache`; repeat download 26 s → 0.1 s at 5000×7000; a second click waits for the running render;
-  a "Preparing your full-size picture…" toast above 4 MP; see SHIPPED). **Still open in (3):** the *first* render
-  itself (measured 5000×7000: STF stats ~55 %, PNG encode ~25 %; `compress_level=1` saves only ~15 % of the
-  encode for +3 % size — not worth it; a faster stretch must stay pixel-identical to the stored preview's look,
-  so it is an engine change for its own run; *re-profiled 2026-10-30, `autostretch` alone on 5000×7000×3: 10.7 s = `nanpercentile` 1.3 s + `_robust_median_sigma` 1.1 s/channel (~44 %) + the per-pixel rolloff/MTF/clip ~1.5 s/channel, much of it first-touch of fresh full-size temporaries (~41 %) — an exact in-place rewrite buys ~20–30 %, not a step change*). (4) **The dark ring**: *checked 2026-10-30* — Auto does
-  **not** remove it; filed, measured, as the first Bugs entry (the per-frame flatten's rim on a vignetted sub). Size **M** for (1), **S** for (2) and
-  (3) each; ship as separate commits.
-
 - ~~**⭐ OWNER-APPROVED (2026-10-14, "Yes go") — the Settings page redesign.**~~ — **✅ ALL FIVE SLICES SHIPPED
   (v0.496.0–v0.500.0).** Spec stays at [`docs/design/settings-redesign.md`](design/settings-redesign.md); each
   slice's record, including every spec-vs-code correction, is in [`SHIPPED.md`](SHIPPED.md). Do not re-pick it.
@@ -3618,6 +3594,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.504.6 **A first Full-res PNG renders faster with the identical bytes — the STF/asinh stretch works in place and takes each median by partitioning only a bracket around it** (`thumbnail.autostretch`, `asinh_stretch`, `_exact_median`, `_mtf(in_place=)`, `_highlight_rolloff(in_place=)`; stretch 10.0 s → 5.4 s, extra peak 830 → 479 MB at 5000×7000; closes the owner's ⭐ 2026-10-28 entry — its part (4), the dark ring, is the first Bugs entry)
 - ✅ v0.504.5 **Pictures stacked before v0.504.2 get the stored-preview border trim too — a one-off job the app queues at boot, per target, no Auto and no re-render** (`pipeline.backfill_unedited_preview_trims`, `submit_unedited_preview_trim_backfill`, job kind `unedited_preview_trim`; the last of slice (1) of the owner's ⭐ 2026-10-28 entry)
 - ✅ v0.504.4 **A non-finite number in ASTAP's `.ini` (`nan`/`inf`) reads as missing, so the centre is recovered from the `.wcs` instead of being stored as NULL (NaN) or breaking the target's stats refresh (inf)** (`astap._parse_astap_ini`; Scout sweep (3))
 - ✅ v0.504.3 **History's "Adjust → Save" on an unedited mosaic keeps Auto's border rectangle and records it, instead of bringing the ragged fringe back** (`render_stack_png(crop=)`, `save_stack_preview` `border_trimmed`; part of slice (1) of the owner's ⭐ 2026-10-28 entry)
