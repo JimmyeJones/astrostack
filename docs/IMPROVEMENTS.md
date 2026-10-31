@@ -3350,6 +3350,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.1 **The Dashboard's sample card points a stacked sample at the editor ("Edit it") instead of leading with "Stack it" again; "Stack again" stays one click away** (`SampleImageCard`, `sampleRunToEdit`) — dogfood find
 - ✅ v0.505.0 **"It's back": the week-plan card on Tonight says when one of his targets returns to the dark hours after two months out of reach, with what he already has on it (per part on a mosaic)** (`nightplan._returning_targets`, `WeekPlan.returning`, `planweek.returningWeekNote`; the Scout's 2026-10-31 beginner idea)
 - ✅ v0.504.7 **A Settings save is no longer blocked by a stacking default already stored out of range — only the values the save changes are judged** (`routers.settings._sanitize_patch(stored=)`) — Scout sweep (4)
 - ✅ v0.504.6 **A first Full-res PNG renders faster with the identical bytes — the STF/asinh stretch works in place and takes each median by partitioning only a bracket around it** (`thumbnail.autostretch`, `asinh_stretch`, `_exact_median`, `_mtf(in_place=)`, `_highlight_rolloff(in_place=)`; stretch 10.0 s → 5.4 s, extra peak 830 → 479 MB at 5000×7000; closes the owner's ⭐ 2026-10-28 entry — its part (4), the dark ring, is the first Bugs entry)

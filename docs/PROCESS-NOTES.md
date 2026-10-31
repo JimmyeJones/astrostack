@@ -1,5 +1,17 @@
 # Process notes & QA sweep records
 
+## 2026-10-31 (Builder, branch `claude/zen-fermat-0zsxqf`) — dogfood `--mosaic --editor`: one friendliness fix (v0.505.1)
+
+- **Start:** no live claims, every Bugs entry gated or deprioritised, no open beginner item in Features.
+- **Pass:** EXIT 0. All 21 ops re-render on both editor drives; Auto trim 7.9 % on the 2×2 with the highlight-hold
+  offer; taste chips 10 live / 2 at-limit, both taps worded truthfully. Target, Dashboard and Tonight paragraphs
+  agree. Nothing overflowing, no console errors. Not re-filed (already recorded): "looks like a Star cluster",
+  "2×2 … about 3 fields of sky", "Plate-solving isn't set up yet" (no ASTAP here).
+- **The find was the Dashboard screenshot:** the sample card said "Your sample target is ready" and led with
+  **Stack it** beside a "Recent stacks" row that already held the sample's picture. Fixed as v0.505.1
+  (`SampleImageCard`, `sampleRunToEdit`).
+- **Suite:** 8522 passed / 7 skipped (`-n 4 --dist worksteal`, 19 min); vitest 4,900 green.
+
 ## 2026-10-31 (Scout, branch `claude/exciting-wozniak-rg2y6y`) — QA rotation sweep (4), new angle — the Settings page's GET → PUT of its own whole form: one bug, Scout-fixed (v0.504.7). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Inbox:** #878, #880, #903, #1015 — the same four, all previously acted-on and owner-gated; none updated since
