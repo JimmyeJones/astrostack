@@ -1,5 +1,40 @@
 # Shipped — the record
 
+## 2026-10-31 (Builder, branch `claude/zen-fermat-q4051c`) — "It's back"
+
+- **v0.505.0** — 🌟 BEGINNER FEATURE ("It's back", the Scout's 2026-10-31 idea). `plan_week` now records each
+  target's first usable night of the week and `_returning_targets` looks back a night a week across the previous
+  `RETURN_LOOKBACK_NIGHTS` (60; samples at 1, 8 … 64 nights before the week, each a whole night anchored at local
+  noon as `season_closing` anchors its samples). A target with time on it that cleared the floor on none of them is
+  **back**; `WeekPlan.returning` carries it (night, minutes, total, `field_fulls`/`depth_fulls`) and the week card
+  on Tonight shows one self-hiding line — "Back in your sky from Friday: M 42 — it hasn't been up in your dark
+  hours for over two months, and you have 6.1 h on it." — worded per part on a mosaic by the closing card's own
+  `haveClause` (now exported). No new card or banner. **Decisions:** the entry's "≥ 1 stack" became "> 0 s kept",
+  because the owner runs with `auto_stack` off and an unstacked target with hours on it is exactly the one he has
+  forgotten; a sampled night with no darkness at all makes the answer silent (the first dark week of a
+  high-latitude autumn would otherwise call the whole sky back — the `season_closing` final-sample rule's mirror).
+  **Cost:** nearest sample first, dropping every candidate found already up, so an ordinary week adds one
+  dark-window search (7 → 8, pinned by a test; 0.9 s → ~1.0 s for 40 targets), cached with the week plan, whose
+  signature now also carries the per-part pair. Verified from 40° N in Oct/Mar/Jul and from London (M 42 back
+  2026-10-01) and Tromsø (silent in August). Tests: five in `tests/test_nightplan.py` (including a daily
+  cross-check of the fortnight before a return, so the weekly stride is not what makes it "back"), one in
+  `tests/webapp/test_plan.py`, `planweek.test.ts` and `PlanWeekCard.test.tsx`. Additive API field (`returning`,
+  also `[]` on the site-less payload); no config, schema, on-disk or default change. The entry as filed:
+
+  - **🌟 NEW BEGINNER IDEA (Scout 2026-10-31) — "It's back": say so when a target he has already shot returns to
+    his evening sky.** *(Pillar: autonomy + enjoy — PRIORITY 2–3; size S–M; offline, read-only.)* A Seestar owner
+    with many targets shoots by season: M 42 in winter, the Veil in summer. When a target goes behind the Sun for
+    months and comes back, nothing tells him "your M 42 from last winter can be deepened again" — the week plan
+    scores his own targets nightly but never marks the *return*, which is the moment a beginner forgets he has 6 h
+    waiting. **Shape:** a target counts as "back" when its first night above the plan's altitude floor in the next
+    7 nights follows ≥ ~60 nights in which it never cleared it (both computed by the existing `nightplan`
+    visibility code from the site, never a network call), and he has ≥ 1 stack of it. Fold it into the **existing
+    week-plan card on Tonight** as one line ("Back this week: M 42 — you have 6.1 h from last winter"), not a new
+    card or banner (§1 UI rule); self-hides with no site, no stacked target, or nothing returning. **Grepped
+    2026-10-31:** "back in season", "this time last year", "returning target" — nothing in `docs/`, `docs/archive/`,
+    `frontend/src`, `webapp`, `seestack`. **Care:** the 60-night window must come from the ephemeris, not from his
+    capture dates (a target he simply skipped is not "back"); a circumpolar target never qualifies.
+
 ## 2026-10-31 (Scout, branch `claude/exciting-wozniak-rg2y6y`) — a stored bad stacking default no longer blocks every Settings save; Features section curated
 
 - **v0.504.7** — 🐛 FIX (Scout sweep (4), new angle: does the Settings page's GET → PUT of its own whole form

@@ -97,6 +97,26 @@ describe("PlanWeekCard", () => {
     mosaic: { cols: 3, rows: 3, panels: 9, text: "About a 3×3 mosaic (9 panels) covers all of it." },
   };
 
+  it("says when one of his targets is back, and only then", async () => {
+    const spy = vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+      nights: [night("2026-09-02")],
+      returning: [{
+        safe: "M_42", name: "M 42", date: "2026-09-02", minutes_above_min_alt: 60,
+        total_exposure_s: 3 * 3600,
+      }],
+    }));
+    const { unmount } = renderCard();
+    await waitFor(() => expect(screen.getByTestId("plan-week-returning")).toBeInTheDocument());
+    expect(screen.getByTestId("plan-week-returning").textContent).toBe(
+      "Back in your sky tonight: M 42 — it hasn't been up in your dark hours"
+      + " for over two months, and you have 3.0 h on it.");
+    unmount();
+    spy.mockResolvedValue(plan({ nights: [night("2026-09-02")] }));
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Plan my week")).toBeInTheDocument());
+    expect(screen.queryByTestId("plan-week-returning")).toBeNull();
+  });
+
   it("says how to shoot what it says to point at", async () => {
     // Mosaic mode is set on the scope *before* a session, and this table plans
     // seven of them — so naming a target and saying nothing about its framing

@@ -7,7 +7,7 @@
 import type {
   ClosingTarget, PlanWeek, SeasonClosing, TargetBestNight, WeekNight,
 } from "./api/client";
-import { weeksLeftPhrase } from "./closingSeason";
+import { haveClause, weeksLeftPhrase } from "./closingSeason";
 import { formatMinutes } from "./tonight";
 
 // A night's own local date, as the backend labels it: the calendar date of the
@@ -259,6 +259,35 @@ export function closingWeekNote(
       + tail;
   }
   return null;
+}
+
+/**
+ * "It's back" — one line naming the target(s) returning to the dark hours this
+ * week after two months away, or `null` on the ordinary week.
+ *
+ * The week table scores his targets night by night but never marks the
+ * *return*, which is the moment a beginner with a seasonal library forgets he
+ * has hours waiting on something: "Back in your sky from Thursday: M 42 — it
+ * hasn't been up in your dark hours for over two months, and you have 6.1 h on
+ * it." What he has is said by `haveClause`, the closing card's own per-part
+ * wording, so a mosaic's total is never read as one panel's.
+ *
+ * The first row is named in full (soonest night, then the deepest); any others
+ * are listed by name after it, so the line stays one line however seasonal the
+ * library is. An older backend sends no `returning` and the card is unchanged.
+ */
+export function returningWeekNote(plan: PlanWeek, now: Date): string | null {
+  const rows = plan.returning ?? [];
+  if (rows.length === 0) return null;
+  const [first, ...rest] = rows;
+  const label = weekNightLabelInline(first.date, now, nightInProgressDate(plan.nights, now));
+  const when = label === "tonight" || label === "tomorrow" ? label : `from ${label}`;
+  let line = `Back in your sky ${when}: ${first.name} — it hasn't been up in your dark`
+    + ` hours for over two months, and ${haveClause(first)}.`;
+  if (rest.length > 0) {
+    line += ` Also back this week: ${rest.map((r) => r.name).join(", ")}.`;
+  }
+  return line;
 }
 
 /**

@@ -76,8 +76,14 @@ export function lastNightLabel(date: string): string {
  * and ``spansMoreThanOneField`` both read a missing or sub-unity figure as 1.0,
  * and a scale under one would *inflate* the apparent depth, which is the
  * direction that hides the bug.
+ *
+ * Exported so the week card's "It's back" line (`returningWeekNote`) says what
+ * he has on a returning target in the same per-part words, not a second
+ * definition of them.
  */
-function haveClause(t: ClosingTarget): string {
+export function haveClause(
+  t: Pick<ClosingTarget, "total_exposure_s" | "field_fulls" | "depth_fulls">,
+): string {
   if (!(t.total_exposure_s > 0)) return "you haven't kept any of it yet";
   const total = formatIntegration(t.total_exposure_s);
   if (!spansMoreThanOneField(t.field_fulls)) return `you have ${total} on it`;

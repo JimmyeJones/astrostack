@@ -2485,20 +2485,6 @@ the card-signal slices, the removed-overlay halves, the Universe fly-to trio, th
 difficulty and "Your sky, so far" — were cut whole to [`SHIPPED.md`](SHIPPED.md) under that date. Do not re-pick
 any of them.)*
 
-- **🌟 NEW BEGINNER IDEA (Scout 2026-10-31) — "It's back": say so when a target he has already shot returns to
-  his evening sky.** *(Pillar: autonomy + enjoy — PRIORITY 2–3; size S–M; offline, read-only.)* A Seestar owner
-  with many targets shoots by season: M 42 in winter, the Veil in summer. When a target goes behind the Sun for
-  months and comes back, nothing tells him "your M 42 from last winter can be deepened again" — the week plan
-  scores his own targets nightly but never marks the *return*, which is the moment a beginner forgets he has 6 h
-  waiting. **Shape:** a target counts as "back" when its first night above the plan's altitude floor in the next
-  7 nights follows ≥ ~60 nights in which it never cleared it (both computed by the existing `nightplan`
-  visibility code from the site, never a network call), and he has ≥ 1 stack of it. Fold it into the **existing
-  week-plan card on Tonight** as one line ("Back this week: M 42 — you have 6.1 h from last winter"), not a new
-  card or banner (§1 UI rule); self-hides with no site, no stacked target, or nothing returning. **Grepped
-  2026-10-31:** "back in season", "this time last year", "returning target" — nothing in `docs/`, `docs/archive/`,
-  `frontend/src`, `webapp`, `seestack`. **Care:** the 60-night window must come from the ephemeris, not from his
-  capture dates (a target he simply skipped is not "back"); a circumpolar target never qualifies.
-
 - **NEW IDEA (Builder 2026-08-06, same run) — a beginner can crop the Moon, but there is no way to crop anything
   else.** *(Friendliness — PRIORITY 3; size M; **think before building**.)* The framing crop is disk-shaped by
   design (`measure_framing` finds "the one bright thing"), which is right for the Moon and Sun and useless for a
@@ -3364,6 +3350,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.0 **"It's back": the week-plan card on Tonight says when one of his targets returns to the dark hours after two months out of reach, with what he already has on it (per part on a mosaic)** (`nightplan._returning_targets`, `WeekPlan.returning`, `planweek.returningWeekNote`; the Scout's 2026-10-31 beginner idea)
 - ✅ v0.504.7 **A Settings save is no longer blocked by a stacking default already stored out of range — only the values the save changes are judged** (`routers.settings._sanitize_patch(stored=)`) — Scout sweep (4)
 - ✅ v0.504.6 **A first Full-res PNG renders faster with the identical bytes — the STF/asinh stretch works in place and takes each median by partitioning only a bracket around it** (`thumbnail.autostretch`, `asinh_stretch`, `_exact_median`, `_mtf(in_place=)`, `_highlight_rolloff(in_place=)`; stretch 10.0 s → 5.4 s, extra peak 830 → 479 MB at 5000×7000; closes the owner's ⭐ 2026-10-28 entry — its part (4), the dark ring, is the first Bugs entry)
 - ✅ v0.504.5 **Pictures stacked before v0.504.2 get the stored-preview border trim too — a one-off job the app queues at boot, per target, no Auto and no re-render** (`pipeline.backfill_unedited_preview_trims`, `submit_unedited_preview_trim_backfill`, job kind `unedited_preview_trim`; the last of slice (1) of the owner's ⭐ 2026-10-28 entry)

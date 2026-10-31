@@ -228,6 +228,25 @@ export interface PlanWeek {
   // (the scan is capped), so the card can be honest about a big library.
   n_targets_considered: number;
   n_targets_with_position: number;
+  /** Targets back in the dark hours this week after two months out of reach
+   * ("It's back"), soonest night first. Absent on an older backend. */
+  returning?: ReturningTarget[];
+}
+
+/** One of your own targets that clears the altitude floor again this week
+ * after at least two months on which it never did — read from the ephemeris,
+ * never from capture dates. A row of `PlanWeek.returning`. */
+export interface ReturningTarget {
+  safe: string;
+  name: string;
+  /** Local evening date (YYYY-MM-DD) of its first usable night this week —
+   * one of `PlanWeek.nights`' own dates. */
+  date: string;
+  minutes_above_min_alt: number;
+  total_exposure_s: number;
+  /** The per-part scale pair `ClosingTarget` carries, read the same way. */
+  field_fulls?: number | null;
+  depth_fulls?: number | null;
 }
 
 /** One of your own targets whose observing season ends soon — a row of

@@ -616,6 +616,9 @@ def _cached_week_plan(
         tuple((t.size_arcmin, t.size_minor_arcmin, t.canvas_is_mosaic,
                t.mosaic_companion)
               for t in targets),
+        # "It's back" rows carry the per-part scale its line is read by, and a
+        # restack can move it at the same total (the closing card's reason).
+        tuple((t.field_fulls, t.depth_fulls) for t in targets),
     )
     return cached_for_registry(
         request.app, "plan_week", sig,
@@ -681,6 +684,7 @@ def get_plan_week(
             "targets": [],
             "n_targets_considered": 0,
             "n_targets_with_position": 0,
+            "returning": [],
         }
 
     plan = _cached_week_plan(request, settings, observer, start,

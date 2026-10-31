@@ -1438,6 +1438,29 @@ def test_plan_week_says_which_of_my_targets_on_which_night(client, solved_librar
     assert per_target_dates == sorted(per_target_dates)
 
 
+def test_plan_week_says_when_one_of_my_targets_is_back(client, solved_library):
+    """"It's back": M 42's position, from London, clears the floor again in the first days
+    of October after a summer out of reach — the week payload names it once,
+    with what he already has on it, and on a January week (up every night) it
+    names nothing. A site-less install gets the empty list, not a missing key."""
+    assert client.get("/api/plan/week").json()["returning"] == []
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/week",
+                      params={"when": "2026-09-26T20:00:00+00:00"}).json()
+    rows = body["returning"]
+    # The fixture solves both of its targets to M 42's position, so both are
+    # back on the same night — soonest first, then most-kept, then by name.
+    assert sorted(r["name"] for r in rows) == ["M_42", "NGC_7000"]
+    assert len({r["date"] for r in rows}) == 1
+    row = rows[0]
+    assert row["date"] in [n["date"] for n in body["nights"]]
+    assert row["total_exposure_s"] > 0
+    assert row["minutes_above_min_alt"] >= 45.0
+    assert {"field_fulls", "depth_fulls"} <= row.keys()
+    jan = client.get("/api/plan/week", params={"when": JAN_EVENING}).json()
+    assert jan["returning"] == []
+
+
 def test_plan_week_picks_carry_the_framing_verdict(client, solved_library):
     """The week table's "Point at" column names a target for each of the nights
     ahead, and mosaic mode is set on the scope **before** a session — so the

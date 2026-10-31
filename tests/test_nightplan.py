@@ -2570,3 +2570,87 @@ def test_no_reported_usable_window_ever_runs_past_astronomical_dark(start_utc):
         # The transit it reports, and the minutes it credits, live inside it too.
         span_minutes = (w.dark_end - w.dark_start).total_seconds() / 60.0
         assert w.minutes_above_min_alt <= span_minutes + 5.0
+
+
+# ---- "It's back" — a target returning to the dark hours (plan_week.returning) ----
+
+#: A northern backyard on the owner's season turn, and a Leo-ish position that
+#: comes back into the pre-dawn sky in the first days of November from there.
+_BACK_SITE = Observer(lat_deg=40.0, lon_deg=-75.0, elevation_m=0.0)
+_BACK_START = datetime(2026, 10, 31, 18, 0, tzinfo=timezone.utc)
+
+
+def test_the_week_plan_names_a_target_that_is_back_after_months_away():
+    """The first night it clears the floor this week follows two months of
+    nights on which it never did — read from the ephemeris, and carried with
+    what he already has on it, per part on a mosaic."""
+    back = _lib("leo", "Leo thing", 172.5, 20.0, hours=6.1,
+                field_fulls=4.0, depth_fulls=5.0)
+    plan = np_plan.plan_week(_BACK_SITE, [back], start_utc=_BACK_START)
+    assert [r.safe for r in plan.returning] == ["leo"]
+    row = plan.returning[0]
+    assert row.date in [n.date for n in plan.nights]
+    # …the target's own first usable night of the week, not just any night.
+    first = next(n.date for n in plan.nights
+                 if n.best is not None and n.best.safe == "leo")
+    assert row.date == first
+    assert row.minutes_above_min_alt >= 45.0
+    assert row.total_exposure_s == pytest.approx(6.1 * 3600.0)
+    assert (row.field_fulls, row.depth_fulls) == (4.0, 5.0)
+
+
+def test_a_returning_target_really_was_out_of_reach_on_the_nights_between_samples():
+    """The look-back samples a night a week; this pins that no *unsampled*
+    night in the fortnight before the return — where a season's edge sits —
+    had it usable, so "back" is not an artefact of the stride."""
+    back = _lib("leo", "Leo thing", 172.5, 20.0, hours=1.0)
+    plan = np_plan.plan_week(_BACK_SITE, [back], start_utc=_BACK_START)
+    assert plan.returning
+    first_evening = datetime.fromisoformat(plan.nights[0].date)
+    before = np_plan.plan_week(
+        _BACK_SITE, [back],
+        start_utc=(first_evening - timedelta(days=14)).replace(
+            hour=17, tzinfo=timezone.utc),
+        nights=14)
+    seen = [n.date for n in before.nights if n.best is not None]
+    assert all(d >= plan.returning[0].date for d in seen), seen
+
+
+def test_a_target_up_all_along_or_never_shot_is_not_back():
+    """Circumpolar, already-up and nothing-kept targets never qualify — and
+    neither does one that was usable last night (it came back already)."""
+    circumpolar = _lib("ncp", "Polar", 30.0, 85.0, hours=2.0)
+    up_all_along = _lib("m31", "M 31", 10.7, 41.3, hours=2.0)
+    unshot = _lib("leo", "Leo thing", 172.5, 20.0, hours=0.0)
+    plan = np_plan.plan_week(_BACK_SITE, [circumpolar, up_all_along, unshot],
+                             start_utc=_BACK_START)
+    assert {t.safe for t in plan.targets} >= {"ncp", "m31", "leo"}
+    assert plan.returning == []
+    # A week later the Leo target is up every night — it is no longer "back".
+    later = np_plan.plan_week(_BACK_SITE, [_lib("leo", "Leo thing", 172.5, 20.0, 1.0)],
+                              start_utc=_BACK_START + timedelta(days=14))
+    assert later.returning == []
+
+
+def test_the_return_of_darkness_at_latitude_is_not_the_return_of_every_target():
+    """At high latitude the summer takes the nights away, not the targets: the
+    first dark week of August from Tromsø would otherwise call the whole sky
+    "back". Silent instead, like ``season_closing``'s final-sample rule."""
+    tromso = Observer(lat_deg=69.7, lon_deg=19.0, elevation_m=10.0)
+    ring = [_lib(f"p{i:02d}", f"P{i}", i * 15.0, 30.0, hours=1.0) for i in range(24)]
+    plan = np_plan.plan_week(tromso, ring,
+                             start_utc=datetime(2026, 8, 1, 12, tzinfo=timezone.utc))
+    assert plan.nights and plan.targets, "the week itself has dark nights"
+    assert plan.returning == []
+
+
+def test_the_return_costs_one_lookback_night_on_an_ordinary_week(monkeypatch):
+    """Nearest sample first, dropping every target it finds already up — so a
+    week with nothing returning adds one dark-window search, not ten."""
+    calls = []
+    real = np_plan._find_dark_window
+    monkeypatch.setattr(np_plan, "_find_dark_window",
+                        lambda *a, **k: calls.append(1) or real(*a, **k))
+    np_plan.plan_week(_BACK_SITE, [_lib("m31", "M 31", 10.7, 41.3, hours=2.0)],
+                      start_utc=_BACK_START, nights=7)
+    assert len(calls) == 7 + 1
