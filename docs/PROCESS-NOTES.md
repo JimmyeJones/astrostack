@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-10-31 (Scout, branch `claude/exciting-wozniak-rg2y6y`) — QA rotation sweep (4), new angle — the Settings page's GET → PUT of its own whole form: one bug, Scout-fixed (v0.504.7). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Inbox:** #878, #880, #903, #1015 — the same four, all previously acted-on and owner-gated; none updated since
+  2026-10-12. No open PRs at start.
+- **Dogfood `--mosaic`:** CLEAN — the Target page's five notes agree (top-right panel ~30 s vs 1 min, the readiness
+  card and next-best-move both say "a thinner part"), Dashboard shows only the ASTAP setup alert (expected in the
+  harness), week plan names one target; nothing overflowing, no console errors; heights on the standing baseline.
+- **Sweep (4), angle not run before** (grep `round-trip` found none): the Settings page PUTs its *whole* form, so
+  every stored value must survive GET → PUT unchanged. Ran it on a booted app (`client` fixture): the default form,
+  every `Settings` field at each of its 49 `ge/le/gt/lt` bounds followed by a fresh GET → PUT, and every stack-option
+  descriptor at min/max as the global default — **all 200**. The break is the one value the loader never validates:
+  `default_stack_options` is an opaque dict, and `_sanitize_patch` validated the whole of it on every PUT. One
+  out-of-range value already stored (`sigma_kappa: 50`) → **every** Settings save 422s, even one that only changes
+  `site_lat`. Exposure latent: validation has guarded writes here since v0.131.4 (2026-07-16) and `git log -G` on
+  the descriptors shows no bound ever tightened (only the Gaia retirement, already normalised) — so a hand-edit or a
+  pre-July value. Fixed by judging only the values the save changes (v0.504.7); test fails before, passes after.
+- **Checked and clean on the way:** the read-only token's gate (`_READONLY_GET_PATHS`, exact-path match on the
+  decoded `scope["path"]`, GET only — a trailing slash or a `..` segment is simply not in the set, so 403). Its
+  refusal text lists five paths and omits `/api/incoming-lag`; cosmetic, not filed.
+- **Curation:** thirteen closed/shipped entries cut whole from "Features that serve real workflows" to `SHIPPED.md`
+  (`IMPROVEMENTS.md` 4,950 → ~4,720 lines); one new beginner idea filed there ("It's back", grepped first).
+- **Baseline suite:** stopped at ~25 % (no failures) to fold the fix into a single full run, since `main`'s tip is
+  docs-only over the Builder's 8515-passed `c44da3db`.
+
 ## 2026-10-31 (Builder, branch `claude/zen-fermat-5mmpo5`) — nothing ungated to build; dogfood `--mosaic --editor` CLEAN.
 
 - **Suite:** 8515 passed / 7 skipped on `c44da3db` (xdist `-n 4`, BLAS capped, 20m38s). No open PRs at start.

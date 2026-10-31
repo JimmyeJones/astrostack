@@ -20,7 +20,8 @@ _AUTH_KEYS = ("auth_password_hash", "auth_salt", "auth_username",
               "readonly_token_hash", "readonly_token_salt")
 
 
-def _sanitize_patch(clean: dict[str, Any]) -> dict[str, Any]:
+def _sanitize_patch(clean: dict[str, Any],
+                   stored: dict[str, Any] | None = None) -> dict[str, Any]:
     """Sanitise *and validate* a persisted default_stack_options in a settings patch.
 
     Two guards, both mirroring the per-target stack-defaults endpoint
@@ -40,6 +41,17 @@ def _sanitize_patch(clean: dict[str, Any]) -> dict[str, Any]:
       exists to prevent. The per-target ``PUT .../stack-defaults`` already validates;
       this closes the same gap on the global path.
 
+    **Only the values this save changes are judged.** The Settings page PUTs its
+    whole form, so the stored ``default_stack_options`` rides along on every save,
+    including one that only flips the walk-away switch. The store keeps that dict
+    opaque and the loader never validates it, so a value it already holds that the
+    validator refuses — a hand-edited ``config.json``, or a value written before
+    v0.131.4 validated this path — used to 422 **every** Settings save, with a
+    message about a stacking option the user never touched, and left no way to
+    save anything else. A value carried back exactly as *stored* is not new input,
+    so it passes through as it was (the per-target Stack form's own validation
+    still names it at stack time); any value that differs is validated as before.
+
     Mutates and returns *clean*. Raises ``HTTPException(422)`` on a bad value."""
     dso = clean.get("default_stack_options")
     if isinstance(dso, dict):
@@ -52,8 +64,12 @@ def _sanitize_patch(clean: dict[str, Any]) -> dict[str, Any]:
         # re-saving settings quietly upgrades an old value instead of writing it
         # back for the next version to trip over (v0.418.0, "gaia").
         stripped = normalise_retired_option_values(strip_non_form_keys(dso))
+        prior = (normalise_retired_option_values(strip_non_form_keys(stored))
+                 if isinstance(stored, dict) else {})
+        changed = {k: v for k, v in stripped.items()
+                   if k not in prior or prior[k] != v}
         try:
-            validate_stack_options(stripped)
+            validate_stack_options(changed)
         except ValueError as exc:
             raise HTTPException(
                 status_code=422,
@@ -102,7 +118,8 @@ def update_settings(patch: dict[str, Any], request: Request) -> dict[str, Any]:
     store = deps.get_settings_store(request)
     # Strip auth credentials (managed only via /api/auth/password) and surface a
     # 422 rather than a 500 when a patch fails validation.
-    clean = _sanitize_patch({k: v for k, v in patch.items() if k not in _AUTH_KEYS})
+    clean = _sanitize_patch({k: v for k, v in patch.items() if k not in _AUTH_KEYS},
+                            store.get().default_stack_options)
     try:
         s = store.update(clean)
     except ValidationError as exc:
@@ -165,7 +182,8 @@ def import_settings(payload: dict[str, Any], request: Request) -> dict[str, Any]
     """
     store = deps.get_settings_store(request)
     skip = (*_AUTH_KEYS, *_HOST_KEYS)
-    clean = _sanitize_patch({k: v for k, v in payload.items() if k not in skip})
+    clean = _sanitize_patch({k: v for k, v in payload.items() if k not in skip},
+                            store.get().default_stack_options)
     try:
         s = store.update(clean)
     except ValidationError as exc:
