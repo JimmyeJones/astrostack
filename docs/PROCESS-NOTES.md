@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-10-31 (Builder, branch `claude/zen-fermat-tqx24a`) — dogfood `--mosaic --dithered --editor`: one editor fix (v0.505.2)
+
+* **The find.** All three drives ran; the single field and the 2×2 mosaic were CLEAN (trim 7.9 %, 21 ops
+  re-render, taste chips clean). The **dithered** drive reported two findings after tapping "Too dark":
+  *"NOTHING SAID"* and *"the taste just taught has no note"*. The screenshot showed the note **was** there — the
+  stand-in `AUTO_TASTE_PLAIN_NOTE` with its Reset — so the second was the probe's regex. The first was real
+  latency: `curl` against the same server timed the tap POST at 2.3–3.2 s and the chip row's re-read at 4.4 s,
+  every one re-measuring the same unchanged picture (`classify_run_measured`, `_run_taste_context`). The
+  probe's 4 s toast window was simply shorter than the app's answer. Fixed (v0.505.2, `run_measure_memo`):
+  15 ms / 10 ms; re-driven against the live server, the dithered drive is CLEAN, marks included.
+* **Method note.** This was the *second* "NOTHING SAID" from this drive whose root cause was half instrument and
+  half app (the first, v0.492.56–60, was all instrument). Read the screenshot before the text, then time the
+  request with `curl` — the two together separated the halves in minutes.
+* Other readings, not acted on: the dithered readiness card prints *"grain 0.000"* (σ below 0.0005 on the
+  synthetic sample; the owner's stacks measure 0.015–0.020, so it cannot read that way for him).
+
 ## 2026-10-31 (Builder, branch `claude/zen-fermat-0zsxqf`) — dogfood `--mosaic --editor`: one friendliness fix (v0.505.1)
 
 - **Start:** no live claims, every Bugs entry gated or deprioritised, no open beginner item in Features.

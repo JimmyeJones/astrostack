@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-10-31 (Builder, branch `claude/zen-fermat-tqx24a`) — the Auto feedback chip answers at once
+
+- **v0.505.2** — 🟠 EDITOR (PRIORITY 1), a `--mosaic --dithered --editor` dogfood find: on the dithered run the
+  drive tapped "Too dark" and read *"NOTHING SAID"*. The app did say it — late. Every chip tap's POST re-read the
+  proxy, re-measured the kept rectangle and re-classified the picture (`classify_run_measured`, for the bucket),
+  and the chip row's re-read straight after it did all that again plus Auto's measured knobs
+  (`_run_taste_context`) — about files no tap changes. **Measured on the dogfood server** (a 1212×784 canvas,
+  smaller than the owner's 1693×1150 mosaics): tap POST **2.3–3.2 s**, re-read **4.4 s**, so the "Thanks — Auto
+  will lean that way" toast and the measured "why Auto shifted" note arrived seconds after the tap. New
+  `webapp/run_measure_memo.py` remembers both answers keyed on everything they read — run id, master path, the
+  stored `is_mosaic` flag and the `(mtime_ns, size)` of the master and both coverage siblings — so a re-stack or
+  a re-written sibling measures afresh; a computation that raises (or a knobs half that failed) is not stored;
+  values are deep-copied in and out; 32 entries, in-process, nothing persisted. The opening read also files the
+  classification under the POST's key, so the first tap is already a lookup. **After:** tap POST **15 ms**,
+  re-read **10 ms**; the opening read is unchanged. Answers are identical to a fresh measurement (pinned).
+  Tests +7 (3 endpoint, 4 unit), **3 red before** under a scratch revert of `editor.py`. Six existing tests count
+  measurement calls per request to prove the trim override never moves the region; they now run under a
+  `measure_every_request` fixture that bypasses the memo, so each request still measures and their assertions
+  are unchanged. The dogfood drive's note reader also learned `AUTO_TASTE_PLAIN_NOTE` — the stand-in note
+  (with its Reset) the row shows while the measured note is in flight — which it had misreported as "no note".
+  No config, schema, on-disk, default or API-shape change.
+
 ## 2026-10-31 (Builder, branch `claude/zen-fermat-0zsxqf`) — the sample card after the sample is stacked
 
 - **v0.505.1** — 🟡 FRIENDLINESS (PRIORITY 3), a dogfood `--mosaic --editor` find (the screenshot, not the text):
