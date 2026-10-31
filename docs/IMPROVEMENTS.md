@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- `claude/zen-fermat-tqx24a` (Builder 2026-10-31) — the Auto feedback chip tap re-measures the whole picture on every tap (`classify_run_measured`, `_run_taste_context`): memoize per run.
 
 ---
 
