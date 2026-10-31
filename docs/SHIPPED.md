@@ -1,5 +1,21 @@
 # Shipped — the record
 
+## 2026-10-31 (Builder, branch `claude/zen-fermat-0zsxqf`) — the sample card after the sample is stacked
+
+- **v0.505.1** — 🟡 FRIENDLINESS (PRIORITY 3), a dogfood `--mosaic --editor` find (the screenshot, not the text):
+  with the sample already stacked (the Dashboard's own "Recent stacks" showed it), `SampleImageCard` still said
+  *"Your sample target is ready"* and led with a filled **Stack it** — the button that only makes a duplicate of
+  the picture the beginner already has, while the step the card exists to walk him to next (edit → export) was two
+  clicks away. The card now reads the sample's runs (`["runs", safe]`, the key the Target and History pages
+  already use, enabled only while a sample is loaded) and, once one exists, says *"Your sample is stacked — try
+  the editor next"* with a filled **Edit it** that opens `/targets/<sample>/edit/<run>` — the run picked by the
+  new pure `sampleRunToEdit` (newest with a picture, else newest: the Target page's fallback). **Nothing removed:**
+  stacking stays on the card as a quiet **Stack again** (same `triggerStack(safe, {})`), and Open sample / Remove
+  are unchanged. An unreadable run list (older backend, network) keeps the old wording and buttons. Tests +7 in
+  `SampleImageCard.test.tsx` (the three loaded-state cases now mock the run list explicitly); **fail-before
+  verified** by restoring the old component — 4 of the new cases red. Frontend-only; no endpoint, config, schema,
+  on-disk, default or API-shape change.
+
 ## 2026-10-31 (Builder, branch `claude/zen-fermat-q4051c`) — "It's back"
 
 - **v0.505.0** — 🌟 BEGINNER FEATURE ("It's back", the Scout's 2026-10-31 idea). `plan_week` now records each

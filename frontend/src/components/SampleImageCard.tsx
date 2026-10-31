@@ -1,9 +1,22 @@
 import { Button, Group, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconPlayerPlay, IconSparkles, IconTrash } from "@tabler/icons-react";
+import { IconPlayerPlay, IconSparkles, IconTrash, IconWand } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import type { StackRun } from "../api/client";
+
+/**
+ * The sample's run the "Edit it" button opens: the newest one with a picture,
+ * else the newest — the same fallback the Target page uses for *the* picture,
+ * so the card and the page it leads to edit the same thing. `null` while the
+ * sample has no stack (or the runs list is unknown), which keeps the card on its
+ * "Stack it" wording.
+ */
+export function sampleRunToEdit(runs: StackRun[] | undefined): StackRun | null {
+  if (!runs || runs.length === 0) return null;
+  return runs.find((r) => r.has_preview) ?? runs[0];
+}
 
 /**
  * "Try it with a sample image" — the empty-app onboarding card.
@@ -25,6 +38,16 @@ export function SampleImageCard() {
 
   const sample = useQuery({ queryKey: ["sample"], queryFn: api.getSampleStatus });
   const stats = useQuery({ queryKey: ["stats"], queryFn: api.getStats });
+  // Has the sample been stacked yet? Same key as the Target and History pages,
+  // so the answer is shared and a finished stack there updates this card. Once
+  // it has, "Stack it" would only make a duplicate of the picture he already
+  // has — the next step on the journey this card exists for is the editor.
+  const sampleSafe = sample.data?.loaded ? sample.data.safe : null;
+  const runs = useQuery({
+    queryKey: ["runs", sampleSafe],
+    queryFn: () => api.listStackRuns(sampleSafe as string),
+    enabled: !!sampleSafe,
+  });
 
   const load = useMutation({
     mutationFn: api.loadSample,
@@ -92,6 +115,8 @@ export function SampleImageCard() {
   if (!loaded && !libraryEmpty) return null;
 
   if (loaded) {
+    const editRun = sampleRunToEdit(runs.data);
+    const stacked = editRun !== null;
     return (
       <Paper withBorder radius="md" p="md">
         {/* Wraps, and the wording column is based on 240 px rather than 0 — see
@@ -104,19 +129,41 @@ export function SampleImageCard() {
               <IconSparkles size={20} />
             </ThemeIcon>
             <Stack gap={2} style={{ minWidth: 0 }}>
-              <Text fw={600} size="sm">Your sample target is ready</Text>
-              <Text size="xs" c="dimmed">
-                Open it to try QC, stacking, editing and exporting — just like your
-                own frames. Remove it any time; nothing else is touched.
-              </Text>
+              {stacked ? (
+                <>
+                  <Text fw={600} size="sm">Your sample is stacked — try the editor next</Text>
+                  <Text size="xs" c="dimmed">
+                    Open its picture in the editor to try Auto-process and export it —
+                    just like your own frames. Remove it any time; nothing else is touched.
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text fw={600} size="sm">Your sample target is ready</Text>
+                  <Text size="xs" c="dimmed">
+                    Open it to try QC, stacking, editing and exporting — just like your
+                    own frames. Remove it any time; nothing else is touched.
+                  </Text>
+                </>
+              )}
             </Stack>
           </Group>
           <Group gap="xs" style={{ flexShrink: 0 }}>
-            <Button size="xs" color="violet"
+            {stacked && (
+              <Button size="xs" color="violet"
+                leftSection={<IconWand size={14} />}
+                onClick={() => sample.data?.safe
+                  && navigate(`/targets/${sample.data.safe}/edit/${editRun.id}`)}>
+                Edit it
+              </Button>
+            )}
+            {/* Kept once stacked (nothing is removed — AGENTS.md's UI rule), but
+                as a quiet "Stack again" so it no longer reads as the next step. */}
+            <Button size="xs" color="violet" variant={stacked ? "subtle" : "filled"}
               leftSection={<IconPlayerPlay size={14} />}
               loading={stack.isPending}
               onClick={() => sample.data?.safe && stack.mutate(sample.data.safe)}>
-              Stack it
+              {stacked ? "Stack again" : "Stack it"}
             </Button>
             <Button size="xs" variant="light" color="violet"
               onClick={() => sample.data?.safe && navigate(`/targets/${sample.data.safe}`)}>
