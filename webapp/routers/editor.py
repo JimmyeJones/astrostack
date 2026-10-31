@@ -58,6 +58,7 @@ from seestack.qc.metrics import frame_fwhm_to_master_px
 from webapp import deps
 from webapp import edit_fit_cache
 from webapp import edit_resume_cache
+from webapp import run_measure_memo
 from webapp import stale_crop
 from webapp.field_fulls import canvas_supersampling
 from webapp.run_options import derived_from_run_id, parse_run_options
@@ -556,8 +557,16 @@ def classify_run_measured(project_dir: Path, run) -> dict:
     border was, and the fringe it was chasing renders nowhere near either target
     anyway. The table is in ``presets.measured_region``.
     """
+    key = run_measure_memo.key_for("classify", project_dir, run)
+    hit = run_measure_memo.lookup(key)
+    if hit is not run_measure_memo.MISS:
+        return hit
     m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run)
-    return presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
+    out = presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
+    # Remembered per run's files (``webapp.run_measure_memo``): every Auto
+    # feedback tap asks this again about a picture that has not changed.
+    run_measure_memo.store(key, out)
+    return out
 
 
 def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
@@ -1135,16 +1144,32 @@ def _run_taste_context(request: Request, safe: str, run_id: int,
     function used to pay on a trim-off request is gone."""
     try:
         project_dir, run = _run_info(request, safe, run_id)
-        m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run)
-        cls = presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale).get("cls")
     except Exception:  # noqa: BLE001 — advisory; never 500 the editor's load
         return None, None
+    # Both answers are remembered per run's files (``webapp.run_measure_memo``):
+    # the chip row re-reads this after every tap, about a picture no tap changes.
+    # The classification is filed under :func:`classify_run_measured`'s own key
+    # too, so the editor's opening read already answers the first tap's POST.
+    key = run_measure_memo.key_for("taste", project_dir, run)
+    cls_key = run_measure_memo.key_for("classify", project_dir, run)
+    hit = run_measure_memo.lookup(key)
+    if hit is not run_measure_memo.MISS:
+        return hit
+    try:
+        m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run)
+        classified = presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
+        cls = classified.get("cls")
+    except Exception:  # noqa: BLE001 — advisory; never 500 the editor's load
+        return None, None
+    run_measure_memo.store(cls_key, classified)
     try:
         knobs = presets_mod.measured_auto_knobs(
             m_rgb, m_cov,
             grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
     except Exception:  # noqa: BLE001 — the marks are the optional half
+        # Not remembered: a failed half is retried on the next read.
         return cls, None
+    run_measure_memo.store(key, (cls, knobs))
     return cls, knobs
 
 

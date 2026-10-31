@@ -999,6 +999,7 @@ def test_preset_suggestion_does_not_call_a_mosaic_a_star_cluster_off_its_fringe(
     assert body["preset_id"] is None, body
 
 
+@pytest.mark.usefixtures("measure_every_request")
 def test_preset_suggestion_classifies_the_kept_picture_with_the_trim_off_too(
         client, solved_library, monkeypatch):
     """The chip's claim is about the **object**, so the border-trim preference must
@@ -1702,6 +1703,21 @@ def test_auto_feedback_with_the_trim_off_is_filed_on_the_kept_picture_too(
     assert lib_wide["biases"], lib_wide
 
 
+@pytest.fixture
+def measure_every_request(monkeypatch):
+    """Bypass ``webapp.run_measure_memo`` so every request measures the picture.
+
+    For the tests that pin *which region* each request measures by counting the
+    calls a spy sees: with the memo on, the second request about one run's
+    unchanged files is a lookup and the spy sees nothing — which is the memo
+    working, not the region moving. Bypassing it keeps those tests asking their
+    own question of every request; the memo's own tests sit beside them."""
+    from webapp import run_measure_memo
+
+    monkeypatch.setattr(run_measure_memo, "lookup",
+                        lambda _key: run_measure_memo.MISS)
+
+
 def _classify_shape_spy(monkeypatch) -> list:
     """Record the ``(h, w)`` of every array the webapp hands ``classify_target``."""
     from webapp.routers import editor as editor_mod
@@ -1732,6 +1748,112 @@ def _knob_shape_spy(monkeypatch) -> list:
     return shapes
 
 
+def test_an_auto_feedback_tap_does_not_re_measure_the_picture_the_editor_opened_on(
+        client, solved_library, monkeypatch):
+    """The "How did Auto do?" chip tap, found by a ``--dithered --editor`` dogfood
+    pass whose drive read *"NOTHING SAID"* after "Too dark": every tap re-read the
+    proxy, re-measured the kept rectangle and re-classified the picture — **twice**,
+    once for the POST's bucket and once for the chip row's re-read — about files
+    no tap changes. 2.3-3.2 s for the POST and 4.4 s for the re-read on a canvas
+    smaller than the owner's mosaics, so the tap's answer arrived seconds late.
+
+    Now the editor's opening read measures once, and the tap and the re-read after
+    it are lookups that answer exactly what the measurement did."""
+    from webapp import run_measure_memo
+    run_measure_memo.clear()
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="memo_tap")
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences"
+    classified = _classify_shape_spy(monkeypatch)
+    knobs = _knob_shape_spy(monkeypatch)
+
+    opened = client.get(url)
+    assert opened.status_code == 200
+    assert (len(classified), len(knobs)) == (1, 1)
+
+    tap = client.post("/api/editor/auto-preferences/feedback",
+                      json={"cue": "too_dark", "safe": safe, "run_id": rid})
+    assert tap.status_code == 200
+    reread = client.get(url)
+    assert reread.status_code == 200
+    assert (len(classified), len(knobs)) == (1, 1), (
+        "a tap re-measured a picture that had not changed")
+
+    # ...and the remembered answers are the measured ones: the same tap and
+    # re-read with the memo emptied first file the cue in the same bucket and
+    # say the same note and marks.
+    remembered = (tap.json(), reread.json())
+    client.delete("/api/editor/auto-preferences")
+    run_measure_memo.clear()
+    client.get(url)
+    tap2 = client.post("/api/editor/auto-preferences/feedback",
+                       json={"cue": "too_dark", "safe": safe, "run_id": rid})
+    run_measure_memo.clear()
+    reread2 = client.get(url)
+    assert (tap2.json(), reread2.json()) == remembered
+    assert len(classified) == 3
+
+
+def test_a_restack_re_measures_the_picture_the_memo_remembered(
+        client, solved_library, monkeypatch):
+    """The memo is keyed on the run's files, so a master written again — a
+    re-stack into the same path — is a new picture and is measured afresh rather
+    than answered from the old one."""
+    import os
+    from webapp import run_measure_memo
+    run_measure_memo.clear()
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="memo_restack")
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences"
+    classified = _classify_shape_spy(monkeypatch)
+
+    assert client.get(url).status_code == 200
+    assert client.get(url).status_code == 200
+    assert len(classified) == 1
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            fp = Path(proj.project_dir) / "output" / "memo_restack.fits"
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    st = fp.stat()
+    os.utime(fp, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    assert client.get(url).status_code == 200
+    assert len(classified) == 2
+
+
+def test_a_failed_knob_measurement_is_not_remembered(
+        client, solved_library, monkeypatch):
+    """The marks are the optional half of the read and degrade on their own; a
+    measurement that failed once is retried on the next read, not remembered as
+    "no marks" for the life of the container."""
+    from webapp import run_measure_memo
+    from webapp.routers import editor as editor_mod
+    run_measure_memo.clear()
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="memo_knobfail")
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences"
+    real = editor_mod.presets_mod.measured_auto_knobs
+    calls = {"n": 0}
+
+    def flaky(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("transient")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(editor_mod.presets_mod, "measured_auto_knobs", flaky)
+    assert client.get(url).status_code == 200
+    assert client.get(url).status_code == 200
+    assert client.get(url).status_code == 200
+    assert calls["n"] == 2
+
+
+@pytest.mark.usefixtures("measure_every_request")
 def test_the_per_run_trim_override_does_not_move_the_region_the_knobs_are_read_off(
         client, solved_library, monkeypatch):
     """The remainder of the lead v0.494.5 decided the archetype half of, and the
@@ -1763,6 +1885,7 @@ def test_the_per_run_trim_override_does_not_move_the_region_the_knobs_are_read_o
     assert shapes == [(76, 96), (76, 96), (76, 96)]
 
 
+@pytest.mark.usefixtures("measure_every_request")
 def test_the_per_run_trim_override_does_not_move_the_bucket_a_cue_is_filed_in(
         client, solved_library, monkeypatch):
     """The editor's **per-run** border-trim switch must *not* reach the
@@ -1794,6 +1917,7 @@ def test_the_per_run_trim_override_does_not_move_the_bucket_a_cue_is_filed_in(
     assert shapes == [(76, 96), (76, 96)]
 
 
+@pytest.mark.usefixtures("measure_every_request")
 def test_the_run_scoped_profile_reads_the_same_archetype_whatever_the_override(
         client, solved_library, monkeypatch):
     """And the other half of the pair: the run-scoped "why Auto shifted" note.
@@ -1814,6 +1938,7 @@ def test_the_run_scoped_profile_reads_the_same_archetype_whatever_the_override(
     assert shapes == [(76, 96), (76, 96), (76, 96)]
 
 
+@pytest.mark.usefixtures("measure_every_request")
 def test_the_archetype_is_the_same_with_the_setting_off_and_the_override_on(
         client, solved_library, monkeypatch):
     """Both directions, which is the case a test that only ever turns the override
@@ -1839,6 +1964,7 @@ def test_the_archetype_is_the_same_with_the_setting_off_and_the_override_on(
     assert shapes == [(76, 96), (76, 96)]
 
 
+@pytest.mark.usefixtures("measure_every_request")
 def test_the_chip_and_the_bucket_answer_one_question_by_one_rule(
         client, solved_library, monkeypatch):
     """The property that made this one task rather than two, and the one worth

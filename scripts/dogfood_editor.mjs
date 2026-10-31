@@ -552,8 +552,13 @@ if (!(await autoButton.count())) {
   // **Reset** link lives, so an absent note is a missing control and not merely a
   // missing sentence.
   const whyAutoShifted = async () => {
+    // The third form is ``AutoFeedback.AUTO_TASTE_PLAIN_NOTE``, the stand-in the
+    // row shows while the measured note is still in flight — it carries the
+    // Reset link too, so it is a note and not a missing one. Without it a slow
+    // re-read printed "the taste just taught has no note" about a line that was
+    // on screen with its Reset beside it (the 2026-10-31 --dithered pass).
     const note = page.locator('div[class*="mantine-Alert-root"] p')
-      .filter({ hasText: /Auto (is running|would run) / }).first();
+      .filter({ hasText: /Auto (is running|would run) |Auto has learned a taste/ }).first();
     if (!(await note.count())) return "";
     return (await note.innerText())
       .replace(/\s+/g, " ").replace(/\s*Reset\s*$/, "").trim();
