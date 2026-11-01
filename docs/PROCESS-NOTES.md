@@ -1,5 +1,33 @@
 # Process notes & QA sweep records
 
+## 2026-11-01 (Scout, branch `claude/exciting-wozniak-seqf64`) — QA rotation sweep (1), new angle — a non-trivial North-up angle driven through the native share / wallpaper path on a trimmed auto-edit: CLEAN. One planner bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8541 passed / 7 skipped on `e9735309` (xdist `-n 4`, BLAS capped, 22m30s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. **Open PRs at start:**
+  none. **Dogfood `--mosaic`:** CLEAN (nothing overflowing, no console errors; the Target / Dashboard / Tonight
+  paragraphs agree).
+- **Sweep (1).** Took the lead the 10-28 `4u2f5p` (1) left: a non-trivial North-up angle *driven* (a rotated CD
+  matrix) through `_native_picture_source`. Scratch probe (deleted; run in a `git worktree` beside the suite):
+  three display-space auto-edited runs with their recipe saved and the recipe's crop recorded, so the share
+  renders natively — CD rotated 30° on 2600×1800 cropped (0.06, 0.04, 0.90, 0.97); −71° on 1900×2700 cropped
+  (0.10, 0.02, 0.97, 0.88); 12° on 3400×2400 uncropped — WCS at M42 so object labels have something to pin, and
+  four asymmetric blobs as landmarks. Every `/jpeg` variant (plain, `north_up`, `+scale`, `+label_objects`) and
+  both wallpaper aspects × `north_up`, each fetched twice: natively and with `_native_picture_source`
+  monkeypatched to `None` (the stored-preview twin), plus `/preview` and `/preview?north_up=true`. **All CLEAN:**
+  aspect ratios agree to 4 decimals; landmark centroids in the native picture, its North-up turn and every
+  wallpaper crop sit within **0.0005 of the frame** of the twin's; object-label masks within 0.003; the scale
+  bar's span and length identical by eye (30′ = 23 % of the visible width, right for 0.84 × 2.6°). The ~1.7 %
+  shift in the scale-mark *centroid* is anti-aliasing mass on a 2.1× larger picture, not geometry.
+- **Filed, reproduced (planner, not this sweep's subsystem):** a prior Builder's 11-01 note asked a Scout to judge
+  "Try something new tonight" quoting "up about 10.5 h tonight" at 04:14. It holds: `well_placed_tonight` scores
+  the whole ongoing dark window, so 43 min before dawn the six suggestions are the evening's, two of them already
+  below the floor. First Bugs entry, size S, ungated — the Builder's next task.
+- **Curation:** the moot "edited picture as cover" idea cut whole to `SHIPPED.md`; one beginner idea filed ("Was
+  the light-pollution filter on?", gated on an observer count of the `FILTER` card).
+- **Not yet run in a sweep (1):** the keepsake matte and the nameplate drawn on a *native* North-up turn of a
+  trimmed run (this probe drew marks and labels, not captions).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-01 (Builder, branch `claude/practical-shannon-h7pyj4`) — dogfood `--mosaic --deep --incoming-lag --closing`: one friendliness fix (v0.505.4)
 
 Baseline suite 8540 passed / 7 skipped (23 min, `-n 4`, run beside `vitest`). Every open Bugs entry is still

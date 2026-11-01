@@ -5,28 +5,34 @@
 > belongs in `docs/PROCESS-NOTES.md`, never here. The 2,559-line page this replaced is kept verbatim in
 > [`archive/FOCUS-to-2026-10-21.md`](archive/FOCUS-to-2026-10-21.md) — nothing was deleted.
 
-## Front of the queue (2026-10-31)
+## Front of the queue (2026-11-01)
 
-**No ungated bug is open (v0.505.3 closed a dogfood find: a catalogued galaxy read as a "star cluster"), and the owner's ⭐ entry from #1317 is closed** — trim on every surface (v0.503.23–v0.504.5), "Finish my unedited pictures" (v0.504.0), repeat downloads cached (v0.503.24) and the first render ~40 % faster with identical bytes (v0.504.6); its part (4), the dark ring, is the first Bugs entry, gated on the S30's measured vignette. "It's back" shipped as v0.505.0; a Builder with nothing ungated should dogfood (`--mosaic --editor`) and file what it finds. Recently closed: a stored out-of-range stacking default no longer blocks every Settings save (v0.504.7, Scout sweep (4)); a non-finite number in ASTAP's `.ini` reads as missing (v0.504.4, Scout sweep (3)); an editor export no longer moves the picture the per-panel hold asks about (v0.503.25, Scout sweep (2)); a `NaN`/`Infinity` body literal is a 422, not a 500 (v0.503.22, Scout sweep (4)); a set-but-wrong ASTAP path now says what is wrong with it (v0.503.21, Scout sweep (3)); the walk-away per-panel readability hold compares a panel with the picture standing (v0.503.20, Scout sweep (2)); an ASTAP that is there but can't be started now reads as a setup
-problem (v0.503.19, Scout sweep (3)); a legacy North-up save on a mosaic is recovered again (v0.503.18, Scout sweep (1)); an upload no longer replaces a sub that reached `incoming/` mid-stream (v0.503.17, Scout sweep (4)); a mosaic panel left a few readable subs vs the walk-away hold (v0.503.16); the deepening reel's shallow night drawn cleaner on a grown mosaic (v0.503.15); one night, one dark window (v0.503.10); the hung ffmpeg decoder vs Cancel (v0.503.8); the walk-away missing-files hold on a mosaic panel (v0.503.5); Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
-progress / Tonight badge); a dogfood pass found and fixed the week plan's same-sky flip (v0.502.41); the Scout's sweep (4) fixed a merge that
-deleted a folder a stack was still writing into (v0.502.42). After that, a Builder with nothing ungated should take a beginner feature from "Features that serve
-real workflows" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), or dogfood (`--mosaic --editor`) and file what it finds.
+**One ungated bug is open and it is the Builder's next task:** "Try something new tonight" plans the whole night
+even when most of it is gone (first Bugs entry, size S, reproduced by the Scout on 2026-11-01 — the v0.505.4 class
+one card over: clip `well_placed_tonight`'s window to now, and check all four callers). After that, the owner's ⭐
+entry from #1317 is closed apart from its part (4), the dark ring — the second Bugs entry, gated on the S30's
+measured vignette. A Builder with nothing ungated should dogfood (`--mosaic --editor`) and file what it finds, or
+take the beginner idea in "Features that serve real workflows" once its observer gate is answered. Recently closed:
+the Calibration repair offer names what it repairs (v0.505.5); "Point here tonight" no longer recommends a target
+that has set (v0.505.4); a catalogued galaxy is not a "star cluster" (v0.505.3); an Auto chip tap answers at once
+(v0.505.2); "It's back" (v0.505.0); a stored bad stacking default no longer blocks every Settings save (v0.504.7,
+Scout sweep (4)). Older closures are in the archived run log and `SHIPPED.md`.
 
 **Gated, do not start:** the un-located-panel entry (third in Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
 re-litigate a stand-down that carries numbers. **Issue inbox:** #878, #880, #903, #1015 — all previously acted-on
-and owner-gated, none updated since 2026-10-12 (re-checked 2026-10-31).
+and owner-gated, none updated since 2026-10-12 (re-checked 2026-11-01).
 
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (4), 2026-10-31
-→ next sweep is (1).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (1), 2026-11-01
+→ next sweep is (2).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-11-01 (Scout, branch `claude/exciting-wozniak-seqf64`) — **QA rotation sweep (1), new angle: a non-trivial North-up angle (CD rotated 30°/−71°/12°) through the native share and wallpaper path on trimmed auto-edits — CLEAN** (landmarks within 0.05 % of the frame of the stored-preview twin). **Filed, reproduced:** "Try something new tonight" scores the whole ongoing night (`well_placed_tonight`). Inbox: the same four, owner-gated. Dogfood `--mosaic` CLEAN. One moot idea closed, one beginner idea filed (LP filter, observer-gated). **START HERE NEXT RUN:** Builder: the first Bugs entry. **Rotation: (1) done → next sweep is (2).***
 *2026-11-01 (Builder, branch `claude/practical-shannon-ieouv1`) — **v0.505.5: the Calibration page's broken-pixel offer names what it repairs ("Repair hot or dead pixels on every stack from now on") instead of a "Repair these" above a table whose counts sit below it** (`calibration.defect_repair_offer`); dogfood `--mosaic --editor --calibration --no-site` otherwise CLEAN. Suite 8541 passed / 7 skipped; vitest 4905. **START HERE NEXT RUN:** Scout: sweep (1) and a fresh beginner idea; Builder: the observer can answer the dark-ring vignette gate.*
 *2026-11-01 (Builder, branch `claude/practical-shannon-h7pyj4`) — **v0.505.4: the Dashboard's "Point here tonight" no longer recommends a started target that has already set** (`pickContinueTonight(nowMs)`; read at 04:14 it named a target whose window closed at 21:16); dogfood `--mosaic --deep --incoming-lag --closing` otherwise CLEAN. **START HERE NEXT RUN:** Scout: sweep (1) and a fresh beginner idea; Builder: the observer can answer the dark-ring vignette gate.*
 *2026-11-01 (Builder, branch `claude/zen-fermat-j4oyhb`) — **v0.505.3: a catalogued galaxy/nebula the pixels call a star cluster gets no "Star cluster" chip and no cluster-bucket taste** (`presets.reconcile_with_catalog`; a small galaxy on the S30 field read as a cluster 12 of 16 times); dogfood `--mosaic --big --editor --restack` otherwise CLEAN. **START HERE NEXT RUN:** Scout: sweep (1) and a fresh beginner idea; Builder: the observer can answer the dark-ring vignette gate.*
@@ -36,7 +42,6 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-10-31 (Scout, branch `claude/exciting-wozniak-rg2y6y`) — **QA rotation sweep (4), new angle: the Settings page's whole-form GET → PUT round-trip — clean at all 49 field bounds, but one out-of-range value already stored in `default_stack_options` 422'd every save; Scout-fixed, v0.504.7** (`_sanitize_patch(stored=)`). Inbox: the same four, owner-gated. Dogfood `--mosaic` CLEAN. Features section curated (13 closed entries → `SHIPPED.md`) and one beginner idea filed. **START HERE NEXT RUN:** Builder: "It's back" (Features). **Rotation: (4) done → next sweep is (1).***
 *2026-10-31 (Builder, branch `claude/zen-fermat-5mmpo5`) — **no code change: every open Bugs entry is gated on owner/observer data and "Features that serve real workflows" has no open beginner item; dogfood `--mosaic --editor` CLEAN on the standing baseline** (trim 7.9 %, 21 ops re-render, Auto + taste chips clean). Suite 8515 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (4) and a fresh beginner idea for the Features section; Builder: the observer can answer the dark-ring vignette gate.*
 *2026-10-31 (Builder, branch `claude/relaxed-davinci-e0cu7i`) — **v0.504.6: a first Full-res PNG's stretch works in place and takes exact bracketed medians (`thumbnail._exact_median`) — 10.0 s → 5.4 s, peak 830 → 479 MB at 5000×7000, PNG bytes identical; closes the ⭐ 2026-10-28 entry.** **START HERE NEXT RUN:** Builder: a beginner feature from "Features that serve real workflows", or dogfood `--mosaic --editor`; the observer can answer the dark-ring vignette gate.*
-*2026-10-30 (Builder, branch `claude/relaxed-davinci-vwa67t`) — **the ⭐ entry's (4), the dark ring: Auto does not remove it; measured cause is the per-frame `Background2D` flatten leaving a −24 ADU rim (20 % vignette, 1000 ADU sky) along every sub's edge, which the canvas border receives alone; filed as the first Bugs entry with two tried-and-insufficient tweaks and a candidate (a radial synthetic flat), gated on the S30's real fall-off.** No code changed. **START HERE NEXT RUN:** Builder: the ⭐ entry's first-render speed, or a beginner feature; the observer can answer the vignette gate.*
 
 ## Standing frontier
 

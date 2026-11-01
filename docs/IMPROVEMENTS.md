@@ -82,6 +82,27 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 (Scout 2026-11-01, reproduced) — "Try something new tonight" plans the *whole* night even when most of it
+  is gone: an hour before dawn it says "up about 10.5 h tonight" and still suggests showpieces that set an hour
+  earlier.** *(Pillar: autonomy / friendliness — PRIORITY 2–3; size **S**; severity low–moderate — the Dashboard and
+  Tonight discovery card points a beginner at something below his floor; nothing is lost. Confidence: high,
+  reproduced through the real function.)* The same class as v0.505.4 ("Point here tonight"), one card over.
+  **Cause:** `nightplan.well_placed_tonight` takes `_find_dark_window(observer, when_utc)`, which inside the night
+  returns the *ongoing* window from its start (by design — it is what lets a post-midnight user plan at all), and
+  then scores and filters each object over that whole window. Nothing clips it to `when_utc`.
+  **Repro** (`suggest_targets(Observer(40.0, -75.0), when, limit=6)`, no library): at 23:30 UTC and at 09:14 UTC —
+  43 min before the window's 09:57 end — the six suggestions are **identical**: same order, "Climbs to 72°" for
+  objects whose transit was five hours earlier, `minutes_above_min_alt` 629 (→ "up about 10.5 h tonight"), and
+  NGC 7635 and M52 still listed with `usable_end_utc` 08:13 / 08:18, i.e. already under the floor. With 43 min
+  left, every one should fail the card's own `min_usable_minutes=45` and the card should self-hide.
+  **Fix shape:** clip the window's start to `max(window.start, when_utc)` inside `well_placed_tonight` and mark it
+  `in_progress=True` — the precedent is `upcoming_dark_windows`, which already clips this way and sets that flag
+  (`DarkWindow.in_progress`). `max_altitude_deg` and the minutes then describe what is left, and the floor drops
+  what has set. **Check every caller** (all four are "tonight" discovery cards, none a whole-night plan):
+  `plan.get_suggested_targets`, `lifelist.py:213` and `:381` (the nearly-there constellation nudge and its
+  `.ics`), `wishlist.py:255`. Leave the Tonight page's own `plan_tonight` alone — it is a plan for a chosen night.
+  **Test:** the 09:14 call returns `[]`; an 08:30 call drops NGC 7635 and M52 and quotes ≤ 87 min for the rest.
+
 - **🟡 (Builder 2026-10-30, the ⭐ 2026-10-28 entry's part (4)) — the "darker ring just inside" the ragged border is
   made by the stacker's per-frame sky flatten: on a vignetted sub, `Background2D` leaves a dark rim along every
   sub's own edge, and the canvas border is where only sub edges land.** *(Pillar: image quality / trust —
@@ -2514,26 +2535,20 @@ any of them.)*
   keep unpacking inline below a size threshold or return an empty-but-valid summary plus the job id. Worth doing
   only once someone actually uploads a big archive; a few hundred MB unpacks in seconds today.
 
-- **NEW (Builder 2026-07-21, follow-up to shipped "Set as cover" v0.145.0) — let the cover also be an *edited*
-  export, not only a raw stack run.** v0.145.0 pins a **`stack_runs` row** as the target's cover (`cover_stack_run_id`
-  resolved through the run's `preview_path`). But the #7 spec's motivating case — "a beginner who *edited* a stack
-  into a lovely picture" — isn't fully served: an editor export is **not** a `stack_runs` row, so an edited picture
-  can't be pinned yet. **Idea:** extend the cover to accept an edited result. Two shapes to weigh: (a) when the
-  editor exports/saves, record the edited render as its own light-weight "result" the cover can point at (a new
-  nullable `cover_preview_path` alongside `cover_stack_run_id`, set directly to the edited PNG — the thumbnail
-  resolver already falls back gracefully if the file is gone); or (b) have the editor "Save as preview" flow (which
-  already re-renders a run's `preview_path`) offer a "★ Set as cover" in the same step, so the *edited* pixels
-  become the pinned run's preview and the existing run-id cover just works. (b) reuses everything already shipped and
-  needs no new column — likely the smaller, safer slice. Beginner bar ✔ (same one-button affordance, extended to the
-  place a beginner most wants it — their finished edit). Additive/upgrade-safe (nullable/new surface, off by default).
-  _(S–M; PRIORITY 3 friendliness / enjoy-share — completes the "pin my favourite picture" story for edited results.)_
-  **⚠ Builder note (2026-08-05, `claude/relaxed-turing-iv0w1h`) — MOSTLY MOOT; verify before starting.** The
-  editor's **Apply & save** path (`submit_editor_export` → `_apply_editor_to_run`) does not produce a loose PNG: it
-  records the edited result as a **real `stack_runs` row** of its own (`notes="edited"`, its own `preview_path`), so
-  an edited picture *can* already be pinned with the existing v0.145.0 "Set as cover" button on that run's History
-  card. What is left is only the narrower case of an editor **download/share** export (PNG/JPEG, no run recorded) —
-  shape (a) — and the shortcut of offering "★ Set as cover" inside the export step rather than one click later on
-  History. Both are marginal against the shipped path, so this is **deprioritised**; don't rebuild the covered part.
+- **NEW IDEA (Scout 2026-11-01) — "Was the light-pollution filter on?": say, per night, whether the Seestar's
+  built-in LP filter was in, and what that means for *this* target.** *(Understand / get a better picture —
+  PRIORITY 3–4; size S–M; **gated on one observer count**.)* The S30 has a one-tap LP filter, and a beginner flips
+  it by habit or by accident: on an emission nebula it is what brings the glow out of a suburban sky; on a galaxy or
+  a star cluster it throws away most of the light and tints the stars. Nothing in the app reads which nights had
+  it in — `grep -ri filter seestack/io` finds no `FILTER` card read; only `webapp/seestar/client.py` sends
+  `lp_filter: False` on a GoTo. **Slice:** read the sub's own filter card at ingest (one optional column, additive
+  migration), tally it per night on the Nights card ("2 nights with the filter, 3 without"), and give one
+  plain sentence keyed to the target's catalogue family (`catalog_family`, v0.505.3) — *"For a galaxy, leave the
+  filter out next time; those nights caught about a third of the light."* Read-only: it never excludes a sub, and
+  does not touch the stack. **Not** a narrowband/channel feature (§1): no HOO split, no per-filter stacking.
+  **Gate:** whether the S30 writes a filter card at all, and under what values — the observer can answer with a
+  count of subs per distinct value of the `FILTER` card on one target (shape and counts only; no header pasted).
+  If it writes none, drop the idea.
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
