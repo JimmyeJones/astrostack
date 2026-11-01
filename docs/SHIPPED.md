@@ -1,5 +1,39 @@
 # Shipped — the record
 
+## 2026-11-01 (Builder, branch `claude/zen-fermat-j4oyhb`) — a catalogued galaxy is not a "star cluster"
+
+- **v0.505.3** — 🟠 EDITOR (PRIORITY 1), a `--mosaic --big --editor --restack` dogfood find. On every pass the
+  Orion Nebula sample's preset chip said **"Star cluster"**, and after a "Too dark" tap the editor said *"Auto is
+  running a bit brighter for your star clusters"* — on a target the app's own framing card names the Orion
+  Nebula. Earlier runs put it down to the sample being a star-only synthetic. It is, but the owner's own frames
+  hit the same thing a different way. On the S30 (150 mm, a 2.1° field) a small galaxy is about a hundred pixels
+  across in a 1920×1080 frame. **Measured on S30-shaped proxies** (1500×844, `proxy_scale` 1.28, a Gaussian
+  galaxy of radius 12–35 px under 300–800 stars): `classify_target` called **12 of 16 a star cluster**
+  (`star_share` 0.75–0.97, `ext_frac` ≤ 0.006), and only the two biggest, sparsest fields came out as a galaxy.
+  So on M51 the chip offered the cluster preset, and every taste tap went into the *cluster* bucket, where it
+  brightened M13 and never reached his next galaxy.
+  **Fix:** `presets.reconcile_with_catalog(verdict, family)` turns a pixel verdict the bundled catalogue
+  contradicts into "unsure" (no chip, global taste). It never *adopts* the catalogue's family; that would give
+  a per-type bucket to every catalogued target the pixels could not read, which is a separate change.
+  `presets.catalog_family` maps the catalogue's types onto the three archetypes (galaxy; globular/open cluster;
+  nebula/planetary nebula/supernova remnant). Asterisms, double stars and star clouds get no archetype, and a
+  test makes any new catalogue type a decision rather than a silent `None`. `editor.target_catalog_family(entry)`
+  is applied on **every** side of the archetype, so read and write still agree (the v0.492.5x class): the chip
+  (`build_preset_suggestion_for_run`), the bucket a tap is filed in (`_classify_run` → `classify_run_measured`),
+  the run-scoped preferences GET (`_run_taste_context`), the editor's Auto (`auto_recipe(catalog_family=)`)
+  and the unattended "Process target" auto-edit (`pipeline._auto_edit_process_run`). The memo keeps the raw
+  pixel verdict, and the veto is applied on the way out.
+  **Tests:** +11 (6 engine, 5 endpoint/pipeline). With the veto neutralised in place, **5 go red**: chip, tap
+  bucket, Auto read side, and the engine's veto and read-side tests. Four existing editor tests plant or force a
+  cluster/galaxy verdict on the shared fixture's target, which sits at M42's coordinates. They now take an
+  `uncatalogued_target` fixture that gives the target no catalogue identity. Their assertions are unchanged; the
+  premise "the pixels decide alone" is now stated instead of assumed. **Not done:** taps already filed under
+  `cluster` from a mistaken galaxy stay where they are. Nothing records which picture they came from, so they
+  cannot be moved honestly. They age out through the profile's own fade.
+  **Upgrade-safe (§9):** no config, schema, on-disk or API-shape change. The endpoints' responses keep their
+  keys; the only difference is `preset_id: null` where the catalogue disagrees. An uncatalogued target behaves
+  exactly as before.
+
 ## 2026-10-31 (Builder, branch `claude/zen-fermat-tqx24a`) — the Auto feedback chip answers at once
 
 - **v0.505.2** — 🟠 EDITOR (PRIORITY 1), a `--mosaic --dithered --editor` dogfood find: on the dithered run the

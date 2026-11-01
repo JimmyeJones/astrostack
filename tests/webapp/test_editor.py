@@ -827,7 +827,23 @@ def _overwrite_fits(data_root, safe, cube, basename="master"):
         lib.close()
 
 
-def test_preset_suggestion_endpoint_classifies_a_star_cluster(client, solved_library):
+@pytest.fixture
+def uncatalogued_target(monkeypatch):
+    """The shared library's target sits at the Orion Nebula's coordinates, so the
+    bundled catalogue calls it a **nebula** — and since the catalogue veto
+    (``presets.reconcile_with_catalog``) a star-only field planted there is,
+    correctly, *not* a star cluster. The tests that use this fixture are about how
+    a pixel verdict is wired (which preset, which bucket), not about which object
+    the target is, so they give it no catalogue identity: the pixels decide alone,
+    exactly as they do for an uncatalogued patch of sky. The veto itself is pinned
+    by the ``catalogue`` tests below."""
+    from webapp.routers import editor as editor_mod
+
+    monkeypatch.setattr(editor_mod, "target_catalog_family", lambda entry: None)
+
+
+def test_preset_suggestion_endpoint_classifies_a_star_cluster(client, solved_library,
+                                                              uncatalogued_target):
     """The preset-suggestion endpoint classifies the run's own proxy and, on a clear
     archetype, names the matching built-in preset — a read-only hint (it never changes
     the Auto recipe). A star-dominated field → the Star-cluster preset."""
@@ -1050,7 +1066,7 @@ def test_preset_suggestion_classifies_the_kept_picture_with_the_trim_off_too(
 
 
 def test_preset_suggestion_on_a_single_field_run_is_untouched(client,
-                                                              solved_library):
+                                                              solved_library, uncatalogued_target):
     """Upgrade safety as a property: a single-field run has no trim rectangle, so
     nothing is narrowed and the chip answers exactly what it answered before."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
@@ -1438,7 +1454,7 @@ def test_the_green_pair_walks_the_served_auto_recipe_both_ways(
 
 
 def test_auto_feedback_with_run_context_is_scoped_to_the_object_type(
-        client, solved_library, monkeypatch):
+        client, solved_library, monkeypatch, uncatalogued_target):
     """Feedback given while editing a run is recorded into that run's archetype
     bucket (not the global taste), and the returned note names the archetype — so
     a 'too dark' on a galaxy brightens galaxies without touching clusters."""
@@ -4497,7 +4513,7 @@ def test_an_unreadable_proxy_leaves_the_chip_row_exactly_as_it_was(
 
 
 def test_a_failed_knob_measurement_does_not_also_cost_the_archetype(
-        client, solved_library, monkeypatch):
+        client, solved_library, monkeypatch, uncatalogued_target):
     """The two answers this GET resolves are not equally important. The archetype
     decides *which bucket* the owner's taste is read from, so dropping it would
     fall the "why Auto shifted" note back to the global taste — the v0.492.50
@@ -4524,3 +4540,130 @@ def test_a_failed_knob_measurement_does_not_also_cost_the_archetype(
     # The galaxy-scoped taste is still the one reported.
     assert body["biases"]["brightness"] == 1
     assert "for your galaxies" in (body["note"] or "")
+
+
+# --- the catalogue veto: a pixel archetype the catalogue contradicts ----------
+#
+# The shared library's target sits at the Orion Nebula's coordinates, so the
+# bundled catalogue calls it a nebula. A star-only field planted there is what a
+# small galaxy on the owner's S30 field looks like to the pixel classifier (see
+# ``tests/test_target_classify.py``): a confident "star cluster" that the
+# catalogue knows is wrong. Every side of the archetype has to treat it as unsure.
+
+def _star_only_run(data_root, safe, basename):
+    rid = _make_run(data_root, safe, basename=basename, h=200, w=200)
+    rng = np.random.default_rng(11)
+    h, w = 200, 200
+    yy, xx = np.mgrid[0:h, 0:w]
+    lum = np.full((h, w), 0.02, np.float32)
+    for _ in range(180):
+        cy, cx = rng.uniform(3, h - 3), rng.uniform(3, w - 3)
+        lum += 0.8 * rng.uniform(0.5, 1.0) * np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / 2.0)
+    lum += rng.normal(0, 0.004, (h, w)).astype("float32")
+    _overwrite_fits(data_root, safe, np.stack([lum, lum, lum]), basename=basename)
+    return rid
+
+
+def test_the_catalogue_names_the_fixture_target_a_nebula(client, solved_library):
+    """The premise of the tests below, checked rather than assumed."""
+    from webapp.routers.editor import target_catalog_family
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        assert target_catalog_family(lib.find_target(safe)) == "nebula"
+    finally:
+        lib.close()
+    assert target_catalog_family(None) is None
+
+
+def test_catalogue_veto_no_star_cluster_chip_on_a_catalogued_nebula(
+        client, solved_library):
+    """The chip: "Star cluster — try this preset?" on the Orion Nebula is the
+    symptom; the honest answer is no suggestion (Auto stays the default)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _star_only_run(solved_library, safe, "veto_chip")
+    body = client.post(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion").json()
+    assert body == {"preset_id": None, "label": None, "reason": None,
+                    "confidence": 0.0}
+
+
+def test_catalogue_veto_a_tap_is_not_filed_under_star_clusters_and_still_works(
+        client, solved_library):
+    """The bucket: a "too dark" tap on the Orion Nebula used to be filed under
+    *cluster* ("Auto is running a bit brighter for your star clusters") — where
+    it would brighten M13 next. Vetoed, it lands in the global taste, the note
+    stops naming star clusters, and Auto (the read side) still moves with it."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _star_only_run(solved_library, safe, "veto_tap")
+
+    before = _auto_target_bg(client, safe, rid)
+    r = client.post("/api/editor/auto-preferences/feedback",
+                    json={"cue": "too_dark", "safe": safe, "run_id": rid})
+    assert r.status_code == 200, r.text
+    assert "star cluster" not in (r.json()["note"] or "")
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        stored = json.loads(lib.get_meta(editor_mod_key()) or "{}")
+    finally:
+        lib.close()
+    assert "cluster" not in (stored.get("by_type") or {})
+    assert stored["biases"].get("brightness") == 1
+
+    view = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences").json()
+    assert "star cluster" not in (view["note"] or "")
+    assert _auto_target_bg(client, safe, rid) > before
+
+
+def editor_mod_key() -> str:
+    from webapp.routers.editor import AUTO_PREFERENCES_META_KEY
+
+    return AUTO_PREFERENCES_META_KEY
+
+
+def test_catalogue_veto_auto_reads_no_cluster_taste_on_a_catalogued_nebula(
+        client, solved_library):
+    """The read side on its own: a taste learned on real star clusters must not
+    reach a catalogued nebula the pixels mistook for one."""
+    from seestack.edit import auto_prefs
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _star_only_run(solved_library, safe, "veto_read")
+    neutral = _auto_target_bg(client, safe, rid)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        lib.set_meta(editor_mod_key(), json.dumps(
+            auto_prefs.record_feedback({}, "too_dark", object_type="cluster")))
+    finally:
+        lib.close()
+    assert _auto_target_bg(client, safe, rid) == neutral
+
+
+def test_catalogue_veto_reaches_the_unattended_auto_edit(
+        client, solved_library, monkeypatch):
+    """"Process target"'s auto-edit builds the same recipe the editor's Auto
+    does, so it must read the same taste bucket — the target's catalogue family
+    goes with it."""
+    from webapp import pipeline
+    from webapp.routers import editor as editor_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _star_only_run(solved_library, safe, "veto_pipeline")
+    seen: list = []
+    real = editor_mod.build_auto_recipe_for_run
+
+    def spy(*a, **kw):
+        seen.append(kw.get("catalog_family"))
+        return real(*a, **kw)
+
+    monkeypatch.setattr(editor_mod, "build_auto_recipe_for_run", spy)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        assert pipeline._auto_edit_process_run(lib, safe, rid) is not None
+    finally:
+        lib.close()
+    assert seen == ["nebula"]

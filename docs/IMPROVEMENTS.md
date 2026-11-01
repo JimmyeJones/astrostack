@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- `claude/zen-fermat-j4oyhb` — a catalogued galaxy/nebula read as "Star cluster" by the preset chip and the taste bucket (`classify_target(catalog_family=)`, Builder 2026-11-01).
+*No live claims.*
 
 ---
 
@@ -3350,6 +3350,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.3 **A catalogued galaxy or nebula the pixels mistake for a star cluster no longer gets the "Star cluster" preset chip, and an Auto feedback tap on it is no longer filed under (and read from) the star-cluster taste** (`presets.reconcile_with_catalog`, `catalog_family`, `editor.target_catalog_family`, `auto_recipe(catalog_family=)`; a small galaxy on the S30 field read as a cluster 12 of 16 times) — dogfood find. Full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.505.2 **An Auto feedback chip tap answers at once instead of after seconds of silence — the run's archetype and Auto's measured knobs are remembered per run's files, so only the editor's opening read measures the picture** (`webapp/run_measure_memo.py`, `classify_run_measured`, `_run_taste_context`; tap POST 2.3–3.2 s → 15 ms, the chip row's re-read 4.4 s → 10 ms on the `--dithered` sample). Full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.505.1 **The Dashboard's sample card points a stacked sample at the editor ("Edit it") instead of leading with "Stack it" again; "Stack again" stays one click away** (`SampleImageCard`, `sampleRunToEdit`) — dogfood find
 - ✅ v0.505.0 **"It's back": the week-plan card on Tonight says when one of his targets returns to the dark hours after two months out of reach, with what he already has on it (per part on a mosaic)** (`nightplan._returning_targets`, `WeekPlan.returning`, `planweek.returningWeekNote`; the Scout's 2026-10-31 beginner idea)
