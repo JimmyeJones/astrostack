@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- `claude/zen-fermat-j4oyhb` — a catalogued galaxy/nebula read as "Star cluster" by the preset chip and the taste bucket (`classify_target(catalog_family=)`, Builder 2026-11-01).
 
 ---
 
