@@ -76,32 +76,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- `claude/practical-shannon-yc744h` — "Try something new tonight" scoring the whole ongoing night (`well_placed_tonight`), Builder 2026-11-01.
+*No live claims.*
 
 ---
 
 ## Bugs (fix these first)
-
-- **🟡 (Scout 2026-11-01, reproduced) — "Try something new tonight" plans the *whole* night even when most of it
-  is gone: an hour before dawn it says "up about 10.5 h tonight" and still suggests showpieces that set an hour
-  earlier.** *(Pillar: autonomy / friendliness — PRIORITY 2–3; size **S**; severity low–moderate — the Dashboard and
-  Tonight discovery card points a beginner at something below his floor; nothing is lost. Confidence: high,
-  reproduced through the real function.)* The same class as v0.505.4 ("Point here tonight"), one card over.
-  **Cause:** `nightplan.well_placed_tonight` takes `_find_dark_window(observer, when_utc)`, which inside the night
-  returns the *ongoing* window from its start (by design — it is what lets a post-midnight user plan at all), and
-  then scores and filters each object over that whole window. Nothing clips it to `when_utc`.
-  **Repro** (`suggest_targets(Observer(40.0, -75.0), when, limit=6)`, no library): at 23:30 UTC and at 09:14 UTC —
-  43 min before the window's 09:57 end — the six suggestions are **identical**: same order, "Climbs to 72°" for
-  objects whose transit was five hours earlier, `minutes_above_min_alt` 629 (→ "up about 10.5 h tonight"), and
-  NGC 7635 and M52 still listed with `usable_end_utc` 08:13 / 08:18, i.e. already under the floor. With 43 min
-  left, every one should fail the card's own `min_usable_minutes=45` and the card should self-hide.
-  **Fix shape:** clip the window's start to `max(window.start, when_utc)` inside `well_placed_tonight` and mark it
-  `in_progress=True` — the precedent is `upcoming_dark_windows`, which already clips this way and sets that flag
-  (`DarkWindow.in_progress`). `max_altitude_deg` and the minutes then describe what is left, and the floor drops
-  what has set. **Check every caller** (all four are "tonight" discovery cards, none a whole-night plan):
-  `plan.get_suggested_targets`, `lifelist.py:213` and `:381` (the nearly-there constellation nudge and its
-  `.ics`), `wishlist.py:255`. Leave the Tonight page's own `plan_tonight` alone — it is a plan for a chosen night.
-  **Test:** the 09:14 call returns `[]`; an 08:30 call drops NGC 7635 and M52 and quotes ≤ 87 min for the rest.
 
 - **🟡 (Builder 2026-10-30, the ⭐ 2026-10-28 entry's part (4)) — the "darker ring just inside" the ragged border is
   made by the stacker's per-frame sky flatten: on a vignetted sub, `Background2D` leaves a dark rim along every
@@ -3365,6 +3344,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.6 **"Try something new tonight" read late in the night scores only the darkness left — an hour before dawn it no longer says "up about 10.5 h tonight" or suggests showpieces that have already set, and with under 45 min left it self-hides** (`nightplan.well_placed_tonight` clips the ongoing window to now, `in_progress=True`; also the nearly-there, life-list and wishlist "up tonight" cards)
 - ✅ v0.505.5 **The Calibration page's broken-pixel offer names what it repairs ("Repair hot or dead pixels on every stack from now on") instead of "Repair these" above a table whose counts are below it** (`calibration.defect_repair_offer`) — dogfood find
 - ✅ v0.505.4 **The Dashboard's "Point here tonight" no longer recommends a started target that has already set — read in the small hours it used to put first an object whose window closed at 9 PM, captioned with that spent window** (`pickContinueTonight(nowMs)`, `ContinueTonightCard`).
 - ✅ v0.505.3 **A catalogued galaxy or nebula the pixels mistake for a star cluster no longer gets the "Star cluster" preset chip, and an Auto feedback tap on it is no longer filed under (and read from) the star-cluster taste** (`presets.reconcile_with_catalog`, `catalog_family`, `editor.target_catalog_family`, `auto_recipe(catalog_family=)`; a small galaxy on the S30 field read as a cluster 12 of 16 times) — dogfood find. Full entry in [`SHIPPED.md`](SHIPPED.md)

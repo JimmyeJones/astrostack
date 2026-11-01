@@ -1,5 +1,39 @@
 # Shipped — the record
 
+## v0.505.6 — 2026-11-01 (Builder, branch `claude/practical-shannon-yc744h`) — "Try something new tonight" scores only the darkness left
+
+- **Fixed.** `nightplan.well_placed_tonight` now clips `_find_dark_window`'s ongoing window to `when_utc` and marks it
+  `in_progress=True` (the `upcoming_dark_windows` precedent), and inside a clipped window quotes no more usable minutes
+  than the darkness left (the 5-minute grid credits its first sample a whole step, so 43 min left totalled 48 and still
+  cleared the 45-min floor). Measured through `suggest_targets(Observer(40, -75))`, night of 2026-11-01: at 09:14 UTC
+  (43 min left) the card returned the evening's six suggestions (629 min each, NGC 7635/M52 already set) → now `[]`;
+  at 08:30 → M44/M81/M82/M97/IC 1805/M45 at 87 min each. Read before dark nothing changes (the evening window is
+  scored unclipped, as the Tonight page does). All four callers are "now" cards: `/api/plan/suggest`, the life-list
+  nearly-there nudge and its `.ics`, `/api/life-list/tonight`, `/api/wishlist/tonight` (rendered only without a
+  chosen date). The Tonight page's own `plan_tonight` is untouched. Tests: three in `tests/test_nightplan.py`, one in
+  `tests/webapp/test_plan.py`; the late-night and self-hide ones fail on the old code. The entry as filed:
+
+  - **🟡 (Scout 2026-11-01, reproduced) — "Try something new tonight" plans the *whole* night even when most of it
+    is gone: an hour before dawn it says "up about 10.5 h tonight" and still suggests showpieces that set an hour
+    earlier.** *(Pillar: autonomy / friendliness — PRIORITY 2–3; size **S**; severity low–moderate — the Dashboard and
+    Tonight discovery card points a beginner at something below his floor; nothing is lost. Confidence: high,
+    reproduced through the real function.)* The same class as v0.505.4 ("Point here tonight"), one card over.
+    **Cause:** `nightplan.well_placed_tonight` takes `_find_dark_window(observer, when_utc)`, which inside the night
+    returns the *ongoing* window from its start (by design — it is what lets a post-midnight user plan at all), and
+    then scores and filters each object over that whole window. Nothing clips it to `when_utc`.
+    **Repro** (`suggest_targets(Observer(40.0, -75.0), when, limit=6)`, no library): at 23:30 UTC and at 09:14 UTC —
+    43 min before the window's 09:57 end — the six suggestions are **identical**: same order, "Climbs to 72°" for
+    objects whose transit was five hours earlier, `minutes_above_min_alt` 629 (→ "up about 10.5 h tonight"), and
+    NGC 7635 and M52 still listed with `usable_end_utc` 08:13 / 08:18, i.e. already under the floor. With 43 min
+    left, every one should fail the card's own `min_usable_minutes=45` and the card should self-hide.
+    **Fix shape:** clip the window's start to `max(window.start, when_utc)` inside `well_placed_tonight` and mark it
+    `in_progress=True` — the precedent is `upcoming_dark_windows`, which already clips this way and sets that flag
+    (`DarkWindow.in_progress`). `max_altitude_deg` and the minutes then describe what is left, and the floor drops
+    what has set. **Check every caller** (all four are "tonight" discovery cards, none a whole-night plan):
+    `plan.get_suggested_targets`, `lifelist.py:213` and `:381` (the nearly-there constellation nudge and its
+    `.ics`), `wishlist.py:255`. Leave the Tonight page's own `plan_tonight` alone — it is a plan for a chosen night.
+    **Test:** the 09:14 call returns `[]`; an 08:30 call drops NGC 7635 and M52 and quotes ≤ 87 min for the rest.
+
 ## 2026-11-01 (Scout, branch `claude/exciting-wozniak-seqf64`) — closed, moot: the "edited picture as cover" idea
 
 - **Closed, not built (Scout 2026-11-01, backlog curation).** Its own 2026-08-05 Builder note had already found it
