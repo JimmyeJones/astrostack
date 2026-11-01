@@ -291,7 +291,7 @@ describe("CalibrationView", () => {
       vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
       vi.spyOn(client.api, "calibrationDefects").mockResolvedValue(censusOf({
         state: "off",
-        message: "Repair these on every stack from now on",
+        message: "Repair hot or dead pixels on every stack from now on",
         detail: "Turns on the repair for every stack \u2026",
         action: "Repair them",
       }));
@@ -300,7 +300,7 @@ describe("CalibrationView", () => {
       renderView();
 
       await waitFor(() =>
-        expect(screen.getByText("Repair these on every stack from now on"))
+        expect(screen.getByText("Repair hot or dead pixels on every stack from now on"))
           .toBeInTheDocument());
       fireEvent.click(screen.getByRole("button", { name: "Repair them" }));
 
@@ -343,7 +343,7 @@ describe("CalibrationView", () => {
       vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
       vi.spyOn(client.api, "calibrationDefects").mockResolvedValue(censusOf({
         state: "off",
-        message: "Repair these on every stack from now on",
+        message: "Repair hot or dead pixels on every stack from now on",
         detail: "Turns on the repair for every stack …",
         action: "Repair them",
       }));
@@ -352,7 +352,7 @@ describe("CalibrationView", () => {
       const button = await waitFor(() =>
         screen.getByRole("button", { name: "Repair them" }));
       expect(button.style.flexShrink).toBe("0");
-      const message = screen.getByText("Repair these on every stack from now on");
+      const message = screen.getByText("Repair hot or dead pixels on every stack from now on");
       expect(message.style.minWidth).toBe("0");
     });
 

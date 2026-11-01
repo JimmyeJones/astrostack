@@ -1,5 +1,20 @@
 # Shipped — the record
 
+## 2026-11-01 (Builder, branch `claude/practical-shannon-ieouv1`) — the Calibration repair offer's dangling "these"
+
+- **v0.505.5** — 🟢 FRIENDLINESS (PRIORITY 3), a `--mosaic --editor --calibration --no-site` dogfood find, read off
+  the Calibration screenshot. The broken-pixel offer (`webapp/calibration.py::defect_repair_offer`) is
+  rendered as the **first line of the masters card, above the table**, and read *"Repair these on every stack from
+  now on · [Repair them]"* — but the counts it acts on are the per-master notes *below* it ("31 hot or dead pixels
+  (0.020%)" on the dark's row), so "these" pointed at nothing, and read cold beside a list of masters it sounded
+  like it repaired the masters. The on-state tooltip had the mirror slip ("replaces the photosites **above**").
+  **Fix:** the off-state message names its noun in the row note's own words — *"Repair hot or dead pixels on
+  every stack from now on"* (and the "— N targets would keep their own settings" variant) — and the on-state
+  detail says "the hot or dead pixels counted on each master below". Wording only; the response shape, the
+  state machine and the action labels are unchanged. **Test:**
+  `test_the_offer_names_what_it_repairs_rather_than_pointing_at_it` (fails on the old wording, passes after) plus
+  the existing exact-string pin updated; `Calibration.test.tsx` fixtures follow.
+
 ## 2026-11-01 (Builder, branch `claude/practical-shannon-h7pyj4`) — "Point here tonight" after the target has set
 
 - **v0.505.4** — 🟡 FRIENDLINESS / AUTONOMY (PRIORITY 2–3), a `--mosaic --deep --incoming-lag --closing` dogfood
