@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- `claude/practical-shannon-yc744h` — "Try something new tonight" scoring the whole ongoing night (`well_placed_tonight`), Builder 2026-11-01.
 
 ---
 
