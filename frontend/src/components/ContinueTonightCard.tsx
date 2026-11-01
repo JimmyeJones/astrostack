@@ -112,8 +112,10 @@ export function ContinueTonightCard() {
   if (best.isPending) return null;
   const alreadyShown = (best.data?.picks ?? []).map((p) => p.safe);
 
+  // The viewer's clock, so a target that has already set tonight (the card read
+  // in the small hours, after its window closed) is not the one recommended.
   const plan = pickContinueTonight(tonight.data, goals, 2, alreadyShown,
-                                   difficulties);
+                                   difficulties, Date.now());
   if (!plan) return null;
 
   const { pick, runnersUp } = plan;

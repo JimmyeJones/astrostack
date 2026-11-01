@@ -2,7 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContinueTonightCard } from "./ContinueTonightCard";
 import type {
   BestTonight, NightPlan, PlannedTarget, TargetProgress,
@@ -91,6 +91,12 @@ function renderCard() {
   );
 }
 
+// The card judges "has this target already set?" against the viewer's clock,
+// and every fixture here is dated 2026-07-24 — so the clock is pinned to the
+// fixtures' own evening (the plan's `generated_utc`), before any of their
+// usable windows close. A test about the small hours moves it explicitly.
+const FIXTURE_NOW = Date.parse("2026-07-24T00:00:00Z");
+beforeEach(() => { vi.spyOn(Date, "now").mockReturnValue(FIXTURE_NOW); });
 afterEach(() => vi.restoreAllMocks());
 
 describe("ContinueTonightCard", () => {
@@ -228,5 +234,31 @@ describe("ContinueTonightCard", () => {
     renderCard();
     expect(await screen.findByText("Point here tonight")).toBeInTheDocument();
     expect(screen.getByText("M31")).toBeInTheDocument();
+  });
+
+  it("does not recommend a started target that has already set tonight", async () => {
+    // Read in the small hours: `/tonight` still plans the whole dark window, so
+    // an object that dropped below the floor at 21:16 keeps its score — and the
+    // card used to put it first ("closest to a finished picture") with that
+    // spent window as its caption. It must give way to one still up.
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-24T04:14:00Z"));
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(
+      plan([
+        owned({
+          name: "Gone", target_safe: "gone", total_exposure_s: 5 * 3600, score: 40,
+          usable_start_utc: "2026-07-23T18:41:00+00:00",
+          usable_end_utc: "2026-07-23T21:16:00+00:00",
+        }),
+        owned({ name: "M31", target_safe: "m31", total_exposure_s: 1 * 3600, score: 60 }),
+      ]),
+    );
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight());
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByText("Point here tonight")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("M31")).toBeInTheDocument();
+    expect(screen.queryByText("Gone")).not.toBeInTheDocument();
   });
 });

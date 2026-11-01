@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-11-01 (Builder, branch `claude/practical-shannon-h7pyj4`) — dogfood `--mosaic --deep --incoming-lag --closing`: one friendliness fix (v0.505.4)
+
+Baseline suite 8540 passed / 7 skipped (23 min, `-n 4`, run beside `vitest`). Every open Bugs entry is still
+gated, and Features has no open beginner item, so this run was a dogfood pass on the flags used least
+(`--closing`, `--incoming-lag`, `--deep`). The probe's text came back CLEAN: nothing overflows, no console
+errors, the frames table grows on scroll at 1,200 subs, and the Target, Dashboard and Tonight paragraphs agree.
+**The finding was in the Dashboard screenshot, not the probe text:** the pass ran at 04:14 UTC, and "Point here
+tonight" named a target whose window had closed at 21:16. The probe prints only the notice board and the Target
+and Tonight cards, not the Dashboard's planning cards, so its text could not have shown this. Fixed as v0.505.4
+(`pickContinueTonight(nowMs)`). **Lesson for the dogfood reader:** a run's wall-clock time is test data. A pass
+in the small hours reaches the in-progress-night code paths that an evening pass never does, so check the time
+stamps on the planning cards against the clock. **Not verified, so not filed:** the "Try something new tonight"
+card said "up about 10.5 h tonight" for catalogue objects at 04:14, one hour before dawn. It is whole-night
+wording on a discovery card and probably harmless, but a Scout could judge it alongside this fix.
+
 ## 2026-11-01 (Builder, branch `claude/zen-fermat-j4oyhb`) — dogfood `--mosaic --big --editor --restack`: one editor fix (v0.505.3)
 
 Baseline suite 8529 passed / 7 skipped (16 min, `-n 4`). Every open Bugs entry is still gated, and "Features that
