@@ -390,8 +390,9 @@ def defect_repair_offer(
             ),
             "detail": (
                 "Every stack from now on — including the hands-off ones — "
-                "replaces the photosites above from their same-colour "
-                "neighbours before the colours are reconstructed. Every other "
+                "replaces the hot or dead pixels counted on each master below "
+                "from their same-colour neighbours before the colours are "
+                "reconstructed. Every other "
                 "pixel, including every star, is left exactly as it was. "
                 "Already-finished pictures are untouched; re-stack a target to "
                 "apply it to one."
@@ -407,9 +408,14 @@ def defect_repair_offer(
     return {
         "state": "off",
         "message": (
-            "Repair these on every stack from now on"
+            # Named, not pointed at: this line is the first thing in the
+            # masters card, *above* the table whose per-master notes carry
+            # the counts ("31 hot or dead pixels"), so a "Repair these" here
+            # pointed at nothing — and beside a list of masters it read as
+            # repairing the masters. Same noun as the row note it acts on.
+            "Repair hot or dead pixels on every stack from now on"
             if not n else
-            f"Repair these on every stack from now on — "
+            f"Repair hot or dead pixels on every stack from now on — "
             f"{_thousands(n)} {targets} would keep "
             f"{'its own setting' if n == 1 else 'their own settings'}"
         ),

@@ -567,5 +567,31 @@ def test_the_plural_and_the_no_exception_wording_both_hold():
     for bad in (0, -3):
         plain = calibration.defect_repair_offer(
             rows, enabled=False, n_overridden=bad)
-        assert plain["message"] == "Repair these on every stack from now on"
+        assert plain["message"] == (
+            "Repair hot or dead pixels on every stack from now on")
         assert "would keep" not in plain["detail"]
+
+
+def test_the_offer_names_what_it_repairs_rather_than_pointing_at_it():
+    """The offer renders as the first line of the masters card, *above* the
+    table, and the counts it acts on are the per-master notes *below* it. A
+    "Repair these" there pointed at nothing — read cold, beside a list of
+    masters, it sounded like it repaired the masters — and the on-state's
+    "the photosites above" pointed the wrong way. Each state now names its
+    noun in the per-row note's own words ("N hot or dead pixels"), so the
+    sentence reads the same wherever the card puts it."""
+    rows = [{"measurable": True, "n_defects": 31, "refused": False}]
+    off = calibration.defect_repair_offer(rows, enabled=False)
+    on = calibration.defect_repair_offer(rows, enabled=True)
+    pinned = calibration.defect_repair_offer(rows, enabled=False, n_overridden=2)
+
+    for text in (off["message"], pinned["message"]):
+        assert "hot or dead pixels" in text
+        assert "these" not in text.lower()
+    for text in (off["detail"], on["detail"], pinned["detail"]):
+        assert "above" not in text
+    # The per-row note this sentence acts on uses the same noun.
+    note = calibration.defect_note(
+        {"measurable": True, "n_defects": 31, "refused": False,
+         "fraction": 0.0002, "n_hot": 30, "n_dead": 1})
+    assert note is not None and "hot or dead" in note["message"]
