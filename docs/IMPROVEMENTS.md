@@ -113,6 +113,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   stack chroma blotch falls toward the noise floor, real nebular colour is untouched, and a library of one
   target declines (no sky diversity). **Owner side:** see whether his Seestar app has a dithering option.
   Dithering spreads the pattern at capture time; it is not a substitute for (1)–(3).
+  **⏸ HOLD (2026-11-01): do not start building yet.** The owner says the blotches appear only on some nights,
+  "when it is cold". A per-sensor-temperature version of the diagnostic (`FrameRow.sensor_temp_c` bins) is
+  with him; its result decides whether (1) needs one master per temperature range, like a matched dark. This
+  line is replaced with the numbers when they arrive.
 
 - **🟡 (Builder 2026-10-30, the ⭐ 2026-10-28 entry's part (4)) — the "darker ring just inside" the ragged border is
   made by the stacker's per-frame sky flatten: on a vignetted sub, `Background2D` leaves a dark rim along every
