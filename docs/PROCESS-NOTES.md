@@ -43,6 +43,20 @@ synthetic sample should be re-asked on the owner's own geometry once before the 
 * Other readings, not acted on: the dithered readiness card prints *"grain 0.000"* (σ below 0.0005 on the
   synthetic sample; the owner's stacks measure 0.015–0.020, so it cannot read that way for him).
 
+## 2026-11-01 (Builder, branch `claude/practical-shannon-ieouv1`) — dogfood `--mosaic --editor --calibration --no-site`: one friendliness fix (v0.505.5)
+
+- **Start:** `main` green at v0.505.4, no open PRs, no live claims; every Bugs entry gated or deprioritised, no open
+  beginner item in Features.
+- **Pass:** EXIT 0. 21 ops re-render on both editor drives; Auto trim 7.9 % with the highlight-hold offer; taste
+  chips 10 live / 2 at-limit, both taps worded truthfully; calibrated run applied both masters and the calibration
+  note withdrew (right). Nothing overflowing, no console errors. Not re-filed (already recorded): "2×2 … about 3
+  fields of sky", "Plate-solving isn't set up yet" (no ASTAP here), "already looks clean" beside "cut its noise
+  about 87 %" (the 2026-10-14 LEAD).
+- **The find was the Calibration screenshot:** the repair offer, the first line of the masters card, read
+  "Repair these on every stack from now on" above the table — the hot/dead counts it means are in the rows below.
+  Fixed as v0.505.5 (`defect_repair_offer` wording; the row note's detail already says "the button above the list").
+- **Suite:** 8541 passed / 7 skipped (`-n 4 --dist worksteal`, 24 min); vitest 4905 green; tsc + vite build clean.
+
 ## 2026-10-31 (Builder, branch `claude/zen-fermat-0zsxqf`) — dogfood `--mosaic --editor`: one friendliness fix (v0.505.1)
 
 - **Start:** no live claims, every Bugs entry gated or deprioritised, no open beginner item in Features.
