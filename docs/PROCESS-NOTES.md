@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-11-01 (Builder, branch `claude/practical-shannon-qz759n`) — nothing ungated to build; dogfood `--mosaic --editor --big --deep` CLEAN, one scale divergence measured and closed as honest.
+
+- **Suite:** 8545 passed / 7 skipped on `9f07d930` (xdist `-n 4`, BLAS capped, 19m25s). No open PRs at start.
+- **Why no task:** every Bugs entry still carries its owner/observer gate (dark-ring vignette, un-located-panel hint
+  shape, the LEADs) or a measured stand-down; the Features section's one beginner idea (LP filter) waits on the
+  observer's `FILTER`-card count, and the other two are self-declined in their own text.
+- **Dogfood:** all 21 ops re-render on the field, the mosaic and the decimated full-size run; undo/redo, the
+  full-size check (navigator, split, caveat on Noise reduction) and the taste chips read cleanly; panel map,
+  grain-uneven note and readiness card agree; `[scale]` 0 of 16 canvas-independent answers moved; the 1,200-sub frames
+  table windows at 300 and grows on scroll; nothing overflowing, no console errors; heights on the standing baseline.
+- **Measured, not a bug:** Auto's "Hold back highlights" nudge appears on the 2×2 mosaic sample and not on its
+  full-size twin. Ran `solve_highlight_protect` on both proxies and `suggest_highlight_protect` on both full-res
+  exports (`proxy_scale=1`): small → 0.05 on preview *and* export (91-px core, just over the floor); full-size →
+  `None` on preview *and* export. Preview and export agree on each run, so `_per_native_px` is doing its job; the
+  difference is the two samples' own sampling of the core, not a preview↔export divergence. Do not re-derive.
+
 ## 2026-11-01 (Scout, branch `claude/exciting-wozniak-seqf64`) — QA rotation sweep (1), new angle — a non-trivial North-up angle driven through the native share / wallpaper path on a trimmed auto-edit: CLEAN. One planner bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8541 passed / 7 skipped on `e9735309` (xdist `-n 4`, BLAS capped, 22m30s). **Inbox:** the same four
