@@ -31,7 +31,7 @@ import json
 import logging
 import math
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -2465,7 +2465,10 @@ def well_placed_tonight(
     Keeps only objects genuinely usable in tonight's dark window (clearing
     ``min_altitude_deg`` for at least ``min_usable_minutes``) and returns them
     best-first by the same altitude/window/Moon blend every other planning card
-    uses. ``limit=None`` returns all of them. Purely offline and read-only;
+    uses. Read from inside the night, only the darkness still to come counts —
+    a card opened an hour before dawn does not quote the hours already gone, and
+    an object that has sunk under the floor is not suggested. ``limit=None``
+    returns all of them. Purely offline and read-only;
     returns an empty list when the Sun never sets, nothing clears the floor, or
     ``objects`` is empty — so a caller's card simply self-hides.
     """
@@ -2475,6 +2478,19 @@ def well_placed_tonight(
     window = _find_dark_window(observer, when_utc)
     if window is None:
         return []  # Sun never sets — nothing to plan.
+    # Inside the night, ``_find_dark_window`` hands back the *ongoing* window from
+    # its start (that is what lets a post-midnight user plan at all). Every caller
+    # here is a "what's up tonight" card read *now*, so score only the darkness
+    # still to come — the same clip :func:`upcoming_dark_windows` makes. Without
+    # it, an hour before dawn the card said "up about 10.5 h tonight" and kept
+    # suggesting objects that had already sunk under the floor.
+    when_utc = when_utc.astimezone(timezone.utc)
+    if window.start < when_utc:
+        window = DarkWindow(start=when_utc, end=window.end,
+                            sun_alt_threshold_deg=window.sun_alt_threshold_deg,
+                            in_progress=True)
+        if window.duration_minutes <= 0:
+            return []
 
     illum = moon_illumination(when_utc)
     obs = _observability_batch(
@@ -2484,6 +2500,13 @@ def well_placed_tonight(
 
     out: list[SuggestedTarget] = []
     for obj, o in zip(objects, obs, strict=True):
+        if window.in_progress:
+            # The 5-minute grid credits its first sample a whole step, so a window
+            # clipped to "now" can total a few minutes more than is left. Quote
+            # (and gate on) no more than the darkness that remains. The evening's
+            # unclipped window is left exactly as the Tonight page computes it.
+            o = replace(o, minutes_above_min_alt=min(
+                o.minutes_above_min_alt, round(window.duration_minutes, 1)))
         if o.minutes_above_min_alt < min_usable_minutes:
             continue  # not up long enough tonight to be worth suggesting
         out.append(SuggestedTarget(

@@ -996,6 +996,26 @@ def test_suggest_returns_new_showpieces(client, solved_library):
         assert not (abs(s["ra_deg"] - 83.6) < 1.0 and abs(s["dec_deg"] + 5.4) < 1.0)
 
 
+def test_suggest_read_just_before_dawn_self_hides(client, solved_library):
+    """Read inside the night, the card scores only the darkness left: with 40
+    minutes to dawn nothing clears the 45-minute floor, so it self-hides rather
+    than quoting the whole night it was "up" for (Scout 2026-11-01)."""
+    from datetime import datetime, timedelta
+
+    from seestack.nightplan import Observer, _find_dark_window
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    window = _find_dark_window(Observer(51.5, -0.13), datetime.fromisoformat(JAN_EVENING))
+    assert window is not None
+    late = (window.end - timedelta(minutes=40)).isoformat()
+    assert client.get("/api/plan/suggest", params={"when": late}).json()["suggestions"] == []
+    # Two hours out it still suggests, and never more time than is left.
+    early = (window.end - timedelta(minutes=120)).isoformat()
+    sugg = client.get("/api/plan/suggest", params={"when": early}).json()["suggestions"]
+    assert sugg
+    assert all(s["minutes_above_min_alt"] <= 120.0 for s in sugg)
+
+
 def test_suggest_ics_downloads_a_calendar_for_a_showpiece(client, solved_library):
     # One-tap "Add to calendar" for a *suggested* (not-yet-captured) target.
     client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})

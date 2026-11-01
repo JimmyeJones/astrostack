@@ -2654,3 +2654,57 @@ def test_the_return_costs_one_lookback_night_on_an_ordinary_week(monkeypatch):
     np_plan.plan_week(_BACK_SITE, [_lib("m31", "M 31", 10.7, 41.3, hours=2.0)],
                       start_utc=_BACK_START, nights=7)
     assert len(calls) == 7 + 1
+
+
+# ---- "Try something new tonight" read late in the night ---------------------
+#
+# ``_find_dark_window`` returns the *ongoing* night from its start, so before the
+# clip a card read an hour before dawn scored the whole night: "up about 10.5 h
+# tonight" and showpieces that had set hours earlier (Scout 2026-11-01).
+
+_PHILLY = Observer(lat_deg=40.0, lon_deg=-75.0, elevation_m=0.0)
+_NOV_EVENING = datetime(2026, 11, 1, 23, 30, tzinfo=timezone.utc)
+
+
+def test_suggest_targets_late_in_the_night_scores_only_the_darkness_left():
+    window = np_plan._find_dark_window(_PHILLY, _NOV_EVENING)
+    assert window is not None
+    late = window.end - timedelta(minutes=90)
+    left = (window.end - late).total_seconds() / 60.0
+
+    evening = suggest_targets(_PHILLY, _NOV_EVENING, limit=40)
+    got = suggest_targets(_PHILLY, late, limit=40)
+    assert evening and got
+    for t in got:
+        # Never more time quoted than the night has left …
+        assert t.minutes_above_min_alt <= left + 1.0
+        # … and nothing whose usable time is already over.
+        assert t.usable_end_utc is not None
+        assert datetime.fromisoformat(t.usable_end_utc) > late
+    # Something the evening suggested has set by then and is dropped.
+    set_by_then = {t.id for t in evening
+                   if t.usable_end_utc
+                   and datetime.fromisoformat(t.usable_end_utc) < late}
+    assert set_by_then
+    assert not set_by_then & {t.id for t in got}
+
+
+def test_suggest_targets_self_hides_with_less_than_the_floor_left():
+    window = np_plan._find_dark_window(_PHILLY, _NOV_EVENING)
+    assert window is not None
+    # 43 minutes of darkness left is under the 45-minute usable floor.
+    assert suggest_targets(_PHILLY, window.end - timedelta(minutes=43), limit=6) == []
+    # … while 50 minutes left still clears it, quoting no more than is left.
+    got = suggest_targets(_PHILLY, window.end - timedelta(minutes=50), limit=6)
+    assert got and all(t.minutes_above_min_alt <= 50.0 for t in got)
+
+
+def test_well_placed_tonight_from_the_afternoon_scores_the_whole_coming_night():
+    """Read before dark, nothing is clipped — the evening card is unchanged."""
+    afternoon = datetime(2026, 11, 1, 18, 0, tzinfo=timezone.utc)  # 13:00 local
+    window = np_plan._find_dark_window(_PHILLY, afternoon)
+    assert window is not None and window.start > afternoon
+    a = suggest_targets(_PHILLY, afternoon, limit=6)
+    b = suggest_targets(_PHILLY, window.start, limit=6)
+    assert [(t.id, t.minutes_above_min_alt) for t in a] == \
+        [(t.id, t.minutes_above_min_alt) for t in b]
