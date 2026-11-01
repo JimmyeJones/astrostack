@@ -82,6 +82,42 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **⭐ 🔴 OWNER-REPORTED, MEASURED ON HIS LIBRARY (2026-11-01) — "colourful mosaic" blotches across the sky of a
+  single-field stack are a fixed colour pattern on the Seestar's sensor that the stacker never removes.**
+  *(Pillar: image quality, PRIORITY 4, with an editor face. Severity high: he sees it on about 25 % of his
+  pictures, and Auto does not remove it. Confidence: **measured**. Size **L**, because it is on the hot path.)*
+  He reported soft brown/blue/purple blotches over the sky, inside the frame and not at the border. It is
+  **not** `bg/per_frame` adding colour: a neutral synthetic Milky-Way field through `subtract_background`
+  (box 128, per_channel, 12 frames) gave chroma RMS 0.119 against 0.102 with flatten off. A read-only
+  diagnostic ran in his container over 105 targets. It averaged **72 raw subs drawn from different targets**
+  **without aligning them**, each scaled by its own sky noise, so different sky cancels and only the sensor's
+  own pattern survives. Result: a repeatable colour pattern at **3.2× the leftover noise at broad scale**
+  (split-half repeat **r = +0.76**) and **1.9× at fine scale** (r = +0.59), amplitude about **0.023 of one
+  sub's noise**. A stack of N subs cuts random noise by √N but not this, so above roughly 1,000 subs the
+  pattern is as large as everything else left in the sky. **The pattern scores match:** mosaics, where every
+  patch of sky lands on different parts of the sensor, score **8–15 %** broad blotch (QU Ser, NGC 6960,
+  HIP 4205, M 3 mosaic). Single fields that sit on one spot of the sensor score **40–170 %** (C 9 163 %,
+  NGC 6910 169 %, M 97 167 %, M 3 159 %). Bright-nebula targets (M 42, M 45, IC 443) score higher still
+  because of real colour, so the metric is confounded there. **None of his 105 runs uses a dark or flat.**
+  The Seestar gives him neither, and the alt-az mount keeps the target on the same pixels night after night.
+  **Spec:** (1) learn the pattern from his own lights, with no new capture. Take a sigma-clipped mean, per
+  **CFA site in the raw-Bayer domain**, of accepted subs from **many different targets**, each with its
+  median removed. Fit an additive term and a sky-proportional term against each sub's sky level, so a
+  dark-like part and a flat-like part are separated rather than assumed. Store it like a calibration master
+  under `calibrate/` with its sub count and date. (2) Subtract it in `calibrate/apply.apply_raw`, before
+  debayer, **opt-in**: a new setting (default off, AGENTS.md §9), offered in plain words on the Target page
+  and on Settings' calibration card, plus "restack with sensor clean-up". (3) Gate it on evidence: it applies
+  only when the split-half repeat r ≥ 0.5 and the ratio ≥ 2. Rebuild it as new nights arrive, and keep one
+  master per camera (`camera_name_from_header`), since gain/exposure groups may need their own. (4) Tests
+  with a synthetic sensor pattern injected into rotated subs of several targets: the pattern is recovered,
+  stack chroma blotch falls toward the noise floor, real nebular colour is untouched, and a library of one
+  target declines (no sky diversity). **Owner side:** see whether his Seestar app has a dithering option.
+  Dithering spreads the pattern at capture time; it is not a substitute for (1)–(3).
+  **⏸ HOLD (2026-11-01): do not start building yet.** The owner says the blotches appear only on some nights,
+  "when it is cold". A per-sensor-temperature version of the diagnostic (`FrameRow.sensor_temp_c` bins) is
+  with him; its result decides whether (1) needs one master per temperature range, like a matched dark. This
+  line is replaced with the numbers when they arrive.
+
 - **🟡 (Builder 2026-10-30, the ⭐ 2026-10-28 entry's part (4)) — the "darker ring just inside" the ragged border is
   made by the stacker's per-frame sky flatten: on a vignetted sub, `Background2D` leaves a dark rim along every
   sub's own edge, and the canvas border is where only sub edges land.** *(Pillar: image quality / trust —
