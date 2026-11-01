@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-11-01 (Builder, branch `claude/fervent-allen-u0a7vz`) — nothing ungated to build; dogfood `--combine --mosaic --editor` CLEAN.
+
+- **Start:** one open PR, #1344 (docs only, the ⭐ fixed-sensor-colour-pattern entry), which **holds itself** ("do not
+  start building yet") for the owner's per-temperature diagnostic, so it was neither built nor merged here. Every
+  other Bugs entry still carries its owner/observer gate; the LP-filter idea still waits on the `FILTER`-card count.
+- **Dogfood `--combine`** (the least-run flag, not used since 2026-10-28): scan → refused stack (its own sentence and
+  its traceback in `/api/logs`, as expected) → synthetic solve → both stacks → merge nudge ("within 0.0 arcmin") →
+  merge (notes and tags carried over, cover pinned) → rescan stays combined → a new sub in the combined-away folder
+  lands in the deep target. **§10: all 7 original files in `incoming/` unchanged; only the one added sub is new.**
+- **Rest CLEAN:** all 21 ops re-render, undo/redo, the taste chips (the live tap shifts Auto; the marked chip says
+  "already at its limit"); nothing overflowing, no console errors; heights on the standing baseline.
+- **Read, not bugs:** (a) Plan my week badges the mosaic sample "NEEDS 3×3 MOSAIC". That sample has no
+  `stack_runs` row in this root (checked), so this is the 2026-10-28 stand-down (v0.503.12): the name has no mosaic
+  suffix and it is unstacked. (b) The probe's one `!` line, "a toast from before the Over-smoothed tap never closed",
+  is the live tap's Auto re-run toast landing late in the probe's 8 s wait. The tap's own effect was read correctly
+  ("why Auto shifted" gained the less-smoothing clause), and `Editor.tsx:874` uses Mantine's default autoClose.
+  This is probe timing, not a toast that stays up.
+
 ## 2026-11-01 (Builder, branch `claude/practical-shannon-qz759n`) — nothing ungated to build; dogfood `--mosaic --editor --big --deep` CLEAN, one scale divergence measured and closed as honest.
 
 - **Suite:** 8545 passed / 7 skipped on `9f07d930` (xdist `-n 4`, BLAS capped, 19m25s). No open PRs at start.
