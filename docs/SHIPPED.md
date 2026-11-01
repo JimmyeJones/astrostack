@@ -1,5 +1,35 @@
 # Shipped — the record
 
+## 2026-11-01 (Scout, branch `claude/exciting-wozniak-seqf64`) — closed, moot: the "edited picture as cover" idea
+
+- **Closed, not built (Scout 2026-11-01, backlog curation).** Its own 2026-08-05 Builder note had already found it
+  *mostly moot*: the editor's **Apply & save** records an edited picture as a real `stack_runs` row
+  (`_apply_editor_to_run`, `notes="edited"`), which the v0.145.0 "Set as cover" button already pins. The remainder
+  (a loose download/share export, or the button inside the export step) is marginal against that path. Cut whole
+  from "Features that serve real workflows" so the section stops presenting it as open. Do not re-pick. The entry
+  as filed:
+
+  - **NEW (Builder 2026-07-21, follow-up to shipped "Set as cover" v0.145.0) — let the cover also be an *edited*
+    export, not only a raw stack run.** v0.145.0 pins a **`stack_runs` row** as the target's cover (`cover_stack_run_id`
+    resolved through the run's `preview_path`). But the #7 spec's motivating case — "a beginner who *edited* a stack
+    into a lovely picture" — isn't fully served: an editor export is **not** a `stack_runs` row, so an edited picture
+    can't be pinned yet. **Idea:** extend the cover to accept an edited result. Two shapes to weigh: (a) when the
+    editor exports/saves, record the edited render as its own light-weight "result" the cover can point at (a new
+    nullable `cover_preview_path` alongside `cover_stack_run_id`, set directly to the edited PNG — the thumbnail
+    resolver already falls back gracefully if the file is gone); or (b) have the editor "Save as preview" flow (which
+    already re-renders a run's `preview_path`) offer a "★ Set as cover" in the same step, so the *edited* pixels
+    become the pinned run's preview and the existing run-id cover just works. (b) reuses everything already shipped and
+    needs no new column — likely the smaller, safer slice. Beginner bar ✔ (same one-button affordance, extended to the
+    place a beginner most wants it — their finished edit). Additive/upgrade-safe (nullable/new surface, off by default).
+    _(S–M; PRIORITY 3 friendliness / enjoy-share — completes the "pin my favourite picture" story for edited results.)_
+    **⚠ Builder note (2026-08-05, `claude/relaxed-turing-iv0w1h`) — MOSTLY MOOT; verify before starting.** The
+    editor's **Apply & save** path (`submit_editor_export` → `_apply_editor_to_run`) does not produce a loose PNG: it
+    records the edited result as a **real `stack_runs` row** of its own (`notes="edited"`, its own `preview_path`), so
+    an edited picture *can* already be pinned with the existing v0.145.0 "Set as cover" button on that run's History
+    card. What is left is only the narrower case of an editor **download/share** export (PNG/JPEG, no run recorded) —
+    shape (a) — and the shortcut of offering "★ Set as cover" inside the export step rather than one click later on
+    History. Both are marginal against the shipped path, so this is **deprioritised**; don't rebuild the covered part.
+
 ## 2026-11-01 (Builder, branch `claude/practical-shannon-ieouv1`) — the Calibration repair offer's dangling "these"
 
 - **v0.505.5** — 🟢 FRIENDLINESS (PRIORITY 3), a `--mosaic --editor --calibration --no-site` dogfood find, read off
