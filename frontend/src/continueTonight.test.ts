@@ -208,4 +208,58 @@ describe("pickContinueTonight", () => {
       expect(out.runnersUp.map((r) => r.target.target_safe)).toEqual(["b"]);
     }
   });
+
+  describe("a target whose window tonight has already closed", () => {
+    // `/tonight` scores the whole dark window, so in the small hours a target
+    // that set at 21:16 still carries score > 0. Read at 04:14 it is not
+    // somewhere to point the scope "tonight".
+    const NOW = Date.parse("2026-07-24T04:14:00Z");
+    const gone = target({
+      name: "Gone", target_safe: "gone", total_exposure_s: 5 * 3600,
+      usable_start_utc: "2026-07-23T18:41:00Z", usable_end_utc: "2026-07-23T21:16:00Z",
+    });
+    const up = target({
+      name: "Up", target_safe: "up", total_exposure_s: 1 * 3600,
+      usable_start_utc: "2026-07-24T00:12:00Z", usable_end_utc: "2026-07-24T05:05:00Z",
+    });
+    const later = target({
+      name: "Later", target_safe: "later", total_exposure_s: 0.5 * 3600,
+      usable_start_utc: "2026-07-24T04:30:00Z", usable_end_utc: "2026-07-24T05:05:00Z",
+    });
+
+    it("is neither the pick nor a runner-up", () => {
+      const out = pickContinueTonight(plan([gone, up, later]), undefined, 2, null,
+                                      undefined, NOW)!;
+      expect(out.pick.target.target_safe).toBe("up");
+      expect(out.runnersUp.map((r) => r.target.target_safe)).toEqual(["later"]);
+    });
+
+    it("hides the card when every started target has already set", () => {
+      expect(pickContinueTonight(plan([gone]), undefined, 2, null, undefined, NOW))
+        .toBeNull();
+    });
+
+    it("counts a window ending exactly now as over", () => {
+      const edge = target({ target_safe: "edge", usable_end_utc: "2026-07-24T04:14:00Z" });
+      expect(pickContinueTonight(plan([edge]), undefined, 2, null, undefined, NOW))
+        .toBeNull();
+    });
+
+    it("keeps today's pick when the clock or the window is unknown", () => {
+      // No clock passed (older callers): nothing filtered, the deepest still wins.
+      expect(pickContinueTonight(plan([gone, up]))!.pick.target.target_safe)
+        .toBe("gone");
+      for (const bad of [null, undefined, Number.NaN]) {
+        expect(pickContinueTonight(plan([gone, up]), undefined, 2, null, undefined,
+                                   bad)!.pick.target.target_safe).toBe("gone");
+      }
+      // No window on the row (an older backend): never hidden on a guess.
+      const bare = target({ target_safe: "bare", total_exposure_s: 5 * 3600 });
+      expect(pickContinueTonight(plan([bare]), undefined, 2, null, undefined, NOW)!
+        .pick.target.target_safe).toBe("bare");
+      const junk = target({ target_safe: "junk", usable_end_utc: "not a time" });
+      expect(pickContinueTonight(plan([junk]), undefined, 2, null, undefined, NOW)!
+        .pick.target.target_safe).toBe("junk");
+    });
+  });
 });

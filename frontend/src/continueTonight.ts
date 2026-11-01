@@ -48,6 +48,17 @@ export type GoalSecondsBySafe = Record<string, number | null | undefined>;
  * and a target the Target page calls done has to be done here too. */
 export type DifficultyBySafe = Record<string, DifficultyHint | null | undefined>;
 
+/** True when `t`'s usable window tonight ended at or before `nowMs` — it has
+ * already set below the floor, so there is nothing left of tonight to point at.
+ * False whenever either side is unknown, so a missing clock or window never
+ * hides a target. */
+function windowAlreadyOver(t: PlannedTarget, nowMs: number | null | undefined): boolean {
+  if (typeof nowMs !== "number" || !Number.isFinite(nowMs)) return false;
+  if (!t.usable_end_utc) return false;
+  const end = Date.parse(t.usable_end_utc);
+  return Number.isFinite(end) && end <= nowMs;
+}
+
 /**
  * Choose the single owned target to continue tonight (plus a couple of
  * runners-up), or null when there's nothing sensible to recommend.
@@ -73,6 +84,15 @@ export type DifficultyBySafe = Record<string, DifficultyHint | null | undefined>
  * an unknown type) sorts as "just started", so it never displaces a genuinely
  * close target but can still be picked when it's your only improvable option up
  * tonight.
+ *
+ * `nowMs` (the viewer's clock, epoch ms) drops a target whose usable window has
+ * already **ended**. `/tonight` plans the whole dark window, including the part
+ * already behind us — right for the Tonight page, which is a plan for a chosen
+ * night, but wrong for a card headed "point here tonight": read at 4 AM, it used
+ * to recommend an object that set below the floor at 9 PM, captioned with that
+ * spent window. A target whose window is still open (or not yet begun), or that
+ * carries no window at all (an older backend), is unaffected; omit `nowMs` and
+ * nothing is filtered, exactly as before.
  */
 export function pickContinueTonight(
   plan: NightPlan | undefined | null,
@@ -80,6 +100,7 @@ export function pickContinueTonight(
   maxRunnersUp = 2,
   alreadyRecommended?: Iterable<string> | null,
   difficultyBySafe?: DifficultyBySafe,
+  nowMs?: number | null,
 ): ContinueTonightPlan | null {
   const targets = plan?.targets;
   if (!targets || targets.length === 0) return null;
@@ -97,7 +118,8 @@ export function pickContinueTonight(
       t.already_targeted &&
       !!t.target_safe &&
       t.score > 0 &&
-      !shown.has(t.target_safe),
+      !shown.has(t.target_safe) &&
+      !windowAlreadyOver(t, nowMs),
   );
   if (owned.length === 0) return null;
 

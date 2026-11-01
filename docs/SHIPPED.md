@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-11-01 (Builder, branch `claude/practical-shannon-h7pyj4`) — "Point here tonight" after the target has set
+
+- **v0.505.4** — 🟡 FRIENDLINESS / AUTONOMY (PRIORITY 2–3), a `--mosaic --deep --incoming-lag --closing` dogfood
+  find, read off the Dashboard screenshot rather than the probe's text. The pass ran at 04:14 UTC, in the last
+  hour of the dark window. "Point here right now" correctly listed the three M42 samples (42° up, ~1 h left),
+  and directly under it **"Point here tonight" recommended "Sample: season closing (hours in)", captioned
+  "Up tonight 06:41 PM–09:16 PM"** — a window that had closed seven hours earlier, with the runner-up in the
+  same state. **Cause:** `/api/tonight` plans the *whole* dark window (`plan_tonight` scores the night, not
+  what is left of it), which is right for the Tonight page — a plan for a chosen night, with its own date
+  picker — but `continueTonight.pickContinueTonight` filtered only on `score > 0`, so any target that was
+  up in the evening stayed eligible until the next night's plan replaced it at dawn. On the owner's install
+  that is every session that checks the Dashboard after midnight, which is when a Seestar owner does. Its
+  "closest to a finished picture" rule makes the deepest evening target win, so the set one was the *pick*,
+  not just a runner-up.
+  **Fix:** `pickContinueTonight` takes the viewer's clock (`nowMs`) and drops a target whose
+  `usable_end_utc` is at or before it; `ContinueTonightCard` passes `Date.now()`. A target still up or not yet
+  risen is unaffected, and so is a row with no window (older backend) or an unparseable one — never hidden on
+  a guess. No `nowMs` means no filter, so other callers keep today's answer. Frontend only; no endpoint,
+  config, schema, on-disk, API-shape or default change. The Tonight page's "Add more to what you're shooting"
+  table still lists the set targets — deliberately, as it is the plan for the night in its date picker.
+  **Tests:** +5 (4 picker, 1 card). With the filter removed, **4 go red**; the fifth pins the
+  unknown-clock/window fallbacks. The card's existing tests are dated 2026-07-24 and now pin `Date.now` to
+  their own plan's `generated_utc`; their assertions are unchanged.
+
 ## 2026-11-01 (Builder, branch `claude/zen-fermat-j4oyhb`) — a catalogued galaxy is not a "star cluster"
 
 - **v0.505.3** — 🟠 EDITOR (PRIORITY 1), a `--mosaic --big --editor --restack` dogfood find. On every pass the
