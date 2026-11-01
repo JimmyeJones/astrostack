@@ -5678,6 +5678,7 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
         build_auto_recipe_for_run,
         render_run_display_array,
         solve_highlight_protect,
+        target_catalog_family,
     )
     from seestack.edit import presets as presets_mod
     from seestack.edit.histogram import measure_sky_cast
@@ -5727,7 +5728,9 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
             prefs = _read_auto_preferences(lib)
             recipe = build_auto_recipe_for_run(
                 proj.project_dir, run, median_fwhm, prefs=prefs,
-                auto_crop=auto_crop, runs=runs)
+                auto_crop=auto_crop, runs=runs,
+                # The same taste bucket the editor's Auto reads for this target.
+                catalog_family=target_catalog_family(entry))
             proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe.to_json())
             # Stamp a plain-language "what Auto did (and why)" note so the History
             # Info panel can explain this silently-applied edit — the same reasoning

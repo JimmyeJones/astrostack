@@ -183,6 +183,44 @@ def _target_nebula_class(request: Request, safe: str) -> str:
     return info.nebula_class if info is not None else ""
 
 
+def target_catalog_family(entry: Any) -> str | None:
+    """The archetype (``galaxy``/``nebula``/``cluster``) the bundled catalogue
+    says this library target *is*, or ``None`` — unidentified, or a type with no
+    archetype (``presets.catalog_family``).
+
+    It is the one thing every caller of the archetype has to agree on besides
+    the pixels: the chip, the bucket a feedback tap is filed in and the bucket
+    Auto reads all pass it to ``presets.reconcile_with_catalog``, so a pixel
+    verdict the catalogue contradicts is "unsure" on all three sides at once.
+    Best-effort: an identification failure is *no opinion*, never an error."""
+    from seestack.objectinfo import identify_object
+
+    if entry is None:
+        return None
+    try:
+        info = identify_object(entry.name, entry.ra_deg, entry.dec_deg)
+    except Exception:  # noqa: BLE001
+        return None
+    return presets_mod.catalog_family(info.type) if info is not None else None
+
+
+def _target_catalog_family(request: Request, safe: str) -> str | None:
+    """:func:`target_catalog_family` for ``safe``, opening the library itself."""
+    try:
+        lib = deps.open_library(request)
+        try:
+            return target_catalog_family(lib.find_target(safe))
+        finally:
+            lib.close()
+    except Exception:  # noqa: BLE001 — no opinion, never an error
+        return None
+
+
+def _veto_archetype(cls: str | None, family: str | None) -> str | None:
+    """``presets.reconcile_with_catalog`` on a bare archetype."""
+    return presets_mod.reconcile_with_catalog({"cls": cls}, family).get("cls")
+
+
 def _run_display_space(run: Any) -> bool:
     """True when this run's stacked image is already tone-mapped display space (an
     editor export), so the editor proxy must not default-stretch it again — the
@@ -422,7 +460,8 @@ def _auto_measure_grain_ratio(project_dir: Path, run, scale: float) -> float | N
 
 def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
                               prefs: dict | None = None,
-                              auto_crop: bool = True, runs=None) -> Recipe:
+                              auto_crop: bool = True, runs=None,
+                              catalog_family: str | None = None) -> Recipe:
     """The one-click Auto recipe for a run, built from its own proxy — the same
     logic the ``…/editor/auto`` endpoint serves, factored out so the one-click
     "Process target" job can chain an auto-edit onto the stack it just produced
@@ -445,7 +484,11 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
     ``median_fwhm`` is the target's per-frame QC median (``Project.median_fwhm``,
     half-resolution green pixels); it is put on this run's master grid here
     (:func:`master_fwhm_for_run`) before it sizes the sharpen radius; ``runs``
-    (the target's stack runs) lets an editor export find its source's grid."""
+    (the target's stack runs) lets an editor export find its source's grid.
+
+    ``catalog_family`` is :func:`target_catalog_family` for the run's target: the
+    taste bucket Auto reads is vetoed by it exactly as the bucket a tap is filed
+    in is (:func:`classify_run_measured`)."""
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     is_mosaic = _run_is_mosaic(run, load=True)
     trim = _trim_rect_for_run(run) if is_mosaic else None
@@ -454,7 +497,8 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
         prefs=prefs, auto_crop=auto_crop,
         coverage=_auto_measure_coverage(run, scale, is_mosaic),
         proxy_scale=scale,
-        grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
+        grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale),
+        catalog_family=catalog_family)
 
 
 def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | None,
@@ -502,7 +546,8 @@ def _measured_region_for_run(project_dir: Path, run):
     return m_rgb, m_cov, scale
 
 
-def classify_run_measured(project_dir: Path, run) -> dict:
+def classify_run_measured(project_dir: Path, run,
+                          catalog_family: str | None = None) -> dict:
     """``presets.classify_target`` on the **well-covered** picture — the one place
     in the webapp that asks a run's coarse archetype.
 
@@ -556,20 +601,27 @@ def classify_run_measured(project_dir: Path, run) -> dict:
     the trim-off stretch target drifted 2.3–10.6 % low purely with how ragged the
     border was, and the fringe it was chasing renders nowhere near either target
     anyway. The table is in ``presets.measured_region``.
+
+    **And a pixel verdict the catalogue contradicts is "unsure"** —
+    ``catalog_family`` is :func:`target_catalog_family`, and
+    ``presets.reconcile_with_catalog`` carries the measurement (a small galaxy on
+    the S30's 2.1° field reads as a star cluster 12 times in 16). The memo keeps
+    the raw pixel verdict, because that is what is fixed for the run's files;
+    the veto is applied on the way out, by every caller alike.
     """
     key = run_measure_memo.key_for("classify", project_dir, run)
-    hit = run_measure_memo.lookup(key)
-    if hit is not run_measure_memo.MISS:
-        return hit
-    m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run)
-    out = presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
-    # Remembered per run's files (``webapp.run_measure_memo``): every Auto
-    # feedback tap asks this again about a picture that has not changed.
-    run_measure_memo.store(key, out)
-    return out
+    out = run_measure_memo.lookup(key)
+    if out is run_measure_memo.MISS:
+        m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run)
+        out = presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
+        # Remembered per run's files (``webapp.run_measure_memo``): every Auto
+        # feedback tap asks this again about a picture that has not changed.
+        run_measure_memo.store(key, out)
+    return presets_mod.reconcile_with_catalog(out, catalog_family)
 
 
-def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
+def build_preset_suggestion_for_run(project_dir: Path, run,
+                                    catalog_family: str | None = None) -> dict:
     """Coarsely classify a run's own proxy and, when one archetype is clear, suggest
     the matching built-in preset (galaxy / nebula / star cluster) — a hint the editor
     shows as a one-click "try this preset?" chip. Read-only: it never changes the Auto
@@ -586,7 +638,7 @@ def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
     :func:`classify_run_measured`: the archetype is a claim about the object, so it
     is read off the well-covered picture whatever the owner has told the trim to
     do."""
-    out = classify_run_measured(project_dir, run)
+    out = classify_run_measured(project_dir, run, catalog_family)
     # Only the user-facing fields; the raw cues stay server-side (debug/tests only).
     return {"preset_id": out["preset_id"], "label": out["label"],
             "reason": out["reason"], "confidence": out["confidence"]}
@@ -1109,7 +1161,8 @@ def _classify_run(request: Request, safe: str, run_id: int) -> str | None:
     """
     try:
         project_dir, run = _run_info(request, safe, run_id)
-        return classify_run_measured(project_dir, run).get("cls")
+        return classify_run_measured(
+            project_dir, run, _target_catalog_family(request, safe)).get("cls")
     except Exception:  # noqa: BLE001 — classification is advisory; never sink feedback
         return None
 
@@ -1152,9 +1205,13 @@ def _run_taste_context(request: Request, safe: str, run_id: int,
     # too, so the editor's opening read already answers the first tap's POST.
     key = run_measure_memo.key_for("taste", project_dir, run)
     cls_key = run_measure_memo.key_for("classify", project_dir, run)
+    # The memo holds the raw pixel verdict (fixed for the run's files); the
+    # catalogue veto is applied on the way out, as :func:`classify_run_measured`
+    # applies it, so the bucket read here is the one a tap is filed in.
+    family = _target_catalog_family(request, safe)
     hit = run_measure_memo.lookup(key)
     if hit is not run_measure_memo.MISS:
-        return hit
+        return _veto_archetype(hit[0], family), hit[1]
     try:
         m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run)
         classified = presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
@@ -1168,9 +1225,9 @@ def _run_taste_context(request: Request, safe: str, run_id: int,
             grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
     except Exception:  # noqa: BLE001 — the marks are the optional half
         # Not remembered: a failed half is retried on the next read.
-        return cls, None
+        return _veto_archetype(cls, family), None
     run_measure_memo.store(key, (cls, knobs))
-    return cls, knobs
+    return _veto_archetype(cls, family), knobs
 
 
 def _run_inert_cue_hints(knobs: dict[str, float] | None, profile: dict,
@@ -2789,6 +2846,9 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
         # Auto's data-driven values toward the owner's taste. Read here while the
         # library is open; neutral ⇒ today's Auto unchanged.
         prefs = _read_auto_preferences(lib)
+        # Which taste bucket that profile is read from must agree with the bucket
+        # a tap on this picture is filed in (:func:`classify_run_measured`).
+        catalog_family = target_catalog_family(lib.find_target(safe))
     finally:
         proj.close()
         lib.close()
@@ -2800,7 +2860,8 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
         # is_mosaic verdict, never the old coverage_max>min heuristic.
         return build_auto_recipe_for_run(
             project_dir, run, median_fwhm, prefs=prefs,
-            auto_crop=auto_crop, runs=runs).to_dict()
+            auto_crop=auto_crop, runs=runs,
+            catalog_family=catalog_family).to_dict()
 
     return await run_in_threadpool(work)
 
@@ -2847,8 +2908,13 @@ async def preset_suggestion(safe: str, run_id: int, request: Request) -> dict:
     # it stays accepted, because an older frontend still sends one and dropping a
     # request field would be an API break (§9).
 
+    # A pixel verdict the catalogue contradicts — a small galaxy on the S30's
+    # wide field reads as a star cluster — is no suggestion at all
+    # (`presets.reconcile_with_catalog`).
+    catalog_family = _target_catalog_family(request, safe)
+
     def work() -> dict:
-        return build_preset_suggestion_for_run(project_dir, run)
+        return build_preset_suggestion_for_run(project_dir, run, catalog_family)
 
     return await run_in_threadpool(work)
 

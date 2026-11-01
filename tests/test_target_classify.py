@@ -594,3 +594,97 @@ def test_the_opening_footprint_is_a_length_on_the_sensor():
     # Never finer than the proxy, whatever nonsense a caller hands it.
     for bogus in (0.0, -3.0, float("nan"), float("inf")):
         assert presets._star_opening_side(bogus) >= floor
+
+
+# --- the catalogue veto (presets.reconcile_with_catalog) ---------------------
+
+def _s30_small_galaxy(seed: int = 7):
+    """A small galaxy as the owner's S30 frames one: a 150 mm lens on a 2.1°
+    field puts M51-sized objects ~a hundred pixels across in a 1920×1080 frame,
+    so on the ~1500-px proxy it is a smooth blob of radius ~18 px under a few
+    hundred stars. Neutral colour, as a galaxy is."""
+    from scipy.ndimage import gaussian_filter
+
+    rng = np.random.default_rng(seed)
+    h, w = 844, 1500
+    f = np.zeros((h, w), np.float32)
+    n = 300
+    ys, xs = rng.integers(0, h, n), rng.integers(0, w, n)
+    f[ys, xs] = rng.uniform(0.3, 3.0, n) * rng.pareto(2.0, n).clip(0, 5) + 0.3
+    f = gaussian_filter(f, 1.3) * 2 * np.pi * 1.3 ** 2 * 0.5
+    lum = 0.05 + f + 0.4 * _blob((h, w), h / 2, w / 2, 18)
+    lum += rng.normal(0, 0.004, (h, w)).astype("float32")
+    return np.repeat(lum[..., None], 3, axis=2).astype("float32")
+
+
+def test_a_small_galaxy_on_the_s30_field_reads_as_a_star_cluster_to_the_pixels():
+    """The premise the veto exists for, pinned so it is re-measured if the
+    classifier changes: the geometry alone calls a small galaxy a cluster."""
+    out = classify_target(_s30_small_galaxy(), proxy_scale=1.28)
+    assert out["cls"] == "cluster"
+    assert out["cues"]["ext_frac"] < 0.004
+
+
+def test_catalogue_family_folds_catalogue_types_onto_the_three_archetypes():
+    assert presets.catalog_family("galaxy") == "galaxy"
+    assert presets.catalog_family("globular cluster") == "cluster"
+    assert presets.catalog_family("open cluster") == "cluster"
+    assert presets.catalog_family("nebula") == "nebula"
+    assert presets.catalog_family("planetary nebula") == "nebula"
+    assert presets.catalog_family("supernova remnant") == "nebula"
+    for no_archetype in ("asterism", "double star", "star cloud", "", None):
+        assert presets.catalog_family(no_archetype) is None
+
+
+def test_every_bundled_catalogue_type_is_either_folded_or_deliberately_not():
+    """A new type in the bundled catalogue must be a decision, not a silent
+    ``None`` — the veto would quietly stop applying to it."""
+    from seestack.nightplan import load_catalog
+
+    known_without_archetype = {"asterism", "double star", "star cloud"}
+    for obj in load_catalog():
+        assert (presets.catalog_family(obj.type) is not None
+                or obj.type in known_without_archetype), obj.type
+
+
+def test_a_catalogue_that_contradicts_the_pixels_makes_the_verdict_unsure():
+    raw = classify_target(_s30_small_galaxy(), proxy_scale=1.28)
+    vetoed = presets.reconcile_with_catalog(raw, "galaxy")
+    assert vetoed["cls"] is None and vetoed["preset_id"] is None
+    assert vetoed["label"] is None and vetoed["reason"] is None
+    assert vetoed["confidence"] == 0.0
+    # The measurement is kept, with what was overruled and by what.
+    assert vetoed["cues"]["pixel_cls"] == "cluster"
+    assert vetoed["cues"]["catalog_family"] == "galaxy"
+    assert vetoed["cues"]["star_share"] == raw["cues"]["star_share"]
+    # The input is not mutated (it may be a memoised answer).
+    assert raw["cls"] == "cluster" and "pixel_cls" not in raw["cues"]
+
+
+def test_an_agreeing_or_silent_catalogue_leaves_the_verdict_alone():
+    raw = classify_target(_s30_small_galaxy(), proxy_scale=1.28)
+    assert presets.reconcile_with_catalog(raw, "cluster") == raw
+    assert presets.reconcile_with_catalog(raw, None) == raw
+    # It never adopts the catalogue's family for a verdict the pixels declined.
+    unsure = {"cls": None, "preset_id": None, "label": None, "reason": None,
+              "confidence": 0.0, "cues": {}}
+    assert presets.reconcile_with_catalog(unsure, "galaxy") == unsure
+
+
+def test_auto_reads_no_cluster_taste_on_a_catalogued_galaxy():
+    """The **read** side: ``auto_recipe`` keys the taste profile on the same
+    vetoed archetype, so a bias learned on star clusters does not reach a
+    galaxy the pixels mistook for one — and still reaches a real cluster."""
+    from seestack.edit import auto_prefs
+
+    rgb = _s30_small_galaxy()
+    cluster_taste = auto_prefs.record_feedback({}, "too_dark", object_type="cluster")
+
+    def target_bg(**kw):
+        rec = presets.auto_recipe(rgb, proxy_scale=1.28, **kw)
+        return next(o for o in rec.ops if o.id == "tone.stretch").params["target_bg"]
+
+    neutral = target_bg(prefs={})
+    assert target_bg(prefs=cluster_taste) > neutral                 # pixels alone: cluster
+    assert target_bg(prefs=cluster_taste, catalog_family="cluster") > neutral
+    assert target_bg(prefs=cluster_taste, catalog_family="galaxy") == neutral

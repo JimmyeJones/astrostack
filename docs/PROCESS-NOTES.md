@@ -1,5 +1,17 @@
 # Process notes & QA sweep records
 
+## 2026-11-01 (Builder, branch `claude/zen-fermat-j4oyhb`) — dogfood `--mosaic --big --editor --restack`: one editor fix (v0.505.3)
+
+Baseline suite 8529 passed / 7 skipped (16 min, `-n 4`). Every open Bugs entry is still gated, and "Features that
+serve real workflows" has no open beginner item, so this run was a dogfood pass. It came back CLEAN: 21 ops
+re-render on single field, 2×2 and full-size, undo/redo work, nothing overflows, no console errors, the scale
+pair shows 0 of 16 answers moving, and the trim is 7.9 %. **One finding, from reading what the app says:** the
+Orion Nebula sample's preset chip says "Star cluster", and a tap says "for your star clusters". Earlier passes
+recorded this and filed it under the sample being star-only. Re-measured for the owner's S30 field, a small
+galaxy gets the same verdict 12 times in 16, so it is a real editor bug, fixed as v0.505.3
+(`presets.reconcile_with_catalog`). **Lesson for the dogfood reader:** a verdict excused as an artefact of the
+synthetic sample should be re-asked on the owner's own geometry once before the excuse is accepted.
+
 ## 2026-10-31 (Builder, branch `claude/zen-fermat-tqx24a`) — dogfood `--mosaic --dithered --editor`: one editor fix (v0.505.2)
 
 * **The find.** All three drives ran; the single field and the 2×2 mosaic were CLEAN (trim 7.9 %, 21 ops

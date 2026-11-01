@@ -1023,6 +1023,62 @@ def classify_target(rgb: np.ndarray | None,
     }
 
 
+#: The bundled catalogue's plain-language ``type`` (``seestack.objectinfo``)
+#: folded onto :func:`classify_target`'s three archetypes. Anything not listed —
+#: a star cloud, a double star, an asterism — has no archetype of its own, so the
+#: catalogue says nothing and the pixels decide alone.
+_CATALOG_TYPE_FAMILY: dict[str, str] = {
+    "galaxy": "galaxy",
+    "globular cluster": "cluster",
+    "open cluster": "cluster",
+    "nebula": "nebula",
+    "planetary nebula": "nebula",
+    "supernova remnant": "nebula",
+}
+
+
+def catalog_family(object_type: str | None) -> str | None:
+    """The :func:`classify_target` archetype the catalogue's ``type`` names, or
+    ``None`` when it names none (or the target was never identified)."""
+    if not object_type:
+        return None
+    return _CATALOG_TYPE_FAMILY.get(str(object_type).strip().lower())
+
+
+def reconcile_with_catalog(classified: dict[str, Any],
+                           family: str | None) -> dict[str, Any]:
+    """:func:`classify_target`'s verdict, standing down when it contradicts what
+    the catalogue already knows the target *is*.
+
+    The pixel classifier only sees geometry, and on the owner's S30 (150 mm, a
+    2.1° field) the geometry of a small galaxy is mostly stars: the galaxy is a
+    hundred-odd pixels across in a frame of two million. Measured on synthetic
+    S30-shaped proxies (1500×844, ``proxy_scale`` 1.28, a Gaussian galaxy of
+    radius 12–35 px under 300–800 stars), **12 of 16 read as a star cluster** —
+    ``star_share`` 0.75–0.97 against ``ext_frac`` ≤ 0.006 — and only the two
+    biggest, sparsest fields read as a galaxy. The chip then offered the
+    cluster preset on M51, and every Auto feedback tap on it was filed in the
+    *cluster* bucket ("Auto is running a bit brighter for your star clusters"),
+    where it brightened M13 and never reached his next galaxy.
+
+    So a confident catalogue identity outranks a geometric guess **only to veto
+    it**: a disagreement means the pixels are unsure, and "unsure" is already
+    the classifier's honest answer (no chip, the global taste). It never
+    *adopts* the catalogue's family — that would hand a per-type bucket to every
+    catalogued target the pixels could not read, which is a behaviour change of
+    its own and not this fix. ``family=None`` (unidentified, or a type with no
+    archetype) returns the verdict untouched; so does an agreeing one.
+    """
+    cls = classified.get("cls")
+    if not family or cls is None or cls == family:
+        return classified
+    cues = dict(classified.get("cues") or {})
+    cues["catalog_family"] = family
+    cues["pixel_cls"] = cls
+    return {"cls": None, "preset_id": None, "label": None, "reason": None,
+            "confidence": 0.0, "cues": cues}
+
+
 # --- the picture Auto makes, not the fringe its own last op deletes ----------
 
 #: The smallest side, in proxy pixels, a trim rectangle must have before Auto
@@ -1480,7 +1536,8 @@ def auto_recipe(rgb: np.ndarray | None = None,
                 auto_crop: bool = True,
                 coverage: np.ndarray | None = None,
                 proxy_scale: float = 1.0,
-                grain_ratio: float | None = None) -> Recipe:
+                grain_ratio: float | None = None,
+                catalog_family: str | None = None) -> Recipe:
     """One-click auto-process built from the image, not hardcoded.
 
     Always: background/gradient removal → photometric colour balance → a proper
@@ -1557,6 +1614,11 @@ def auto_recipe(rgb: np.ndarray | None = None,
     ``noise._SIGMA_FULL`` behind the denoise strength) were calibrated on. See
     :func:`analyze_proxy`; ``None``/``1.0`` ⇒ no correction, and an undecimated
     proxy is ``1.0`` by construction.
+
+    ``catalog_family`` is the target's catalogue archetype
+    (:func:`catalog_family`), and only ever narrows *which taste bucket* is read:
+    a pixel verdict that contradicts it is treated as unsure
+    (:func:`reconcile_with_catalog`). ``None`` ⇒ the verdict stands, as before.
     """
     # The steps are only measured *out* where the recipe actually takes them
     # out — ``background.level_coverage`` is emitted on a mosaic and nowhere
@@ -1590,8 +1652,14 @@ def auto_recipe(rgb: np.ndarray | None = None,
         # moment the fringe shrinks. This is the **read** side of that profile and
         # ``editor._classify_run`` is the write side; they have to answer by one
         # rule, so neither asks the preference.
-        object_type = classify_target(m_rgb, m_cov if is_mosaic else None,
-                                      proxy_scale=proxy_scale).get("cls")
+        #
+        # ``catalog_family`` (the target's catalogue archetype, when it has one)
+        # vetoes a contradicting verdict through :func:`reconcile_with_catalog`,
+        # and the write side applies the same veto — see that function.
+        object_type = reconcile_with_catalog(
+            classify_target(m_rgb, m_cov if is_mosaic else None,
+                            proxy_scale=proxy_scale),
+            catalog_family).get("cls")
     values = auto_knob_values(knobs, prefs, object_type)
 
     ops: list[tuple[str, dict]] = []
