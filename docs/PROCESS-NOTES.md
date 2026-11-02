@@ -1,5 +1,18 @@
 # Process notes & QA sweep records
 
+## 2026-11-02 (Builder, branch `claude/fervent-allen-s1pgbe`) — v0.505.9; first-ever dogfood `--mosaic --deep --combine --calibration --editor`.
+
+- **Setup:** `agent-setup.sh`'s `pip install -e .[dev,web,gui]` hung >12 min on a download (process asleep, no
+  progress); killed and re-ran with `--timeout 120 --retries 5 -e ".[dev,web]"`, then the setup script again — fine.
+- **Dogfood, read as paragraphs:** mosaic, deep (1,200-row frames table windowed at 300, observer grows it) and the
+  editor drive all clean, nothing overflowing, no console errors. Two lines needed a second look: (1) "masters
+  actually applied: NONE" — a script gap, `--combine` sets `DO_STACK=0` so `--calibration` never re-processed
+  (fixed; re-run read both masters applied, note withdrawn); (2) **after that re-process the Dashboard still said
+  "3 subs you've shot aren't in the picture yet · M 31 · +3"** — the run had used all 7 subs, but the merge's app pin
+  kept the 4-sub run as the cover, and only the batch ever lifted it. That is v0.505.9.
+- **Not covered by a test:** the walk-away auto-stack call site (owner has `auto_stack` off); it uses the same
+  helper as the two tested paths.
+
 ## 2026-11-02 (Builder, branch `claude/fervent-allen-mt7l7g`) — nothing ungated to build; first-ever dogfood `--mosaic --dithered --incoming-lag --calibration --editor` CLEAN.
 
 - **Suite:** 8549 passed / 7 skipped on `af9f231f` (xdist `-n 4`, BLAS capped, 25m56s). No open PRs at start.

@@ -1,5 +1,30 @@
 # Shipped — the record
 
+## v0.505.9 — 2026-11-02 (Builder, branch `claude/fervent-allen-s1pgbe`) — a one-target stack after a Combine shows its deeper picture instead of leaving the merge's pin on the shallower one
+
+- **Fixed (dogfood find, `--mosaic --deep --combine --calibration --editor`, re-confirmed on `--combine --calibration`).**
+  A Combine pins the destination's own picture so the carried one-night stack cannot take its place
+  (`PIN_REASON_MERGE`, `Library.merge_targets_result`), and v0.492.13 taught **only** "Bring my pictures up to date"
+  (`_settle_cover_after_restack`) to lift that pin once a deeper run exists. The Stack form, the Target page's Process
+  and the walk-away auto-stack never did, so the owner who did what the Dashboard says — *"3 subs you've shot aren't
+  in the picture yet … Stacking again folds them in"* — got a 7-sub run in History, the 4-sub picture still on the
+  wall, and the same "+3" note on the board for ever (measured in the scratch library: run 3 used 7 subs,
+  `cover_stack_run_id` stayed 1). **Now** `pipeline._settle_app_pin_after_stack` reads the displayed picture before
+  the stack and, **only when the app placed the pin**, applies the batch's own rule afterwards: a flat picture's pin
+  is lifted; an auto-finished one's only when the fresh run is finished too (Process and auto-stack chain Auto; the
+  Stack form does not, so there it stays); a hand-finished one stays and is re-recorded `kept_finished`, so the
+  new-light note measures the deeper run in History instead of nagging. No pin and the owner's own pin are untouched,
+  so an ordinary stack behaves exactly as before. The job result carries an additive `cover` key
+  (`"advanced"`/`"kept"`) when it settled one.
+- **Upgrade-safe (§9):** no config, schema, layout, default or response-shape change; an additive job-result key.
+- **Tests:** `tests/webapp/test_reprocess_all.py` +7 — Stack form lifts a merge pin on a flat picture, keeps a
+  hand-finished one as `kept_finished`, keeps an auto-finished one over a flat run, never touches the owner's pin,
+  pins nothing with no pin; Process lifts it once Auto finished the fresh run, keeps it when Auto fails.
+  **Fail-before:** 3 red with `webapp/pipeline.py` reverted (the three that settle), the 4 guards green both ways.
+- **Dev script:** `scripts/agent-dogfood.sh` — `--calibration` now re-processes under `--combine` too (that pass sets
+  `DO_STACK=0` because it stacks its own targets, so the probe read the pre-master run and printed "masters actually
+  applied: NONE"); with it the calibrated branch read `{dark_master_id: 1, flat_master_id: 2}` and the note withdrew.
+
 ## v0.505.8 — 2026-11-02 (Scout, branch `claude/exciting-wozniak-8uy5tg`) — "It's back" names the deepest returning target per part, not by total
 
 - **Fixed (Scout sweep (2), the whole-target-number-that-is-really-per-panel pattern).** `nightplan._returning_targets`
