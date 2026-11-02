@@ -1,5 +1,24 @@
 # Process notes & QA sweep records
 
+## 2026-11-02 (Builder, branch `claude/fervent-allen-u2gvb2`) — nothing ungated to build; first-ever dogfood `--mosaic --dithered --closing --no-site --combine --editor` CLEAN; the editor drive's stale-toast wait fixed (dev script only).
+
+- **Suite:** 8549 passed / 7 skipped on `58b34417` (xdist `-n 4`, BLAS capped, 25m38s). No open PRs at start.
+- **Why no app task:** every Bugs entry still carries its owner/observer gate or a measured stand-down (FOCUS.md);
+  the symlinked-duplicate-subdir Minor item was re-read and left as filed (needs a symlink inside `incoming/`, a
+  shape nothing says the owner has, and its fix sits in `scan_and_organize`'s unit builder).
+- **Dogfood:** combine pass as on 2026-11-01 (refused unsolved stack with its own sentence, merge, rescan stays
+  combined, a new sub in the combined-away folder lands in the deep target); **§10: all 7 originals unchanged, only
+  the added sub is new.** `--closing` printed its own skip under `--no-site`. All 21 ops re-render, undo/redo,
+  nothing overflowing, no console errors, heights on the standing baseline.
+- **The one `!` line was the instrument, for the second pass running:** "a toast from before the Over-smoothed tap
+  never closed", after which the marked chip's reading printed the live tap's late "Auto-process applied" toast
+  instead of its own sentence — the one reading that block exists to take. Two causes in the wait, both fixed in
+  `scripts/dogfood_editor.mjs`: the pointer stayed where the last click left it (Mantine pauses autoClose under
+  hover), and an 8 s wait cannot outlast a toast that lands at ~7 s and lives 4 s. The drive now parks the cursor at
+  the top-left and waits up to 20 s. Re-run (`--mosaic --editor`): both drives clean, and the marked chip read
+  *"Auto is already smoothing as little as it will here…"* on both targets. Not an app bug — the app said the
+  right thing all along.
+
 ## 2026-11-02 (Scout, branch `claude/exciting-wozniak-8uy5tg`) — QA rotation sweep (2), new angle — which returning target "It's back" names in full: one bug, Scout-fixed (v0.505.8). Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
 
 - **Suite:** 8549 passed / 7 skipped on `c8a47634` + this fix (xdist `-n 4`, BLAS capped, 16m01s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
