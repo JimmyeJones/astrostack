@@ -3380,6 +3380,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.7 **Compare no longer calls a single field and its own mosaic (`M 42` / `M 42 (mosaic)`) "two different objects" — it decides by the catalogue's object match, and says "different targets" when it can't tell** (`GalleryItem.object_id`, `Compare.targetRelation`, `noiseComparison`) — dogfood find
 - ✅ v0.505.6 **"Try something new tonight" read late in the night scores only the darkness left — an hour before dawn it no longer says "up about 10.5 h tonight" or suggests showpieces that have already set, and with under 45 min left it self-hides** (`nightplan.well_placed_tonight` clips the ongoing window to now, `in_progress=True`; also the nearly-there, life-list and wishlist "up tonight" cards)
 - ✅ v0.505.5 **The Calibration page's broken-pixel offer names what it repairs ("Repair hot or dead pixels on every stack from now on") instead of "Repair these" above a table whose counts are below it** (`calibration.defect_repair_offer`) — dogfood find
 - ✅ v0.505.4 **The Dashboard's "Point here tonight" no longer recommends a started target that has already set — read in the small hours it used to put first an object whose window closed at 9 PM, captioned with that spent window** (`pickContinueTonight(nowMs)`, `ContinueTonightCard`).
