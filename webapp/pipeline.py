@@ -726,6 +726,9 @@ def _pipeline_body(
                     if degraded_fp is not None:
                         _mark_auto_stack_degraded_heal(lib, safe, degraded_fp)
                     _mark_auto_stack_attempt(lib, safe, attempt_n)
+                    # Before the stack, while the old picture is still the one
+                    # shown: whose pin is on it (``_settle_app_pin_after_stack``).
+                    shown_before = _displayed_picture_state(lib, safe)
                     res = _stack_target(
                         settings, jm, job, lib, safe,
                         auto_bind_calibration=settings.auto_bind_calibration,
@@ -764,6 +767,7 @@ def _pipeline_body(
                     # survives the night because it lives in the project rather
                     # than in a page's state — the owner made "easy to override"
                     # a condition of turning this on (see webapp/auto_edit_pref).
+                    new_run_finished = False
                     if run_id is not None and not job.cancel_requested() and \
                             _wants_auto_edit_for(
                                 lib, safe, settings.auto_edit_on_autostack):
@@ -771,6 +775,9 @@ def _pipeline_body(
                                 lib, safe, run_id,
                                 auto_crop=settings.auto_crop_border) is not None:
                             auto_edited += 1
+                            new_run_finished = True
+                    _settle_app_pin_after_stack(lib, safe, shown_before, run_id,
+                                                new_run_finished=new_run_finished)
                 except Exception as exc:  # noqa: BLE001 — one target shouldn't sink the batch
                     # The process survived this failure, so the crash-loop marker
                     # written at line 123 must be cleared — otherwise a *transient*
@@ -1152,6 +1159,7 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
                 summary["mixed_pointings"] = _mixed_pointing_summary(mixed)
                 summary["mixed_pointings_message"] = _mixed_pointing_message(mixed)
                 return summary
+            shown_before = _displayed_picture_state(lib, safe)
             summary["stack"] = _stack_target(
                 settings, jm, job, lib, safe,
                 auto_bind_calibration=settings.auto_bind_calibration,
@@ -1179,6 +1187,12 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
                     lib, safe, run_id, auto_crop=settings.auto_crop_border)
                 if n_ops is not None:
                     summary["auto_edited"] = n_ops
+            if not job.cancel_requested():
+                settled = _settle_app_pin_after_stack(
+                    lib, safe, shown_before, run_id,
+                    new_run_finished=summary.get("auto_edited") is not None)
+                if settled is not None:
+                    summary["cover"] = settled
             return summary
         finally:
             lib.close()
@@ -1192,7 +1206,15 @@ def submit_stack(
     def body(job: Job) -> dict[str, Any]:
         lib = Library.open_or_create(settings.resolved_library_root)
         try:
-            return _stack_target(settings, jm, job, lib, safe, options=options)
+            shown_before = _displayed_picture_state(lib, safe)
+            res = _stack_target(settings, jm, job, lib, safe, options=options)
+            if not res.get("cancelled") and not job.cancel_requested():
+                settled = _settle_app_pin_after_stack(
+                    lib, safe, shown_before, res.get("run_id"),
+                    new_run_finished=False)
+                if settled is not None:
+                    res["cover"] = settled
+            return res
         finally:
             lib.close()
 
@@ -1836,6 +1858,37 @@ def _settle_cover_after_restack(lib: Library, safe: str,
     except Exception:  # noqa: BLE001 — the batch's bookkeeping never fails a target
         log.warning("reprocess-all: could not settle %s's cover", safe, exc_info=True)
     return None
+
+
+def _settle_app_pin_after_stack(lib: Library, safe: str,
+                                shown: DisplayedPicture | None,
+                                new_run_id: int | None, *,
+                                new_run_finished: bool) -> str | None:
+    """The batch's cover rule, for a **one-target** stack — but only where the
+    *app* pinned the cover.
+
+    A Combine pins the deep target's own picture so the carried one-night stack
+    cannot take its place (``PIN_REASON_MERGE``). Only "Bring my pictures up to
+    date" ever lifted that pin, so the owner who did what the Dashboard's
+    "N subs you've shot aren't in the picture yet" note says — open the target,
+    press Stack — got the deeper run in History, the old shallower picture
+    still on the wall, and the same note still naming the same subs, for ever
+    (Builder 2026-11-02, dogfood ``--combine --calibration``: a 7-sub restack
+    of a 4 + 3 Combine left the 4-sub picture pinned and "+3" on the board).
+
+    So the Stack form, the Target page's Process and the walk-away auto-stack
+    now settle the cover exactly as the batch does
+    (:func:`_settle_cover_after_restack`) — a flat or auto-finished picture's
+    app pin is lifted (the latter only when the fresh run is finished too), a
+    hand-finished one stays and is re-recorded as kept — **and touch nothing
+    else**: no pin (the newest run already is the picture) and the owner's own
+    pin are both left exactly as before, so an ordinary stack behaves as it
+    always did.
+    """
+    if shown is None or shown.app_pin_reason is None:
+        return None
+    return _settle_cover_after_restack(lib, safe, shown, new_run_id,
+                                       new_run_finished=new_run_finished)
 
 
 def _carry_hand_saved_recipe(lib: Library, safe: str,

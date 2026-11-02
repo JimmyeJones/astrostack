@@ -3119,3 +3119,147 @@ def test_carry_keeps_a_same_shape_crop_it_cannot_place(solved_library, tmp_path)
     ops = _carried_ops(solved_library, tmp_path, ops=_HAND_OPS, src_fits=False,
                        dst_shape=(200, 240))
     assert _crop_params(ops) == [_HAND_OPS[1]["params"]]
+
+
+# --------------------------------------------------------------------------- #
+# The same merge pin, met by a ONE-target stack (Builder 2026-11-02, dogfood
+# `--combine --calibration`). Only the batch above ever lifted it, so the owner
+# who did what the Dashboard's "N subs you've shot aren't in the picture yet"
+# note says — open the target, press Stack — got the deeper run in History, the
+# shallower picture still on the wall, and the same note naming the same subs.
+# The Stack form and Process now settle an *app* pin by the batch's own rule
+# (`pipeline._settle_app_pin_after_stack`) and leave every other cover alone.
+# --------------------------------------------------------------------------- #
+
+def _one_target_with(solved_library, seed, reason):
+    """``(lib, safe, seeded_run_id)``, the seeded run pinned as the cover and,
+    when ``reason`` is given, recorded as the app's pin for that reason."""
+    lib = Library.open_or_create(solved_library / "library")
+    safe = next(e.safe_name for e in lib.list_targets())
+    proj = lib.open_target(safe)
+    try:
+        run_id = seed(proj)
+    finally:
+        proj.close()
+    if reason is None:
+        lib.set_target_cover(safe, run_id)
+    else:
+        _mark(lib, safe, run_id, reason)
+    return lib, safe, run_id
+
+
+def _stack_form(solved_library, safe):
+    return _run_body(pipeline.submit_stack, _settings(solved_library),
+                     Job(kind="stack"), safe=safe, options={})
+
+
+def test_stack_form_lifts_the_merge_pin_on_a_flat_picture(solved_library, monkeypatch):
+    """Regression: fails before — the cover stayed on the shallower picture."""
+    _patch_run_stack_new_run(monkeypatch)
+    lib, safe, _ = _one_target_with(
+        solved_library,
+        lambda p: _seed_finished_run(p, baked=False, recipe=False), "merge")
+    try:
+        res = _stack_form(solved_library, safe)
+        assert res["run_id"] == NEW_RUN_ID
+        assert res["cover"] == pipeline.COVER_ADVANCED
+        assert _cover_and_reason(lib, safe) == (None, None)
+    finally:
+        lib.close()
+
+
+def test_stack_form_keeps_a_hand_finished_merge_pinned_picture(
+        solved_library, monkeypatch):
+    """His own finished picture stays on the wall, re-recorded as "kept" so the
+    new-light note measures the deeper run in History instead of nagging."""
+    from seestack.coverpin import PIN_REASON_KEPT_FINISHED
+
+    _patch_run_stack_new_run(monkeypatch)
+    lib, safe, run_id = _one_target_with(solved_library, _seed_hand_finished_run,
+                                         "merge")
+    try:
+        res = _stack_form(solved_library, safe)
+        assert res["cover"] == pipeline.COVER_KEPT
+        assert _cover_and_reason(lib, safe) == (run_id, PIN_REASON_KEPT_FINISHED)
+    finally:
+        lib.close()
+
+
+def test_stack_form_keeps_an_auto_finished_merge_pin_over_a_flat_run(
+        solved_library, monkeypatch):
+    """The batch's one guard holds here too: the Stack form does not auto-edit,
+    so lifting the pin would swap a finished picture for a flat stack."""
+    _patch_run_stack_new_run(monkeypatch)
+    lib, safe, run_id = _one_target_with(solved_library, _seed_finished_run, "merge")
+    try:
+        res = _stack_form(solved_library, safe)
+        assert "cover" not in res
+        assert _cover_and_reason(lib, safe) == (run_id, "merge")
+    finally:
+        lib.close()
+
+
+def test_stack_form_never_touches_the_owners_own_pin(solved_library, monkeypatch):
+    _patch_run_stack_new_run(monkeypatch)
+    lib, safe, run_id = _one_target_with(
+        solved_library,
+        lambda p: _seed_finished_run(p, baked=False, recipe=False), None)
+    try:
+        res = _stack_form(solved_library, safe)
+        assert "cover" not in res
+        assert _cover_and_reason(lib, safe) == (run_id, None)
+    finally:
+        lib.close()
+
+
+def test_stack_form_with_no_pin_pins_nothing(solved_library, monkeypatch):
+    """An ordinary stack behaves as it always did — even over a hand-finished
+    picture, which only the *batch* protects with a pin of its own."""
+    _patch_run_stack_new_run(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            _seed_hand_finished_run(proj)
+        finally:
+            proj.close()
+        res = _stack_form(solved_library, safe)
+        assert "cover" not in res
+        assert _cover_and_reason(lib, safe) == (None, None)
+    finally:
+        lib.close()
+
+
+def test_process_lifts_the_merge_pin_once_its_fresh_run_is_finished(
+        solved_library, monkeypatch):
+    """Process chains Auto onto the fresh run, so even an auto-finished
+    merge-pinned picture gives way to the deeper, finished one."""
+    _patch_run_stack_new_run(monkeypatch)
+    edited = _record_auto_edits(monkeypatch)
+    monkeypatch.setattr("webapp.pipeline.run_qc_and_solve", lambda *a, **k: {})
+    lib, safe, _ = _one_target_with(solved_library, _seed_finished_run, "merge")
+    try:
+        summary = _run_body(pipeline.submit_process_target, _settings(solved_library),
+                            Job(kind="process_target"), safe=safe)
+        assert summary["stacked"] is True
+        assert (safe, NEW_RUN_ID) in edited
+        assert summary["cover"] == pipeline.COVER_ADVANCED
+        assert _cover_and_reason(lib, safe) == (None, None)
+    finally:
+        lib.close()
+
+
+def test_process_keeps_the_merge_pin_when_auto_fails(solved_library, monkeypatch):
+    _patch_run_stack_new_run(monkeypatch)
+    monkeypatch.setattr("webapp.pipeline._auto_edit_process_run",
+                        lambda lib, safe, run_id, auto_crop=True: None)
+    monkeypatch.setattr("webapp.pipeline.run_qc_and_solve", lambda *a, **k: {})
+    lib, safe, run_id = _one_target_with(solved_library, _seed_finished_run, "merge")
+    try:
+        summary = _run_body(pipeline.submit_process_target, _settings(solved_library),
+                            Job(kind="process_target"), safe=safe)
+        assert "cover" not in summary
+        assert _cover_and_reason(lib, safe) == (run_id, "merge")
+    finally:
+        lib.close()

@@ -1157,7 +1157,13 @@ for m in rows:
   # health note simply keeps saying "no darks or flats were applied", which is
   # exactly the empty state --calibration exists to escape). Found on this
   # flag's own first run.
-  if [ "$DO_STACK" = 1 ] && [ -n "$SAFE" ] \
+  # --combine also lands here with DO_STACK=0 — not because stacking is off,
+  # but because that pass stacks its own targets earlier, in the journey's
+  # order. Without the re-process the probe below read the combined run that
+  # predates the masters and printed "masters actually applied: NONE", which is
+  # true of that run and says nothing about calibration (Builder 2026-11-02,
+  # `--mosaic --deep --combine --calibration --editor`). --no-stack still skips it.
+  if { [ "$DO_STACK" = 1 ] || [ "$DO_COMBINE" = 1 ]; } && [ -n "$SAFE" ] \
      && [ "$(curl -sf "$BASE/api/targets/$SAFE/stack-runs" | tr -d '[:space:]')" != "[]" ]; then
     echo "   the sample already has a run from an earlier pass — re-processing it"
     echo "   so the newest picture is a CALIBRATED one (this is the slow part)"
