@@ -143,6 +143,35 @@ def test_the_honest_differences_are_informational_not_findings():
     assert "coverage_pct 55->100" in out
 
 
+def test_a_calibration_note_on_one_side_only_is_printed_not_counted():
+    """Under ``--calibration`` the masters fit the small sample's sensor and not
+    the full-size one, so only the full-size side keeps "No darks or flats were
+    applied". The first ``--calibration --mosaic --big`` pass printed that as
+    ``MOVED notes`` — a sensor difference, which is the one thing this pair is
+    *allowed* to differ in. Any other note moving is still a finding."""
+    mod = _helper()
+    calibrated_small = copy.deepcopy(_SMALL)
+    calibrated_small["stack-health"]["notes"] = [
+        {"kind": "solid", "severity": "good", "message": "calibrated (dark+flat)",
+         "action": None}]
+    big = copy.deepcopy(calibrated_small)
+    big["stack-health"]["notes"] = [
+        *calibrated_small["stack-health"]["notes"],
+        {"kind": "calibration", "severity": "info",
+         "message": "No darks or flats were applied to this stack.",
+         "action": "calibration"}]
+    out = _report(mod, calibrated_small, big)
+    assert "MOVED" not in out
+    assert "calibration (none)->calibration/info/calibration" in out
+
+    big["stack-health"]["notes"].append(
+        {"kind": "grain_uneven", "severity": "info", "message": "thinner part",
+         "action": None})
+    out = _report(mod, calibrated_small, big)
+    assert "MOVED  notes" in out
+    assert "only in full-size: grain_uneven/info/-" in out
+
+
 def test_a_measurement_that_drifts_is_tolerated_and_one_that_jumps_is_not():
     """The two samples draw their noise from different streams on purpose, so a
     few percent of drift in a background number is the fixture, not a finding —
