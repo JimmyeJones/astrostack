@@ -172,6 +172,16 @@ class GalleryItem(BaseModel):
     # verbatim dump of, keep saying "Off". Additive with a `None` default, which
     # reads as "don't claim anything", i.e. exactly today's behaviour.
     is_mosaic: bool | None = None
+    # The offline catalogue's designation for this picture's **object** ("M42"),
+    # resolved once per target exactly as the Target page's object card does
+    # (:func:`seestack.objectinfo.identify_object`: designation in the name, then
+    # common name, then a tight cone on the solved centre). Compare needs it to
+    # tell "two different objects" from "two targets of one object" — the owner's
+    # ``M 42`` and ``M 42 (mosaic)`` are separate targets by the Seestar folder
+    # convention, and comparing the two by target alone called them different
+    # objects. Additive and empty-by-default: an unmatched target and an older
+    # frontend both read exactly as before.
+    object_id: str = ""
 
 
 class VideoStillItem(BaseModel):
@@ -259,12 +269,18 @@ def get_gallery(request: Request) -> GalleryResponse:
             EXPORTED_RECIPE_META_PREFIX,
             RECIPE_META_PREFIX,
         )
+        from seestack.nightplan import load_catalog
+        from seestack.objectinfo import identify_object
         from webapp.routers.stack import _unexported_edit
 
         # The observer's longitude, so each run's capture window can be named by
         # the observing night it belongs to — resolved once for the whole page,
         # and by the same helper the Nights card and imaging calendar use.
         lon = resolve_site_lon(request, lib, deps.get_settings(request).site_lon)
+        # Offline catalogue, loaded once (``lru_cache``d) for the object match
+        # each target's cards carry — the same resolution the best-pictures wall
+        # already pays per target.
+        catalog = load_catalog()
 
         for t in lib.list_targets():
             proj = None
@@ -292,13 +308,14 @@ def get_gallery(request: Request) -> GalleryResponse:
                     proj.close()
                 continue
             try:
+                object_id = _object_id_for(t, catalog, identify_object)
                 for run in runs:
                     try:
                         items.append(_gallery_item(
                             t, run, proj, RECIPE_META_PREFIX,
                             EXPORTED_RECIPE_META_PREFIX, _unexported_edit,
                             AUTO_EDIT_BAKED_LOOK_PREFIX, lon, native_shape,
-                            by_id,
+                            by_id, object_id,
                         ))
                     except Exception:  # noqa: BLE001 — one bad run must not hide the rest
                         # Every required field is NOT NULL today, so nothing here
@@ -322,11 +339,24 @@ def get_gallery(request: Request) -> GalleryResponse:
     return GalleryResponse(items=items, videos=_video_stills(request))
 
 
+def _object_id_for(t, catalog, identify_object) -> str:  # noqa: ANN001
+    """The catalogue designation of target ``t``'s object, or ``""`` when the
+    offline catalogue doesn't know it. Never raises: a failed match costs the
+    cards their object id, not the gallery."""
+    try:
+        info = identify_object(t.name, t.ra_deg, t.dec_deg, catalog=catalog)
+    except Exception:  # noqa: BLE001 — an odd name must not hide the target's pictures
+        log.debug("object match for %s failed", t.safe_name, exc_info=True)
+        return ""
+    return info.id if info is not None else ""
+
+
 def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
                   unexported_edit, baked_look_prefix: str = "",
                   lon_deg: float | None = None,
                   native_shape: tuple[float, float] | None = None,
                   by_id: dict | None = None,
+                  object_id: str = "",
                   ) -> GalleryItem:  # noqa: ANN001
     """One finished stack's gallery card. Split out so the loop above can skip a
     single unreadable run without losing every other target's pictures."""
@@ -371,6 +401,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         grain_verdict=grain_verdict(run.grain_ratio),
         field_fulls=stacking_field_fulls(run, by_id or {}, native_shape),
         is_mosaic=run.is_mosaic,
+        object_id=object_id,
         # Three extra keyed reads on the project DB the caller already has open —
         # the same near-free lookups the run listing does, which is what made
         # this affordable library-wide.

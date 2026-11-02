@@ -2503,6 +2503,12 @@ export interface GalleryItem {
    *  a pre-column run and on an editor export, all of which read as "claim
    *  nothing", i.e. today's behaviour. */
   is_mosaic?: boolean | null;
+  /** The offline catalogue's designation for this picture's object ("M42"),
+   *  resolved server-side per target. Compare reads it to tell two targets of
+   *  one object (`M 42` against `M 42 (mosaic)`) from two different objects.
+   *  `""` when the catalogue doesn't know the target; absent on an older
+   *  backend — both read as "unknown". */
+  object_id?: string;
 }
 
 // A finished Moon/Sun still, as the Gallery lists it alongside stack runs. It is

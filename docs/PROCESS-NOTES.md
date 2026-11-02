@@ -1,5 +1,16 @@
 # Process notes & QA sweep records
 
+## 2026-11-02 (Builder, branch `claude/fervent-allen-9387wr`) — dogfood `--mosaic --dithered --restack --closing --deep --editor` (first time together): one trust fix (v0.505.7)
+
+- **Start:** `main` green at v0.505.6, no open PRs, no live claims; every Bugs entry gated (sensor-pattern hold,
+  vignette gate, hint-shape answer, observer measurements).
+- **Pass:** EXIT 0. Editor drive clean on both mosaic samples; trims 7.9 % (tiled) / 30.7 % (dithered, recorded apron
+  30.3 %); deep frames table windowed 300 → 600 rows, no console errors; nothing overflowing. Not re-filed (known):
+  dithered "about 6 fields of sky", panel map silent on the dithered shape (by design), "Plate-solving isn't set up".
+- **The find was the Compare screenshot:** the two M42 samples were called "two different objects" — Compare
+  decided by target folder, so `M 42` against `M 42 (mosaic)` would read the same. Fixed as v0.505.7.
+- **Suite:** 8547 passed / 7 skipped (`-n 4 --dist worksteal`, 17 min); vitest 4909 green; tsc + vite build clean.
+
 ## 2026-11-02 (Builder, branch `claude/fervent-allen-40n5a5`) — nothing ungated to build; first-run dogfood `--empty` CLEAN.
 
 - **Suite:** 8545 passed / 7 skipped on `6f1088e3` (xdist `-n 4`, BLAS capped, 18m22s). No open PRs at start.

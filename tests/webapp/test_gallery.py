@@ -495,3 +495,56 @@ def test_gallery_and_the_noise_card_agree_about_one_runs_canvas(
     noise = client.get(
         f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise").json()
     assert card["is_mosaic"] == noise["is_mosaic"] is True
+
+
+def test_gallery_names_each_cards_object_so_compare_can_tell_twins_from_strangers(
+        client, solved_library):
+    """Compare used to decide "two different objects" by target alone, so the
+    owner's ``M 42`` against ``M 42 (mosaic)`` — two targets by the Seestar
+    folder convention, one object — was called two different objects. Each card
+    now carries the catalogue's designation, resolved the way the Target page's
+    object card resolves it."""
+    from seestack.nightplan import load_catalog
+    from seestack.objectinfo import identify_object
+
+    targets = client.get("/api/targets").json()
+    m42 = next(t for t in targets if "42" in t["name"])
+    run_id = _register_run(solved_library, m42["safe_name"], {"sigma_clip": True})
+
+    items = client.get("/api/gallery").json()["items"]
+    mine = next(it for it in items if it["run_id"] == run_id
+                and it["safe"] == m42["safe_name"])
+    info = identify_object(m42["name"], m42["ra_deg"], m42["dec_deg"],
+                           catalog=load_catalog())
+    assert info is not None
+    assert mine["object_id"] == info.id
+    # The single field and its mosaic resolve to the same designation by name.
+    assert identify_object("M 42 (mosaic)", catalog=load_catalog()).id == info.id
+
+
+def test_gallery_object_id_is_empty_when_the_catalogue_cannot_say(
+        client, solved_library, monkeypatch):
+    """Unknown reads as ``""`` (Compare then says "different targets", never
+    "different objects"), and a match that raises costs the card its id, not
+    the page."""
+    import seestack.objectinfo as objectinfo
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(solved_library, safe, {"sigma_clip": True})
+
+    monkeypatch.setattr(objectinfo, "identify_object", lambda *a, **k: None)
+    r = client.get("/api/gallery")
+    assert r.status_code == 200
+    mine = next(it for it in r.json()["items"] if it["run_id"] == run_id
+                and it["safe"] == safe)
+    assert mine["object_id"] == ""
+
+    def boom(*a, **k):
+        raise ValueError("odd name")
+
+    monkeypatch.setattr(objectinfo, "identify_object", boom)
+    r = client.get("/api/gallery")
+    assert r.status_code == 200
+    assert any(it["run_id"] == run_id and it["safe"] == safe
+               for it in r.json()["items"])
+    assert all(it["object_id"] == "" for it in r.json()["items"])

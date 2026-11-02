@@ -1,5 +1,23 @@
 # Shipped — the record
 
+## v0.505.7 — 2026-11-02 (Builder, branch `claude/fervent-allen-9387wr`) — Compare stops calling a single field and its own mosaic "two different objects"
+
+- **Fixed (dogfood find, `--mosaic --dithered --restack --closing --deep --editor`).** Compare's noise line decided
+  "two different objects" by target alone (`noiseComparison`'s `sameTarget: a.safe === b.safe`). The Seestar folder
+  convention keeps a single field and its mosaic as two targets (`M 42`, `M 42 (mosaic)`), so the owner comparing
+  them — the obvious "did the mosaic come out better?" pair — was told *"these are two different objects, so that's
+  mostly about the sky you were pointing at"*. On the pass, the two M42 samples (2×2 and dithered-nights 2×2) read
+  exactly that while both pages' framing cards named Orion Nebula. **Now:** `/api/gallery` items carry `object_id`
+  (additive, `""` default), resolved once per target by `seestack.objectinfo.identify_object` — the Target page's
+  object card's own match (designation, common name, then a cone on the solved centre) — and
+  `Compare.targetRelation` splits same target / same object / different objects / unknown. Same object is judged like
+  one target (the `widerSky` refusal still fires on the mosaic, worded *"its time is spread across more of the
+  object"* rather than "a newly added panel"); two catalogued different objects keep today's sentence; two targets
+  the catalogue can't place on both sides say *"two different targets, so that may be as much about the sky…"*
+  instead of asserting different objects. A failing match costs the card its id, never the page. Tests: four new in
+  `Compare.test.tsx` (all fail on the old `Compare.tsx`), two in `tests/webapp/test_gallery.py`; the two existing
+  different-objects tests now give their fixtures the catalogue ids that make the claim true.
+
 ## v0.505.6 — 2026-11-01 (Builder, branch `claude/practical-shannon-yc744h`) — "Try something new tonight" scores only the darkness left
 
 - **Fixed.** `nightplan.well_placed_tonight` now clips `_find_dark_window`'s ongoing window to `when_utc` and marks it

@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  CompareView, parseRef, compareHref, noiseComparison, panelComparison,
+  CompareView, parseRef, compareHref, noiseComparison, panelComparison, targetRelation,
   nightsComparison, compareDateLabel, compareNorthUpOffer, needsSkyPlacement,
   usablePlacement,
 } from "./Compare";
@@ -145,8 +145,33 @@ describe("noiseComparison", () => {
     // same field — not between two different objects, where the figure is mostly
     // about how bright and busy that patch of sky is. The number still stands;
     // "the cleaner stack" does not.
-    const v = noiseComparison(withNoise(1, 0.05), withNoise(2, 0.04, "NGC_7000"));
+    const m42 = withNoise(1, 0.05);
+    m42.object_id = "M42";
+    const ngc = withNoise(2, 0.04, "NGC_7000");
+    ngc.object_id = "NGC7000";
+    const v = noiseComparison(m42, ngc);
     expect(v).toEqual({ winner: "B", loser: "A", pct: 20, sameTarget: false });
+  });
+  it("judges a single field against its own mosaic as one object", () => {
+    // The Seestar convention keeps `M 42` and `M 42 (mosaic)` as two targets;
+    // both match the catalogue's M42, so they are the same sky — not "two
+    // different objects", which is what the folder-only test used to say.
+    const field = withNoise(1, 0.05, "M_42");
+    field.object_id = "M42";
+    const mosaic = withNoise(2, 0.04, "M_42_mosaic");
+    mosaic.object_id = "M42";
+    expect(noiseComparison(field, mosaic)).toEqual(
+      { winner: "B", loser: "A", pct: 20, sameTarget: true, crossTarget: "same-object" });
+  });
+  it("doesn't call two targets different objects when the catalogue can't place both", () => {
+    const named = withNoise(1, 0.05);
+    named.object_id = "M42";
+    const unknown = withNoise(2, 0.04, "My_Field"); // no object_id: older backend or no match
+    expect(noiseComparison(named, unknown)).toEqual(
+      { winner: "B", loser: "A", pct: 20, sameTarget: false, crossTarget: "unknown" });
+    expect(targetRelation(named, unknown)).toBe("unknown");
+    unknown.object_id = "";
+    expect(targetRelation(named, unknown)).toBe("unknown");
   });
   it("flags a grown mosaic, where the whole-canvas σ is not like-for-like", () => {
     // Measured through the real run_stack + /api/gallery on the bundled 2×2
@@ -367,6 +392,8 @@ describe("CompareView", () => {
     const b = item(7, "NGC_7000", "North America");
     a.noise_sigma = 0.05;
     b.noise_sigma = 0.04;
+    a.object_id = "M42";
+    b.object_id = "NGC7000";
     vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
     renderCompare("?a=M_42:3&b=NGC_7000:7");
     await waitFor(() => expect(screen.getByTestId("noise-verdict")).toBeInTheDocument());
@@ -377,6 +404,44 @@ describe("CompareView", () => {
     // Both objects are named in the sentence, so the reader can see why.
     expect(line).toContain("Orion");
     expect(line).toContain("North America");
+  });
+
+  it("never calls a single field and its own mosaic two different objects", async () => {
+    // Measured on a dogfood pass: the two M42 samples (a 2×2 mosaic and the same
+    // mosaic over re-framed nights) read "these are two different objects".
+    // The owner's `M 42` / `M 42 (mosaic)` pair is the case that matters.
+    const field = item(3, "M_42", "M 42");
+    const mosaic = item(7, "M_42_mosaic", "M 42 (mosaic)");
+    field.noise_sigma = 0.05;
+    field.field_fulls = 1.0;
+    field.object_id = "M42";
+    mosaic.noise_sigma = 0.04;
+    mosaic.field_fulls = 3.6;
+    mosaic.object_id = "M42";
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [field, mosaic] });
+    renderCompare("?a=M_42:3&b=M_42_mosaic:7");
+    await waitFor(() => expect(screen.getByTestId("noise-verdict")).toBeInTheDocument());
+    const line = screen.getByTestId("noise-verdict").textContent ?? "";
+    expect(line).toContain("20% lower");
+    expect(line).not.toContain("different objects");
+    expect(line).not.toContain("cleaner stack");
+    expect(line).toContain("3.6× as much sky, so its time is spread across more of the object,"
+      + " so this isn't a like-for-like read");
+    expect(screen.getAllByTestId("noise-verdict")).toHaveLength(1);
+  });
+
+  it("says 'different targets', not 'different objects', when the catalogue can't tell", async () => {
+    const a = item(3, "My_Field", "My field");
+    const b = item(7, "Other_Field", "Other field");
+    a.noise_sigma = 0.05;
+    b.noise_sigma = 0.04;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=My_Field:3&b=Other_Field:7");
+    await waitFor(() => expect(screen.getByTestId("noise-verdict")).toBeInTheDocument());
+    const line = screen.getByTestId("noise-verdict").textContent ?? "";
+    expect(line).toContain("two different targets");
+    expect(line).not.toContain("different objects");
+    expect(line).not.toContain("cleaner stack");
   });
 
   it("offers a Split mode that overlays A over B under one draggable divider", async () => {

@@ -62,12 +62,35 @@ export function compareHref(a: GalleryItem, b: GalleryItem): string {
 // pair with the same 0.9 (`seestack/covernudge.MIN_SKY_SHARE`, where it was
 // measured): a restack of the same sky moves `field_fulls` by under 1 %, one
 // added panel by 80 % or more.
+//
+// `sameTarget` is really "same *object*": the Seestar folder convention keeps a
+// single field and its mosaic as two targets (`M 42`, `M 42 (mosaic)`), and the
+// owner comparing the two was told they were "two different objects". So two
+// targets whose catalogue match (`object_id`, resolved server-side) is the same
+// designation count as the same sky, and carry `crossTarget: "same-object"` so
+// the wording can say why their canvases differ. Two different targets the
+// catalogue can't place on both sides carry `crossTarget: "unknown"` — the app
+// can't say they are different objects, only different targets.
 const MIN_SKY_SHARE = 0.9;
 
 export type NoiseComparison = {
   winner: "A" | "B"; loser: "A" | "B"; pct: number; sameTarget: boolean;
   widerSky?: { side: "A" | "B"; ratio: number };
+  crossTarget?: "same-object" | "unknown";
 };
+
+/** How two pictures' targets relate: one target, two targets of one catalogued
+ *  object, two catalogued different objects, or two targets the catalogue can't
+ *  tell apart either way. */
+export function targetRelation(
+  a: GalleryItem, b: GalleryItem,
+): "same-target" | "same-object" | "different-objects" | "unknown" {
+  if (a.safe === b.safe) return "same-target";
+  const ia = a.object_id ?? "";
+  const ib = b.object_id ?? "";
+  if (!ia || !ib) return "unknown";
+  return ia === ib ? "same-object" : "different-objects";
+}
 
 // "1.8" / "2" — one decimal, no trailing ".0", for "about 1.8× as much sky".
 function skyTimes(value: number): string {
@@ -84,9 +107,12 @@ export function noiseComparison(
   if (sa <= 0 || sb <= 0 || sa === sb) return null;
   const [winner, loser, hi, lo] =
     sa < sb ? ["A", "B", sb, sa] as const : ["B", "A", sa, sb] as const;
+  const relation = targetRelation(a, b);
   const out: NoiseComparison = {
-    winner, loser, pct: Math.round((1 - lo / hi) * 100), sameTarget: a.safe === b.safe,
+    winner, loser, pct: Math.round((1 - lo / hi) * 100),
+    sameTarget: relation === "same-target" || relation === "same-object",
   };
+  if (relation === "same-object" || relation === "unknown") out.crossTarget = relation;
   const fa = a.field_fulls;
   const fb = b.field_fulls;
   if (typeof fa === "number" && typeof fb === "number" && Number.isFinite(fa)
@@ -694,9 +720,11 @@ export function CompareView() {
               <Text size="sm" data-testid="noise-verdict">
                 <b>{verdict.winner}</b> reads <b>{verdict.pct}% lower</b> background noise
                 {" "}— but <b>{verdict.widerSky.side}</b> covers about
-                {" "}{skyTimes(verdict.widerSky.ratio)}× as much sky, and a newly added panel
-                {" "}reads grainy until it has caught up, so this isn't a like-for-like read
-                {" "}of which stack came out better.
+                {" "}{skyTimes(verdict.widerSky.ratio)}× as much sky,
+                {verdict.crossTarget === "same-object"
+                  ? " so its time is spread across more of the object"
+                  : " and a newly added panel reads grainy until it has caught up"}
+                , so this isn't a like-for-like read of which stack came out better.
               </Text>
             ) : null}
             {/* Two different objects: keep the measurement, drop the verdict. A
@@ -707,9 +735,12 @@ export function CompareView() {
               <Text size="sm" data-testid="noise-verdict">
                 <b>{verdict.winner}</b> ({verdict.winner === "A" ? a.target_name : b.target_name})
                 {" "}reads <b>{verdict.pct}% lower</b> background noise than <b>{verdict.loser}</b>
-                {" "}({verdict.loser === "A" ? a.target_name : b.target_name}) — but these are two
-                {" "}different objects, so that's mostly about the sky you were pointing at, not
-                {" "}about which stack came out better.
+                {" "}({verdict.loser === "A" ? a.target_name : b.target_name})
+                {verdict.crossTarget === "unknown"
+                  ? " — but these are two different targets, so that may be as much about the"
+                    + " sky you were pointing at as about which stack came out better."
+                  : " — but these are two different objects, so that's mostly about the sky"
+                    + " you were pointing at, not about which stack came out better."}
               </Text>
             ) : null}
             {panels ? (
