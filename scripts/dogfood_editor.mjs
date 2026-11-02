@@ -661,9 +661,18 @@ if (!(await autoButton.count())) {
         // this pass exists to take, so a stale toast must not be able to stand
         // in for it. Waiting them out (rather than diffing texts) also covers a
         // stale toast that is *identical* to the one the tap should produce.
+        //
+        // Two things kept that wait from ending (2026-11-02, two passes in a
+        // row): Mantine *pauses* autoClose while the pointer is over a toast,
+        // and the pointer is left wherever the last click put it — so park it
+        // in the page's top-left corner, well clear of the bottom-right stack.
+        // And the live tap's Auto re-run can land its toast near the end of
+        // an 8 s wait, after which it is still up for its own 4 s; 20 s covers
+        // a late toast's full life without masking one that genuinely sticks.
+        await page.mouse.move(2, 2);
         const staleToasts = page.locator('[class*="mantine-Notification-description"]');
         let stale = [];
-        for (let waited = 0; waited < 8000; waited += 200) {
+        for (let waited = 0; waited < 20000; waited += 200) {
           stale = (await staleToasts.allInnerTexts())
             .map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
           if (!stale.length) break;
