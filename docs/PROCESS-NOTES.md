@@ -9,7 +9,7 @@
   dithered "about 6 fields of sky", panel map silent on the dithered shape (by design), "Plate-solving isn't set up".
 - **The find was the Compare screenshot:** the two M42 samples were called "two different objects" — Compare
   decided by target folder, so `M 42` against `M 42 (mosaic)` would read the same. Fixed as v0.505.7.
-- **Suite:** see the PR.
+- **Suite:** 8547 passed / 7 skipped (`-n 4 --dist worksteal`, 17 min); vitest 4909 green; tsc + vite build clean.
 
 ## 2026-11-02 (Builder, branch `claude/fervent-allen-40n5a5`) — nothing ungated to build; first-run dogfood `--empty` CLEAN.
 
