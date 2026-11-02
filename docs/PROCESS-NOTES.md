@@ -22,6 +22,22 @@
   `source_path`s (`imported_by_folder`), so #878's double registration cannot strand it.
 - **Rotation: (2) done → next sweep is (3).**
 
+## 2026-11-02 (Builder, branch `claude/fervent-allen-ker4l7`) — nothing ungated to build; dogfood `--mosaic --no-site --editor --big` (first time together) CLEAN
+
+- **Start:** `main` at v0.505.7 (c8a47634), no open PRs, no live claims; every Bugs entry gated (sensor-pattern
+  hold, vignette gate, hint-shape answer, observer measurements). The two Features entries without a gate
+  (zip-as-job, deep-sky crop) are each marked "only once needed" / "probably not worth building" — left.
+- **Pass:** EXIT 0. Editor drive clean on the single field, the 2×2 mosaic and the decimated full-size mosaic
+  (847 px preview, 2.0× export; the full-size check offered and placed top-left / bottom-right). Auto's trim
+  7.9 % (small) / 6.7 % (full-size — the same pixel jitter on a bigger canvas, as the scale-pair note says);
+  scale pair 0 of 16 canvas-independent answers moved. Without a site, `/tonight` renders its alert and
+  "Worth more time" falls back to the started-targets ranking ("another hour would cut its noise about 87 %"
+  at 1 min — 1/√61, honest). Nothing overflowing, no console errors; tallest page the documented
+  `[phone] /life-list [Still to shoot]` 14,513 px.
+- **Read as one paragraph:** the mosaic's readiness card ("~7 h, about 3 fields of sky"), next-best-move and the
+  folded health note agree on "clean background, one thinner part, more light evens it" — no contradiction.
+- **Suite:** not re-run — docs-only change; the docs-budget test passed locally, CI is the net.
+
 ## 2026-11-02 (Builder, branch `claude/fervent-allen-uz0cj2`) — nothing ungated to build; dogfood `--mosaic --dithered --calibration --restack --big --editor` (first time together) CLEAN; one instrument false alarm fixed.
 
 - **Start:** `main` green at v0.505.7, no open PRs, no live claims; every Bugs entry gated (sensor-pattern hold,
