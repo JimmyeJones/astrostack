@@ -62,17 +62,31 @@ UNREACHABLE = "__unreachable__"
 def health_claims(payload: Any) -> dict[str, Any]:
     """``stack-health`` reduced to what it says about *depth and calibration*.
 
-    Both samples are the same 21 subs over the same two nights with no masters
-    bound, so which notes fire, how loud each is, and what each offers to do
-    are all canvas-independent. The messages themselves quote pixel counts, so
-    they are left to the informational half.
+    Both samples are the same 21 subs over the same two nights, so which notes
+    fire, how loud each is, and what each offers to do are all
+    canvas-independent. The messages themselves quote pixel counts, so they
+    are left to the informational half.
+
+    **Except the ``calibration`` note, which follows the sensor.** Under
+    ``--calibration`` the masters are built for the single-field sample's
+    sensor, which the small mosaic shares and the full-size one (900×600) does
+    not, so only the small side can be calibrated and the full-size side
+    honestly keeps "No darks or flats were applied". The first pass to combine
+    ``--calibration`` with ``--mosaic --big`` printed that as a MOVED note list
+    (Builder 2026-11-02). It is carried as its own ``calibration`` key, which
+    is not in ``must_agree``: printed, not checked.
     """
     notes = sorted((payload or {}).get("notes") or [],
                    key=lambda n: str(n.get("kind")))
+
+    def _claim(n: dict) -> str:
+        return f"{n.get('kind')}/{n.get('severity')}/{n.get('action') or '-'}"
+
     return {
-        "notes": ", ".join(
-            f"{n.get('kind')}/{n.get('severity')}/{n.get('action') or '-'}"
-            for n in notes) or "(none)",
+        "notes": ", ".join(_claim(n) for n in notes
+                           if n.get("kind") != "calibration") or "(none)",
+        "calibration": ", ".join(_claim(n) for n in notes
+                                 if n.get("kind") == "calibration") or "(none)",
         "background_clean": (payload or {}).get("background_clean"),
     }
 
@@ -164,8 +178,10 @@ QUESTIONS: tuple[Question, ...] = (
         post=False,
         claims=health_claims,
         must_agree=("notes", "background_clean"),
-        may_differ="nothing here is expected to move: same 21 subs, same two "
-                   "nights, no masters bound on either",
+        may_differ="nothing but `calibration` is expected to move: same 21 "
+                   "subs, same two nights; under --calibration the masters fit "
+                   "the small sensor only, so the full-size side stays "
+                   "uncalibrated",
     ),
 )
 

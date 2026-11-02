@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-11-02 (Builder, branch `claude/fervent-allen-uz0cj2`) — nothing ungated to build; dogfood `--mosaic --dithered --calibration --restack --big --editor` (first time together) CLEAN; one instrument false alarm fixed.
+
+- **Start:** `main` green at v0.505.7, no open PRs, no live claims; every Bugs entry gated (sensor-pattern hold,
+  vignette gate, hint-shape answer, observer measurements).
+- **Pass:** EXIT 0. Editor drive clean on the mosaic and the decimated full-size run; Auto's trim 7.9 % (tiled) /
+  30.7 % (dithered, apron 30.3 %); nothing overflowing, no console errors; tallest page the documented
+  `[phone] /life-list [Still to shoot]` 14,513 px. The calibrated branch spoke as designed (masters applied on
+  run 2, the "no darks" note withdrew, `solid` says "calibrated (dark+flat)").
+- **The one MOVED line was the instrument, not the app:** `scripts/dogfood_scale_pair.py` reported the
+  `stack-health` note list moving (`calibration/info` on the full-size side only) under a note saying "no masters
+  bound on either". The masters are built for the single-field sensor (480×320), which the small mosaic shares and
+  the full-size one (900×600) does not, so the full-size side is honestly uncalibrated. `health_claims` now carries
+  the `calibration` note as its own informational key (printed, not checked) and the note says why; any other note
+  moving is still a finding (`test_a_calibration_note_on_one_side_only_is_printed_not_counted`, fails before).
+  No version bump: dev script and its test only, nothing in the image changes.
+- **Suite:** 8548 passed / 7 skipped (`-n 4 --dist worksteal`, BLAS capped, 27 min).
+
 ## 2026-11-02 (Builder, branch `claude/fervent-allen-9387wr`) — dogfood `--mosaic --dithered --restack --closing --deep --editor` (first time together): one trust fix (v0.505.7)
 
 - **Start:** `main` green at v0.505.6, no open PRs, no live claims; every Bugs entry gated (sensor-pattern hold,
