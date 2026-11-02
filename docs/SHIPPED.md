@@ -1,5 +1,18 @@
 # Shipped — the record
 
+## v0.505.8 — 2026-11-02 (Scout, branch `claude/exciting-wozniak-8uy5tg`) — "It's back" names the deepest returning target per part, not by total
+
+- **Fixed (Scout sweep (2), the whole-target-number-that-is-really-per-panel pattern).** `nightplan._returning_targets`
+  ordered same-night returns by `-total_exposure_s`, and `planweek.returningWeekNote` names the first row in full
+  ("soonest night, then the deepest") and the rest only by name after "Also back this week". The line itself quotes
+  the depth *per typical part* (`haveClause`), so a mosaic won by its target total while being shallower where it
+  counts. Reproduced through the real `plan_week` (`_BACK_SITE`, `_BACK_START`): a 4-field mosaic with 6 h
+  (1.5 h per part) and a 3 h single field at the same position, both back on 2026-11-02 → the mosaic was named in
+  full and the single field, twice as deep per part, went to "Also back". **Now** the tie-break is
+  `per_pixel_total(total, _panel_depth_fulls(field_fulls, depth_fulls))` — the planner's own per-part divisor, so a
+  single field and a row with no scale sort exactly as before. Test:
+  `test_the_returning_target_named_first_is_the_deepest_per_part_not_by_total` (fails on the old sort).
+
 ## v0.505.7 — 2026-11-02 (Builder, branch `claude/fervent-allen-9387wr`) — Compare stops calling a single field and its own mosaic "two different objects"
 
 - **Fixed (dogfood find, `--mosaic --dithered --restack --closing --deep --editor`).** Compare's noise line decided

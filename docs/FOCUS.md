@@ -5,30 +5,31 @@
 > belongs in `docs/PROCESS-NOTES.md`, never here. The 2,559-line page this replaced is kept verbatim in
 > [`archive/FOCUS-to-2026-10-21.md`](archive/FOCUS-to-2026-10-21.md) — nothing was deleted.
 
-## Front of the queue (2026-11-01)
+## Front of the queue (2026-11-02)
 
-**No ungated bug is open** (re-checked by a Builder dogfood `--mosaic --editor --big --deep`, CLEAN). "Try something new tonight" scoring the whole ongoing night closed in v0.505.6. The
+**No ungated bug is open** (Scout sweep (2) found and fixed one in v0.505.8; dogfood `--mosaic --editor` CLEAN). The
 owner's ⭐ entry from #1317 is closed apart from its part (4), the dark ring — the first Bugs entry, gated on the S30's
 measured vignette. A Builder with nothing ungated should dogfood (`--mosaic --editor`) and file what it finds, or
-take the beginner idea in "Features that serve real workflows" once its observer gate is answered. Recently closed:
-"Try something new tonight" scores only the darkness left (v0.505.6); the Calibration repair offer names what it
+take the beginner idea in "Features that serve real workflows" once its observer gate is answered. Recently closed: "It's back" names the deepest
+returning target per part (v0.505.8); Compare's same-object pair (v0.505.7); "Try something new tonight" scores only the darkness left (v0.505.6); the Calibration repair offer names what it
 repairs (v0.505.5); "Point here tonight" no longer recommends a target that has set (v0.505.4); a catalogued galaxy is
 not a "star cluster" (v0.505.3); an Auto chip tap answers at once (v0.505.2); "It's back" (v0.505.0). Older closures are in the archived run log and `SHIPPED.md`.
 
 **Gated, do not start:** the un-located-panel entry (second in Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
 re-litigate a stand-down that carries numbers. **Issue inbox:** #878, #880, #903, #1015 — all previously acted-on
-and owner-gated, none updated since 2026-10-12 (re-checked 2026-11-01).
+and owner-gated, none updated since 2026-10-12 (re-checked 2026-11-02).
 
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (1), 2026-11-01
-→ next sweep is (2).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (2), 2026-11-02
+→ next sweep is (3).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-11-02 (Scout, branch `claude/exciting-wozniak-8uy5tg`) — **QA rotation sweep (2), new angle: which returning target "It's back" names in full — one bug, Scout-fixed as v0.505.8** (`nightplan._returning_targets` ranked same-night returns by target total; a 4-field 6 h mosaic, 1.5 h per part, was named ahead of a 3 h single field). Inbox: the same four, owner-gated; #1344's hold unanswered. Dogfood `--mosaic --editor` CLEAN. **START HERE NEXT RUN:** Scout: sweep (3) with a new angle; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
 *2026-11-02 (Builder, branch `claude/fervent-allen-ker4l7`) — **no app change: nothing ungated; first-ever dogfood `--mosaic --no-site --editor --big` CLEAN** (Auto trim 7.9 % small / 6.7 % full-size, editor drive clean on all three runs, nothing overflowing, no console errors; tallest page the documented `[phone] /life-list [Still to shoot]` 14,513 px). **START HERE NEXT RUN:** Scout: sweep (2) and triage #1344's hold; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
 *2026-11-02 (Builder, branch `claude/fervent-allen-uz0cj2`) — **no app change: nothing ungated; first-ever dogfood `--mosaic --dithered --calibration --restack --big --editor` CLEAN**; its one MOVED line was the scale-pair instrument (`dogfood_scale_pair.health_claims` now prints a sensor-size calibration difference instead of counting it). Suite 8548 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (2) and triage #1344's hold; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
 *2026-11-02 (Builder, branch `claude/fervent-allen-9387wr`) — **v0.505.7: Compare stops calling a single field and its own mosaic "two different objects"** (`GalleryItem.object_id`, `Compare.targetRelation`); found by a first-ever `--mosaic --dithered --restack --closing --deep --editor` pass, otherwise CLEAN. **START HERE NEXT RUN:** Scout: sweep (2) and triage #1344's hold; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
@@ -38,7 +39,6 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-11-01 (Builder, branch `claude/practical-shannon-yc744h`) — **v0.505.6: "Try something new tonight" read late in the night scores only the darkness left** (`nightplan.well_placed_tonight` clips the ongoing window to now; at 43 min to dawn it showed the evening's six picks at 629 min each → now self-hides). Also fixes the nearly-there, life-list and wishlist "up tonight" cards. Suite 8545 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (2); Builder: nothing ungated — dogfood `--mosaic --editor`; the observer can answer the dark-ring vignette gate.*
 *2026-11-01 (Scout, branch `claude/exciting-wozniak-seqf64`) — **QA rotation sweep (1), new angle: a non-trivial North-up angle (CD rotated 30°/−71°/12°) through the native share and wallpaper path on trimmed auto-edits — CLEAN** (landmarks within 0.05 % of the frame of the stored-preview twin). **Filed, reproduced:** "Try something new tonight" scores the whole ongoing night (`well_placed_tonight`). Inbox: the same four, owner-gated. Dogfood `--mosaic` CLEAN. One moot idea closed, one beginner idea filed (LP filter, observer-gated). **START HERE NEXT RUN:** Builder: the first Bugs entry. **Rotation: (1) done → next sweep is (2).***
 *2026-11-01 (Builder, branch `claude/practical-shannon-ieouv1`) — **v0.505.5: the Calibration page's broken-pixel offer names what it repairs ("Repair hot or dead pixels on every stack from now on") instead of a "Repair these" above a table whose counts sit below it** (`calibration.defect_repair_offer`); dogfood `--mosaic --editor --calibration --no-site` otherwise CLEAN. Suite 8541 passed / 7 skipped; vitest 4905. **START HERE NEXT RUN:** Scout: sweep (1) and a fresh beginner idea; Builder: the observer can answer the dark-ring vignette gate.*
-*2026-11-01 (Builder, branch `claude/practical-shannon-h7pyj4`) — **v0.505.4: the Dashboard's "Point here tonight" no longer recommends a started target that has already set** (`pickContinueTonight(nowMs)`; read at 04:14 it named a target whose window closed at 21:16); dogfood `--mosaic --deep --incoming-lag --closing` otherwise CLEAN. **START HERE NEXT RUN:** Scout: sweep (1) and a fresh beginner idea; Builder: the observer can answer the dark-ring vignette gate.*
 
 ## Standing frontier
 
