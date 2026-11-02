@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-11-02 (Builder, branch `claude/fervent-allen-mt7l7g`) — nothing ungated to build; first-ever dogfood `--mosaic --dithered --incoming-lag --calibration --editor` CLEAN.
+
+- **Suite:** 8549 passed / 7 skipped on `af9f231f` (xdist `-n 4`, BLAS capped, 25m56s). No open PRs at start.
+- **Why no app task:** every Bugs entry still carries its owner/observer gate or a measured stand-down (FOCUS.md);
+  the "Features" beginner idea (LP filter) waits on the observer's `FILTER`-card count, and the full-data TIFF
+  white-point item was re-read against its 2026-09-03 trace (archive) and left as filed — it needs a real deep stack.
+- **Dogfood, read as paragraphs:** mosaic trim 7.9 %; dithered trim 30.7 % against the recorded 30.3 % apron (no
+  move); its silent panel map is the documented `PANEL_LINK_DIST_DEG` limit. The calibrated branch applied both
+  masters and its note withdrew, as it should. The Dashboard's incoming-lag note said "8 subs … haven't been
+  imported" on the first two probes and "A sub … can't be read" on the third — the scan had imported the 7 readable
+  subs in between, so that is the note tracking the folder, not two notes disagreeing. Target-page cards agree with
+  each other on all three targets (the "grain 0.000" readings are the fixture's, as filed in the "Worth more time"
+  LEAD). Three editor drives clean (all ops re-render, live and marked taste chips each answer with their own
+  sentence), nothing overflowing, no console errors, page heights on the standing baseline (`/life-list` 14,513 px).
+
 ## 2026-11-02 (Builder, branch `claude/fervent-allen-u2gvb2`) — nothing ungated to build; first-ever dogfood `--mosaic --dithered --closing --no-site --combine --editor` CLEAN; the editor drive's stale-toast wait fixed (dev script only).
 
 - **Suite:** 8549 passed / 7 skipped on `58b34417` (xdist `-n 4`, BLAS capped, 25m38s). No open PRs at start.
