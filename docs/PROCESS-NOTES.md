@@ -12,6 +12,7 @@
   kept the 4-sub run as the cover, and only the batch ever lifted it. That is v0.505.9.
 - **Not covered by a test:** the walk-away auto-stack call site (owner has `auto_stack` off); it uses the same
   helper as the two tested paths.
+- **Suite:** 8556 passed / 7 skipped (xdist -n 4, 17 min) after syncing `origin/main`.
 
 ## 2026-11-02 (Builder, branch `claude/fervent-allen-mt7l7g`) — nothing ungated to build; first-ever dogfood `--mosaic --dithered --incoming-lag --calibration --editor` CLEAN.
 
