@@ -2599,6 +2599,25 @@ def test_the_week_plan_names_a_target_that_is_back_after_months_away():
     assert (row.field_fulls, row.depth_fulls) == (4.0, 5.0)
 
 
+def test_the_returning_target_named_first_is_the_deepest_per_part_not_by_total():
+    """Two targets back on the same night: the one named in full is the deeper
+    *per part* — the figure the line quotes — not the bigger total. A 4-field
+    mosaic with 6 h holds 1.5 h on a typical part; a single field with 3 h holds
+    3 h, and used to be pushed into "Also back this week" behind it."""
+    mosaic = _lib("leo_mosaic", "Leo mosaic", 172.5, 20.0, hours=6.0,
+                  field_fulls=4.0, depth_fulls=4.0)
+    single = _lib("leo", "Leo thing", 172.6, 20.0, hours=3.0)
+    plan = np_plan.plan_week(_BACK_SITE, [mosaic, single], start_utc=_BACK_START)
+    assert {r.safe for r in plan.returning} == {"leo", "leo_mosaic"}
+    assert len({r.date for r in plan.returning}) == 1, "same night, so depth decides"
+    assert [r.safe for r in plan.returning] == ["leo", "leo_mosaic"]
+    # A single field and an evenly read mosaic with more per part still lead.
+    deeper = _lib("leo_mosaic", "Leo mosaic", 172.5, 20.0, hours=16.0,
+                  field_fulls=4.0, depth_fulls=4.0)
+    plan = np_plan.plan_week(_BACK_SITE, [deeper, single], start_utc=_BACK_START)
+    assert [r.safe for r in plan.returning] == ["leo_mosaic", "leo"]
+
+
 def test_a_returning_target_really_was_out_of_reach_on_the_nights_between_samples():
     """The look-back samples a night a week; this pins that no *unsampled*
     night in the fortnight before the return — where a season's edge sits —

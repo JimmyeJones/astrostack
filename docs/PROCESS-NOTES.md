@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-11-02 (Scout, branch `claude/exciting-wozniak-8uy5tg`) — QA rotation sweep (2), new angle — which returning target "It's back" names in full: one bug, Scout-fixed (v0.505.8). Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
+
+- **Suite:** 8549 passed / 7 skipped on `c8a47634` + this fix (xdist `-n 4`, BLAS capped, 16m01s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+  owner-gated — nothing owed. No open PRs at start. #1344's ⭐ sensor-pattern entry: still on its own HOLD for the
+  owner's per-temperature diagnostic; no result has arrived (no issue, no backlog note), so it stays as filed.
+  **Dogfood `--mosaic --editor`:** CLEAN (EXIT 0, trim 7.9 %, nothing overflowing, no console errors, editor drive clean on both runs; the known non-finding only — the Dashboard's ASTAP note in a dogfood without ASTAP).
+- **Sweep (2).** Per-panel code since the last (2) (`6ya1y4`, 10-29): v0.504.0–5 (unedited-preview border trim —
+  `unedited_border_trim` is Auto's own `largest_covered_rect`, whose threshold is already one panel's depth via
+  `_panel_reference` plus the coverage-bound ladder; not re-swept), v0.505.0 "It's back", v0.505.4/6 (windows,
+  no per-panel number), v0.505.7 (object match). Asked of v0.505.0: its clause is per part (`haveClause`), but the
+  rows were ordered "soonest night, then the deepest" by `-total_exposure_s` — and only the first row is named in
+  full. Repro through the real `plan_week` (`_BACK_SITE`, `_BACK_START`): a 4-field mosaic with 6 h (1.5 h/part)
+  and a 3 h single field, same position, both back 2026-11-02 → mosaic named in full, the single field (twice as
+  deep per part) under "Also back". Fixed with the planner's own per-part divisor; fail-before test.
+- **Read and holds:** `plan_week`'s considered order (`-total_exposure_s`) and the library summary's "longest
+  target"/heroes rank by *time invested*, which is the whole-target number by meaning. `season_closing`'s
+  considered order (least total first) only matters when its `max_targets` cost cap bites — a mosaic is then kept
+  later than its per-part depth deserves; not filed (no library near the cap has been measured).
+  `_auto_stack_arrival_hold` was read for a shared-folder angle: it already uses library-wide distinct
+  `source_path`s (`imported_by_folder`), so #878's double registration cannot strand it.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-11-02 (Builder, branch `claude/fervent-allen-uz0cj2`) — nothing ungated to build; dogfood `--mosaic --dithered --calibration --restack --big --editor` (first time together) CLEAN; one instrument false alarm fixed.
 
 - **Start:** `main` green at v0.505.7, no open PRs, no live claims; every Bugs entry gated (sensor-pattern hold,

@@ -1853,7 +1853,15 @@ def _returning_targets(
         )
         for t, d, m in candidates
     ]
-    out.sort(key=lambda r: (r.date, -r.total_exposure_s, r.safe))
+    # "Then the deepest" is what a *typical part* holds — the figure the line
+    # itself quotes (``haveClause``) — not the target total: a 4-field mosaic
+    # with 6 h holds 1.5 h per part, and ranking it by its 6 h named it in full
+    # ahead of a 3 h single field twice as deep, which went to "Also back".
+    out.sort(key=lambda r: (
+        r.date,
+        -per_pixel_total(r.total_exposure_s,
+                         _panel_depth_fulls(r.field_fulls, r.depth_fulls)),
+        r.safe))
     return out
 
 
