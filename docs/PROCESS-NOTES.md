@@ -1,5 +1,18 @@
 # Process notes & QA sweep records
 
+## 2026-11-02 (Builder, branch `claude/fervent-allen-40n5a5`) — nothing ungated to build; first-run dogfood `--empty` CLEAN.
+
+- **Suite:** 8545 passed / 7 skipped on `6f1088e3` (xdist `-n 4`, BLAS capped, 18m22s). No open PRs at start.
+- **Why no task:** the ⭐ sensor-pattern entry holds itself for the owner's per-temperature diagnostic; every other
+  Bugs entry carries its owner/observer gate or a measured stand-down; the LP-filter idea waits on the `FILTER`-card
+  count. Re-read the two ungated "Minor / low-priority" items: `MergeResult.n_skipped_missing_file` is consumed only by
+  `seestack/gui/main_window.py` (the deprioritised desktop GUI), never by the web app, and the symlinked-subdir
+  double-ingest is an edge with no report — both keep their "fix only if touching these files" disposition.
+- **Dogfood `--empty`:** EXIT 0, nothing overflowing, no console errors. The notice board speaks one note (ASTAP not
+  set up, links to Settings), which is right for a first run. Tallest page `[phone] /life-list [Still to shoot]`
+  14,604 px — 110 "Not captured" tiles, the documented non-bug (v0.492.2: the list the user asked for is never
+  shortened); `/settings/more` 5,042 px phone. Heights on the standing baseline.
+
 ## 2026-11-01 (Builder, branch `claude/fervent-allen-u0a7vz`) — nothing ungated to build; dogfood `--combine --mosaic --editor` CLEAN.
 
 - **Start:** one open PR, #1344 (docs only, the ⭐ fixed-sensor-colour-pattern entry), which **holds itself** ("do not
