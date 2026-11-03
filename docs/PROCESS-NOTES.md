@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-11-03 (Builder, branch `claude/fervent-allen-d02o0b`) — nothing ungated to build; first-ever dogfood `--mosaic --big --deep --closing --incoming-lag --editor` CLEAN.
+
+- **Suite:** 8557 passed / 7 skipped on `f647c4b9` (xdist `-n 4`, BLAS capped, 17m31s). No open PRs at start; inbox
+  is the Scout's (the same four, owner-gated).
+- **Why this combination:** `--big` (the decimated preview) and `--deep` (1,200 subs) had never run in one pass, nor
+  `--closing` beside `--incoming-lag`. **Read as paragraphs:** `[scale]` 0 of 16 canvas-independent answers moved;
+  mosaic trim 7.9 % (full-size 6.7 %); panel map, grain-uneven and seams notes agree (top-right part ~30 s behind);
+  the closing-season, week-plan and week-plan-closing cards name the same two targets and the same night; the
+  incoming-lag note moves from "8 subs" to the one unreadable sub once the scan imports the 7. Three editor drives
+  clean (21 ops each, Undo/Redo, full-size check with its Noise-reduction caveat, taste chips answer at once); deep
+  frames table windows at 301 of 1,200 rows and grows to 601 on scroll; nothing overflowing, no console errors;
+  heights on the standing baseline (`[phone] /life-list [Still to shoot]` 14,513 px, documented non-bug).
+- **Not re-derived:** the "Hold back highlights (0.05)" nudge on the 2×2 mosaic and not its full-size twin is the
+  measured sampling difference already recorded further down this file (grep `Measured, not a bug`) (`solve_highlight_protect` agrees preview↔export on each).
+
 ## 2026-11-03 (Builder, branch `claude/fervent-allen-dq0u87`) — nothing ungated to build; first-ever dogfood `--mosaic --dithered --deep --combine --calibration --editor` CLEAN.
 
 - **Suite:** 8557 passed / 7 skipped on `4ecc54f7` + this record (xdist `-n 4`, BLAS capped, 22m45s).
