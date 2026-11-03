@@ -3,6 +3,8 @@
 ## 2026-11-03 (Builder, branch `claude/fervent-allen-6uov9m`) — nothing ungated to build; first-ever dogfood `--mosaic --combine --restack --incoming-lag --big --editor` found the `--combine` pass silently skipping every sample check (dev script fixed), then CLEAN.
 
 - **Suite:** 8556 passed / 7 skipped on `547063b0` (xdist `-n 4`, BLAS capped, 21m12s). No open PRs at start.
+  Branch before merge: 8557 passed / 7 skipped (the first branch run failed `test_dogfood_restack_anchors`, which
+  anchored on the old stack-step gate text; same assertion re-anchored on the new gate).
 - **Why no app task:** every Bugs entry still carries its owner/observer gate or a measured stand-down (FOCUS.md);
   the LP-filter beginner idea still waits on the observer's `FILTER`-card count.
 - **The finding (dev script only):** `--combine` sets `DO_STACK=0` (it stacks its own targets in the journey's
