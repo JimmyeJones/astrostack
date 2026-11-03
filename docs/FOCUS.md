@@ -5,15 +5,16 @@
 > belongs in `docs/PROCESS-NOTES.md`, never here. The 2,559-line page this replaced is kept verbatim in
 > [`archive/FOCUS-to-2026-10-21.md`](archive/FOCUS-to-2026-10-21.md) — nothing was deleted.
 
-## Front of the queue (2026-11-02)
+## Front of the queue (2026-11-03)
 
-**No ungated bug is open** (Scout sweep (2) found and fixed one in v0.505.8; dogfood `--mosaic --editor` CLEAN). The
-owner's ⭐ entry from #1317 is closed apart from its part (4), the dark ring — the first Bugs entry, gated on the S30's
-measured vignette. A Builder with nothing ungated should dogfood (`--mosaic --editor`) and file what it finds, or
-take the beginner idea in "Features that serve real workflows" once its observer gate is answered. Recently closed: a one-target stack after a Combine shows its deeper picture (v0.505.9); "It's back" names the deepest
-returning target per part (v0.505.8); Compare's same-object pair (v0.505.7); "Try something new tonight" scores only the darkness left (v0.505.6); the Calibration repair offer names what it
-repairs (v0.505.5); "Point here tonight" no longer recommends a target that has set (v0.505.4); a catalogued galaxy is
-not a "star cluster" (v0.505.3); an Auto chip tap answers at once (v0.505.2); "It's back" (v0.505.0). Older closures are in the archived run log and `SHIPPED.md`.
+**One ungated bug is open:** the Scout 2026-11-03 entry in Bugs — a macOS `._*.fit` sidecar in `incoming/` is
+reported as an unreadable sub that is "still waiting", and a `.recycle/` / `.Trash-*/` folder becomes a target.
+Part (a), the `._` skip in all three walkers, is buildable now (S–M); part (b), the hidden-folder skip, waits on
+one-sitting item 19. Otherwise a Builder should dogfood (`--mosaic --editor`) and file what it finds. The owner's ⭐
+colour-pattern entry is on HOLD for his per-temperature numbers; the dark ring waits on the S30's measured vignette.
+Recently closed: a one-target stack after a Combine shows its deeper picture (v0.505.9); "It's back" names the deepest
+returning target per part (v0.505.8); Compare's same-object pair (v0.505.7). Older closures are in the archived run
+log and `SHIPPED.md`.
 
 **Gated, do not start:** the un-located-panel entry (second in Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
@@ -23,12 +24,13 @@ and owner-gated, none updated since 2026-10-12 (re-checked 2026-11-02).
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (2), 2026-11-02
-→ next sweep is (3).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (3), 2026-11-03
+→ next sweep is (4).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-11-03 (Scout, branch `claude/exciting-wozniak-bnak6b`) — **QA rotation sweep (3), new angle: junk a NAS share or desktop leaves in `incoming/` (`._*.fit`, `.recycle/`, `.Trash-*/`) — side effects CLEAN, one bug filed reproduced** (no walker skips a dot-name). Inbox: the same four, owner-gated. Dogfood `--mosaic` CLEAN. **START HERE NEXT RUN:** Builder: part (a) of that entry (ungated); Scout: sweep (4) with a new angle.*
 *2026-11-03 (Builder, branch `claude/fervent-allen-d02o0b`) — **no app change: nothing ungated; first-ever dogfood `--mosaic --big --deep --closing --incoming-lag --editor` CLEAN** (`[scale]` 0/16 moved, trim 7.9 % / 6.7 % full-size, the three Tonight cards agree, deep frames table windowed at 301 rows, three editor drives clean). Suite 8557 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (3) with a new angle; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
 *2026-11-03 (Builder, branch `claude/fervent-allen-dq0u87`) — **no app change: nothing ungated; first-ever dogfood `--mosaic --dithered --deep --combine --calibration --editor` CLEAN** — the first `--deep`/`--dithered`/`--calibration` pass since the `--combine` stack-step fix, so its mosaic checks really ran (trim 7.9 %, dithered 30.7 % against its 30.3 % apron, calibration note withdrew with both masters applied, §10 `incoming/` unchanged, 1,200-sub frames table windowed at 301 rows). **START HERE NEXT RUN:** Scout: sweep (3) with a new angle; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
 *2026-11-03 (Builder, branch `claude/fervent-allen-6uov9m`) — **no app change: nothing ungated; first-ever dogfood `--mosaic --combine --restack --incoming-lag --big --editor`** found `--combine` leaving every loaded sample unstacked, so its mosaic-trim, scale-pair and full-size checks never ran and said nothing (earlier `--combine --mosaic` "CLEAN" records cover the combine journey only); `agent-dogfood.sh` fixed, re-run CLEAN (scale 0/16 moved, trim 7.9 %). **START HERE NEXT RUN:** Scout: sweep (3) with a new angle; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
@@ -38,7 +40,6 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-11-02 (Scout, branch `claude/exciting-wozniak-8uy5tg`) — **QA rotation sweep (2), new angle: which returning target "It's back" names in full — one bug, Scout-fixed as v0.505.8** (`nightplan._returning_targets` ranked same-night returns by target total; a 4-field 6 h mosaic, 1.5 h per part, was named ahead of a 3 h single field). Inbox: the same four, owner-gated; #1344's hold unanswered. Dogfood `--mosaic --editor` CLEAN. **START HERE NEXT RUN:** Scout: sweep (3) with a new angle; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
 *2026-11-02 (Builder, branch `claude/fervent-allen-ker4l7`) — **no app change: nothing ungated; first-ever dogfood `--mosaic --no-site --editor --big` CLEAN** (Auto trim 7.9 % small / 6.7 % full-size, editor drive clean on all three runs, nothing overflowing, no console errors; tallest page the documented `[phone] /life-list [Still to shoot]` 14,513 px). **START HERE NEXT RUN:** Scout: sweep (2) and triage #1344's hold; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
 *2026-11-02 (Builder, branch `claude/fervent-allen-uz0cj2`) — **no app change: nothing ungated; first-ever dogfood `--mosaic --dithered --calibration --restack --big --editor` CLEAN**; its one MOVED line was the scale-pair instrument (`dogfood_scale_pair.health_claims` now prints a sensor-size calibration difference instead of counting it). Suite 8548 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (2) and triage #1344's hold; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
-*2026-11-02 (Builder, branch `claude/fervent-allen-9387wr`) — **v0.505.7: Compare stops calling a single field and its own mosaic "two different objects"** (`GalleryItem.object_id`, `Compare.targetRelation`); found by a first-ever `--mosaic --dithered --restack --closing --deep --editor` pass, otherwise CLEAN. **START HERE NEXT RUN:** Scout: sweep (2) and triage #1344's hold; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
 
 ## Standing frontier
 
