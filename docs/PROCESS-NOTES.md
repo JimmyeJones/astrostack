@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-11-03 (Builder, branch `claude/fervent-allen-9aep51`) — nothing ungated to build; two new-angle probes CLEAN (a sub missing from disk at stack time; mosaic-shaped holes through every editor op at every parameter extreme).
+
+- **Suite:** 8557 passed / 7 skipped on `349b80c8` (xdist `-n 4`, BLAS capped, 17m56s). No open PRs at start.
+- **Why no dogfood combination this time:** six Builder runs in a row recorded a CLEAN flag combination; a seventh
+  adds little. Two angles none of them reached instead, both run through the real functions (scratch scripts only):
+- **(a) A sub deleted from disk between ingest and stack** (the owner reorganising `incoming/` while a stack is
+  queued; `copy_to_cache` off, so the source path is the only copy). `run_stack` on an 8-sub `_build_project` with one
+  file unlinked: logs *"1 of 8 subs have no readable file (neither the Stage-1 cache nor the original source is on
+  disk) — they cannot be stacked"* and stacks the other 7. No traceback, no job failure. Already handled.
+- **(b) Every registered editor op (all 21) on a mosaic-shaped canvas** — 300×420, an L-shaped missing corner plus an
+  interior gap strip, 60 stars and a soft nebula — in both the linear and the stretched domain, at the defaults **and**
+  at each float/int parameter's min and max, each enum option and each flipped bool. Checked: no exception, shape kept,
+  no hole filled, no new NaN in covered sky. Only findings are by design: `geometry.rotate` ±180° moves the holes with
+  the picture and `geometry.resize` changes the shape. Nothing to file.
+
 ## 2026-11-03 (Builder, branch `claude/fervent-allen-d02o0b`) — nothing ungated to build; first-ever dogfood `--mosaic --big --deep --closing --incoming-lag --editor` CLEAN.
 
 - **Suite:** 8557 passed / 7 skipped on `f647c4b9` (xdist `-n 4`, BLAS capped, 17m31s). No open PRs at start; inbox
