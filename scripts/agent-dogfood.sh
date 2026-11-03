@@ -1187,6 +1187,13 @@ run_id_of() {  # newest stack run id for a target, or empty
 #     This runs BEFORE the ordinary stack step below on purpose: `stack_target`
 #     returns early once a run exists, so by doing both runs here the later call
 #     no-ops rather than adding a third.
+if [ "$DO_RESTACK" = 1 ] && [ "$DO_STACK" = 0 ]; then
+  # --no-stack or --combine: the sample is not this script's to stack twice
+  # here (--combine's sample IS the combined deep target). Said out loud, so a
+  # pass that asked for --restack does not record it as run.
+  echo "-- --restack: NOT RUN — this pass does not stack the field sample itself"
+  echo "   (--no-stack or --combine); drop the other flag to reach it"
+fi
 if [ "$DO_RESTACK" = 1 ] && [ "$DO_STACK" = 1 ] && [ -n "$SAFE" ]; then
   echo "-- --restack: stacking the sample TWICE (thin, then deep) so the"
   echo "   cross-run comparison surfaces exist at all"
@@ -1270,7 +1277,15 @@ if not d.get("available"):
   fi
 fi
 
-if [ "$DO_STACK" = 1 ]; then
+# --combine sets DO_STACK=0 because it stacks ITS OWN targets earlier, in the
+# journey's order — not because the samples --mosaic/--big/--dithered loaded
+# beside it should stay unstacked. Before this, those passes probed every
+# sample as frames-only: no mosaic trim, no scale-pair diff, no full-size
+# preview, each skipped without a word, and the pass still read CLEAN (Builder
+# 2026-11-03, `--mosaic --combine --restack --incoming-lag --big --editor`).
+# `stack_target` returns early on a target that already has a run, so the
+# combine pass's own deep target is not stacked a second time.
+if [ "$DO_STACK" = 1 ] || [ "$DO_COMBINE" = 1 ]; then
   stack_target "$SAFE" "sample"
   stack_target "$MOSAIC_SAFE" "mosaic sample"
   stack_target "$BIG_SAFE" "full-size mosaic sample"
@@ -1284,6 +1299,7 @@ fi
 #     (the same trap the observing site's `location_source` line closed).
 if [ -n "$BIG_SAFE" ]; then
   BIG_RUN="$(run_id_of "$BIG_SAFE")"
+  [ -n "$BIG_RUN" ] || echo "-- full-size preview: NOT MEASURED — the full-size sample has no stack run"
   if [ -n "$BIG_RUN" ]; then
     curl -sf "$BASE/api/targets/$BIG_SAFE/stack-runs/$BIG_RUN/editor/loupe-info" \
       | python -c '
@@ -1335,6 +1351,9 @@ fi
 #     script is a finder, and anything it turns up still needs a real test.
 if [ -n "$MOSAIC_SAFE" ]; then
   MOSAIC_RUN="$(run_id_of "$MOSAIC_SAFE")"
+  # Say so when there is nothing to measure — a missing line here is the only
+  # sign this pass's §1 mosaic-trim check never ran, and silence reads as CLEAN.
+  [ -n "$MOSAIC_RUN" ] || echo "-- mosaic trim: NOT MEASURED — the mosaic sample has no stack run"
   if [ -n "$MOSAIC_RUN" ]; then
     curl -sf "$BASE/api/targets/$MOSAIC_SAFE/stack-runs/$MOSAIC_RUN/editor/trim-suggestion" \
       | python -c '

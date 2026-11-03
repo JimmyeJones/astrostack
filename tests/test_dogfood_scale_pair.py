@@ -226,3 +226,25 @@ def test_the_shell_pass_runs_it_and_only_with_both_halves_of_the_pair():
     assert "add --mosaic to this pass" in src, (
         "a --big-only pass is no longer told why the diff did not run"
     )
+
+
+def test_a_combine_pass_still_stacks_the_samples_it_loads():
+    """``--combine`` sets ``DO_STACK=0`` because it stacks its own targets in the
+    journey's order — but the mosaic/full-size samples loaded beside it must
+    still be stacked, or the scale-pair diff above, the §1 mosaic-trim check
+    and the full-size preview probe are all skipped without a word (Builder
+    2026-11-03: a ``--mosaic --combine --big`` pass printed "skipped: needs BOTH
+    mosaic samples, stacked (--mosaic --big)" with both flags given, and no
+    mosaic-trim line at all). And a check that cannot run must say so."""
+    src = SCRIPT.read_text(encoding="utf-8")
+    assert 'if [ "$DO_STACK" = 1 ] || [ "$DO_COMBINE" = 1 ]; then\n  stack_target "$SAFE"' in src, (
+        "the sample stack step is gated on DO_STACK alone again — "
+        "a --combine pass will leave every loaded sample unstacked"
+    )
+    assert "mosaic trim: NOT MEASURED" in src, (
+        "a pass with no mosaic run no longer says the trim check did not run"
+    )
+    assert "full-size preview: NOT MEASURED" in src
+    assert "--restack: NOT RUN" in src, (
+        "a --restack the pass cannot honour is dropped silently again"
+    )
