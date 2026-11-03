@@ -1,5 +1,25 @@
 # Shipped — the record
 
+## v0.505.10 — 2026-11-03 (Builder, branch `claude/fervent-allen-7cutrz`) — a macOS `._<name>.fit` sidecar in `incoming/` is no longer read as a sub
+
+- **Fixed (Scout 2026-11-03, QA sweep (3), part (a)).** A Mac copying onto a share without native resource-fork
+  support writes a 4 KB AppleDouble twin `._<name>.fit` beside every sub. Nothing in `ingest.find_fits_files`,
+  `scanner.scan_and_organize` (the loose-root `iterdir`) or `scanner.plan_incoming_units` skipped it, so a
+  Mac-copied `M 42_sub/` of 4 subs planned **8**, added 4 and reported `n_errors: 4` with all four `._` names as
+  unreadable — the Jobs page listed them and the Dashboard's incoming-lag note counted them as waiting for ever.
+  **Now** one name-only predicate, `ingest.is_appledouble_sidecar` (inside `is_fits_candidate`), is used by all
+  three walkers, so the plan (which may not open files) and the scan cannot disagree. Name-only on purpose: a real
+  sidecar begins with magic `0x00051607`, which no FITS file can, and macOS reserves the prefix — a byte check could
+  only disagree with the name on a file no camera writes. Other dot-names (`.recycle/`, `.Trash-*/`, part (b)) are
+  **not** matched; that skip is still the owner's call and stays open in Bugs.
+- **Upgrade-safe (§9):** no config, schema, layout, default or response-shape change. A library that already recorded
+  sidecars as unreadable clears them on its next scan (`webapp/unreadablesubs.py` replaces the record per scan).
+  `incoming/` is only read (§10; the new test snapshots it before and after).
+- **Tests:** new `tests/test_appledouble_sidecars.py` (10) — the predicate, `find_fits_files`, the plan handed a
+  listing that still carries sidecars, and the real scan: 4 + 2 loose subs found and added, 0 errors, no `._`
+  name in `unreadable_examples`, plan == scan, `incoming/` byte/mtime-identical. **Fail-before:** the 3 behavioural
+  tests red with `seestack/` reverted.
+
 ## v0.505.9 — 2026-11-02 (Builder, branch `claude/fervent-allen-s1pgbe`) — a one-target stack after a Combine shows its deeper picture instead of leaving the merge's pin on the shallower one
 
 - **Fixed (dogfood find, `--mosaic --deep --combine --calibration --editor`, re-confirmed on `--combine --calibration`).**

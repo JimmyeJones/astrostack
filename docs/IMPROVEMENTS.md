@@ -118,31 +118,20 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   with him; its result decides whether (1) needs one master per temperature range, like a matched dark. This
   line is replaced with the numbers when they arrive.
 
-- **🟡 (Scout 2026-11-03, QA rotation sweep (3)) — files a NAS share or a desktop writes *into* `incoming/` on its
-  own are read as subs: every macOS `._<name>.fit` sidecar is reported as an unreadable sub that is "still
-  waiting", and a `.recycle/` or `.Trash-*/` folder becomes a library target of the subs he deleted.**
-  *(Pillar: trust / friendliness — PRIORITY 2–3; size **S–M**; severity moderate *if* his share ever sees a Mac or
-  a Linux desktop's delete, none otherwise; nothing is lost on disk and `incoming/` is never written. Confidence:
-  **reproduced** through the real functions; occurrence on the owner's share **unmeasured**.)*
-  Nothing in `seestack/io/ingest.find_fits_files`, `scanner.scan_and_organize` (`subdirs` / `loose`) or
-  `scanner.plan_incoming_units` skips a dot-name — unlike `video/discover.py:96,158`, `calibrate/discover.py:136,323`
-  and `webapp/calibration.py:1355`, which all already do. Scratch repro (deleted): `incoming/M 42_sub/` with 4
-  synth subs + their 4 AppleDouble twins (`._Light_….fit`, magic `0x00051607`, 4 KB) + `.DS_Store`,
-  `incoming/.recycle/<user>/M 31_sub/` (2 subs), `incoming/.Trash-1000/files/` (1 sub); real `plan_incoming_units`
-  then `scan_and_organize`. **(a)** `M 42` plans **8** files, adds 4, `n_errors: 4` with all four `._` names in
-  `unreadable_examples` — so `unreadablesubs` records them, the Jobs page lists them as unreadable and the
-  Dashboard's incoming-lag note counts them as waiting forever (a Mac-copied library doubles every folder's
-  count). **(b)** targets **`.recycle`** (2 frames, `safe_name` `recycle`) and **`.Trash-1000`** (1 frame) are
-  created — the recycle bin's own `M 31_sub` structure is flattened into one target named after the bin, so
-  deleted subs of several objects would co-stack, and with `copy_to_cache` off they go missing when the bin is
-  emptied. `incoming/` byte/mtime-identical throughout (§10 held). **Fix (a), ungated:** skip a file named
-  `._<rest>` in the scan *and* the plan — the planner cannot open files (§10 / `incominglag` design), so key on
-  the name; a real FITS cannot begin with AppleDouble's magic, so the scan side may also check the first 4 bytes
-  before calling it a sidecar. One shared predicate in `ingest.py`, used by all three walkers, so the plan and
-  the scan cannot disagree (`test_plan_matches_real_scan`-style test). **(b) needs owner sign-off** — a
-  name-based folder skip on the scan hot path is his call (precedent: `_TEMP_FOLDER_NAMES`, owner-decided
-  2026-09-08); asked in the one-sitting list. Observer can measure reach as a shape: how many files under
-  `incoming/` start with `._`, and how many top-level folders start with `.`.
+- **🟡 (Scout 2026-11-03, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/` or `.Trash-*/` folder
+  a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
+  *(Pillar: trust — PRIORITY 2–3; size **S**; severity moderate *if* his share has a recycle bin or sees a desktop
+  delete; nothing is lost on disk. Confidence: **reproduced** through the real functions; occurrence **unmeasured**.)*
+  Scratch repro: `incoming/.recycle/<user>/M 31_sub/` (2 subs) and `incoming/.Trash-1000/files/` (1 sub) → real
+  `scan_and_organize` creates targets **`.recycle`** (2 frames, `safe_name` `recycle`) and **`.Trash-1000`**; the
+  bin's own `M 31_sub` structure is flattened into one target named after the bin, so deleted subs of several
+  objects would co-stack, and with `copy_to_cache` off they go missing when the bin is emptied. `incoming/` was
+  unchanged (§10 held). Part (a), the macOS `._*.fit` sidecar, is fixed by `ingest.is_appledouble_sidecar` — that
+  predicate deliberately does **not** match other dot-names. **(b) needs owner sign-off** — a name-based folder skip
+  on the scan hot path is his call (precedent: `_TEMP_FOLDER_NAMES`, owner-decided 2026-09-08); asked in the
+  one-sitting list. When answered, add the skip beside `is_fits_candidate` so `find_fits_files`,
+  `scan_and_organize` and `plan_incoming_units` keep agreeing. Observer can measure reach as a shape: how many
+  top-level folders under `incoming/` start with `.`.
 
 - **🟡 (Builder 2026-10-30, the ⭐ 2026-10-28 entry's part (4)) — the "darker ring just inside" the ragged border is
   made by the stacker's per-frame sky flatten: on a vignetted sub, `Background2D` leaves a dark rim along every
@@ -3409,6 +3398,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.10 **A macOS `._<name>.fit` sidecar in `incoming/` is no longer read as a sub — it was counted as an unreadable sub on the Jobs page and as "still waiting" in the incoming-lag note, doubling every Mac-copied folder** (`ingest.is_appledouble_sidecar`, `is_fits_candidate`, used by `find_fits_files`, `scan_and_organize`, `plan_incoming_units`) — Scout sweep (3) part (a)
 - ✅ v0.505.9 **A one-target stack (Stack form, Process, auto-stack) after a Combine lifts the merge's app pin by the batch's rule, so the deeper picture shows and "N subs aren't in the picture yet" stops naming subs it already holds** (`pipeline._settle_app_pin_after_stack`, `_settle_cover_after_restack`, `PIN_REASON_MERGE`) — dogfood find
 - ✅ v0.505.8 **"It's back" names in full the returning target that is deepest *per part* — the figure its own line quotes — instead of the biggest total, which put a 4-field mosaic with 1.5 h per part ahead of a 3 h single field** (`nightplan._returning_targets` sort, `per_pixel_total`, `_panel_depth_fulls`) — Scout sweep (2)
 - ✅ v0.505.7 **Compare no longer calls a single field and its own mosaic (`M 42` / `M 42 (mosaic)`) "two different objects" — it decides by the catalogue's object match, and says "different targets" when it can't tell** (`GalleryItem.object_id`, `Compare.targetRelation`, `noiseComparison`) — dogfood find

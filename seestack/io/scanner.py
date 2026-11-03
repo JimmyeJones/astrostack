@@ -56,7 +56,11 @@ from pathlib import Path
 
 from seestack.core.cache import CacheManager
 from seestack.io.fits_loader import load_header
-from seestack.io.ingest import FITS_SUFFIXES, find_fits_files, ingest_files
+from seestack.io.ingest import (
+    find_fits_files,
+    ingest_files,
+    is_fits_candidate,
+)
 from seestack.io.library import UNSORTED_TARGET_NAME, Library
 from seestack.io.project import Project, is_seestar_output_filename
 from seestack.io.wcs_io import wcs_text_is_usable
@@ -388,7 +392,9 @@ def plan_incoming_units(
     by_rel: dict[tuple[str, ...], list[tuple[Path, float]]] = {}
     for raw, mtime in files.items():
         p = Path(raw)
-        if p.suffix.lower() not in FITS_SUFFIXES:
+        # The scan's own test, so a macOS ``._<name>.fit`` sidecar in a listing
+        # handed over by any caller is not planned as a sub the scan never takes.
+        if not is_fits_candidate(p):
             continue
         try:
             rel = p.relative_to(root)
@@ -1293,7 +1299,7 @@ def scan_and_organize(
     # Loose FITS directly in the root → the Unsorted catch-all.
     loose = sorted(
         p for p in root.iterdir()
-        if p.is_file() and p.suffix.lower() in FITS_SUFFIXES
+        if is_fits_candidate(p) and p.is_file()
     )
 
     subdirs_with_fits: list[tuple[str, list[Path]]] = []
