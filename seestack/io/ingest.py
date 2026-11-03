@@ -32,6 +32,34 @@ log = logging.getLogger(__name__)
 
 FITS_SUFFIXES = (".fit", ".fits", ".fts")
 
+# The name prefix macOS gives an AppleDouble sidecar: the ``._<name>`` file it
+# writes beside every file it copies onto a share without native resource-fork
+# support. It keeps its twin's ``.fit`` suffix, so without this every walker of
+# ``incoming/`` took it for a sub.
+APPLEDOUBLE_PREFIX = "._"
+
+
+def is_appledouble_sidecar(path: str | Path) -> bool:
+    """True if ``path`` names a macOS AppleDouble sidecar (``._<name>``).
+
+    **By name alone, deliberately.** The scan and the incoming-lag plan
+    (:func:`seestack.io.scanner.plan_incoming_units`) must agree about which
+    files are subs, and the plan may not open files (AGENTS.md §10: it runs on
+    every watcher poll over the one tree the app may never write to). A real
+    sidecar starts with AppleDouble's magic ``0x00051607``, which no FITS file
+    can (a FITS file starts ``SIMPLE``), and macOS reserves the prefix for
+    exactly these files — so a byte check would only ever disagree with the name
+    on a file no camera writes. Other dot-names (``.recycle/``, ``.Trash-*``)
+    are a separate, owner-gated question and are *not* matched here.
+    """
+    return os.path.basename(str(path)).startswith(APPLEDOUBLE_PREFIX)
+
+
+def is_fits_candidate(path: Path) -> bool:
+    """A file name every walker of ``incoming/`` treats as a sub: a FITS suffix
+    and not a macOS sidecar. Name-only (see :func:`is_appledouble_sidecar`)."""
+    return path.suffix.lower() in FITS_SUFFIXES and not is_appledouble_sidecar(path)
+
 
 @dataclass
 class IngestResult:
@@ -58,16 +86,20 @@ class IngestResult:
 
 
 def find_fits_files(root: str | Path, *, recursive: bool = True) -> list[Path]:
-    """List FITS files under ``root``. Sorted for deterministic ingest order."""
+    """List FITS files under ``root``. Sorted for deterministic ingest order.
+
+    A macOS AppleDouble sidecar (``._<name>.fit``) is not listed — it is a 4 KB
+    resource-fork twin, not a sub (:func:`is_appledouble_sidecar`).
+    """
     root = Path(root)
     if not root.exists():
         raise FileNotFoundError(root)
     if root.is_file():
-        return [root] if root.suffix.lower() in FITS_SUFFIXES else []
+        return [root] if is_fits_candidate(root) else []
     pattern = "**/*" if recursive else "*"
     files = [
         p for p in root.glob(pattern)
-        if p.is_file() and p.suffix.lower() in FITS_SUFFIXES
+        if is_fits_candidate(p) and p.is_file()
     ]
     files.sort()
     return files
