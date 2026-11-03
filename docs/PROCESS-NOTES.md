@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-11-03 (Builder, branch `claude/fervent-allen-6hrl7o`) — nothing ungated to build; first-ever dogfood `--mosaic --dithered --big --deep --incoming-lag --editor` CLEAN.
+
+- **Suite:** 8567 passed / 7 skipped on `82c42196` (xdist `-n 4`, BLAS capped, 17m31s). No open PRs at start; inbox
+  is the Scout's (the same four, owner-gated).
+- **Why this combination:** `--dithered` had never run beside `--big` and `--deep` in one pass, so the dithered
+  canvas, the decimated full-size preview and the 1,200-sub frames table had not been read together. **Read as
+  paragraphs:** `[scale]` 0 of 16 canvas-independent answers moved; mosaic trim 7.9 % (full-size 6.7 %); dithered
+  30.7 % against its recorded 30.3 % apron; panel map, grain-uneven and seams notes agree (top-right part ~30 s
+  behind); the incoming-lag note moves from "8 subs" to the one unreadable sub once the scan imports the 7. Four
+  editor drives clean (21 ops each, Undo/Redo; the full-size drive's navigator window and black box checked, the
+  three 1:1 drives correctly say the check is not offered); taste chips answer at once; deep frames table windows
+  at 301 of 1,200 rows and grows to 601 on scroll; nothing overflowing, no console errors; heights on the standing
+  baseline (`[phone] /life-list [Still to shoot]` 14,513 px, documented non-bug).
+- **Not re-derived:** the 2×2's "about a 3×3 mosaic" week-plan chip on the deep single field is the open mosaic-effort
+  LEAD's shape (Ideas, owner-data-gated); the "Hold back highlights" nudge differing 2×2 vs full-size is the
+  measured sampling difference already recorded (grep `Measured, not a bug`).
+
 ## 2026-11-03 (Scout, branch `claude/exciting-wozniak-bnak6b`) — QA rotation sweep (3), new angle — files a NAS share or desktop writes into `incoming/` itself (AppleDouble `._*.fit`, `.recycle/`, `.Trash-*/`): side effects CLEAN; one bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8557 passed / 7 skipped on `349b80c8` (xdist `-n 4`, BLAS capped, 21m36s). **Inbox:** the same four
