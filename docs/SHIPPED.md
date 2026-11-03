@@ -1,5 +1,23 @@
 # Shipped — the record
 
+## v0.505.11 — 2026-11-03 (Builder, branch `claude/fervent-allen-gsmulj`) — the Calibration page's masters list fits a phone
+
+- **Polish (UX & polish backlog, "Mobile layout polish across the newer pages").** Found on a `--mosaic --calibration
+  --combine` dogfood at the probe's 420 px phone width: the masters table sits in a `Table.ScrollContainer
+  minWidth={680}`, so a phone showed Name / Type / Frames and hid **Exp, Gain, Temp, Size and the delete button** off
+  the right edge with nothing on screen to say a sideways scroll existed. The overflow probe cannot see this by
+  design (a scroll container is excluded), which is why every earlier `--calibration` pass recorded it clean.
+  **Now** below Mantine's `sm` breakpoint (`useMediaQuery("(max-width: 48em)")`, read synchronously so a phone never
+  flashes the table) each master is one stacked row: the same name and notes (one shared `MasterSummary`, so the two
+  layouts cannot say different things), its numbers on one line (`masterSpecsLine`: "20 frames · 30s · gain 80 ·
+  -5°C · 1080×1920", unknowns left out rather than dashed), and the type badge and delete button pinned top-right.
+  One layout or the other is rendered, never both. **Nothing removed or moved on desktop** — the table is unchanged.
+- **Upgrade-safe (§9):** frontend only; no endpoint, config, schema, layout or default change.
+- **Tests:** +5 vitest in `Calibration.test.tsx` — the phone rows (no `table`, one row per master, both number lines,
+  delete reachable and calling the API), the wide-screen table, and three `masterSpecsLine` cases. **Fail-before:**
+  the phone test is red with the media query forced off.
+- **Combine** (the other page the backlog line named) is the deprioritised channel-combine page (§1), left alone.
+
 ## v0.505.10 — 2026-11-03 (Builder, branch `claude/fervent-allen-7cutrz`) — a macOS `._<name>.fit` sidecar in `incoming/` is no longer read as a sub
 
 - **Fixed (Scout 2026-11-03, QA sweep (3), part (a)).** A Mac copying onto a share without native resource-fork
