@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-11-03 (Scout, branch `claude/exciting-wozniak-bnak6b`) — QA rotation sweep (3), new angle — files a NAS share or desktop writes into `incoming/` itself (AppleDouble `._*.fit`, `.recycle/`, `.Trash-*/`): side effects CLEAN; one bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8557 passed / 7 skipped on `349b80c8` (xdist `-n 4`, BLAS capped, 21m36s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors).
+- **Sweep (3).** Every earlier (3) sweep varied the binary or the frames the app means to hand it; none asked what
+  the scan hands on from files *nobody meant as subs* that a share or desktop leaves in `incoming/`. Scratch probe
+  (deleted): synth subs plus AppleDouble twins and `.DS_Store` in `M 42_sub/`, an SMB-style `.recycle/<user>/M 31_sub/`
+  and a `.Trash-1000/files/`; real `plan_incoming_units` → `scan_and_organize`. **Side effects CLEAN:** `incoming/`
+  byte/mtime-identical; the `._` files fail at the header read, so ASTAP is never started on them; the bin's subs
+  solve from a scratch copy like any other. **Found:** no walker skips a dot-name (the video and calibration
+  discoverers do) — the `._` twins are recorded unreadable and counted as waiting, and the two bins become targets.
+  Filed reproduced in Bugs (part (a) ungated, S–M; part (b) is one-sitting item 19).
+- **Not yet run in a sweep (3):** `.zfs/snapshot/` with `snapdir=visible` under `incoming/` (every sub seen once per
+  snapshot) — the same missing predicate would cover it; not separately probed.
+- **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-11-03 (Builder, branch `claude/fervent-allen-9aep51`) — nothing ungated to build; two new-angle probes CLEAN (a sub missing from disk at stack time; mosaic-shaped holes through every editor op at every parameter extreme).
 
 - **Suite:** 8557 passed / 7 skipped on `349b80c8` (xdist `-n 4`, BLAS capped, 17m56s). No open PRs at start.
