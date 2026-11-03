@@ -1,5 +1,23 @@
 # Shipped — the record
 
+## v0.505.12 — 2026-11-03 (Builder, branch `claude/fervent-allen-dlwmrz`) — the Tonight planner's target tables fit a phone
+
+- **Polish (UX & polish backlog, "Mobile layout polish"; the lead v0.505.11's run log left: other pages'
+  `Table.ScrollContainer`s at phone width).** Both Tonight tables ("Add more to what you're shooting", "Start
+  something new") sit in a `Table.ScrollContainer minWidth={520}`, so at the probe's 420 px a phone hid the **Moon
+  and Score** columns off the right edge — on the one page the app itself says is read *while pointing the scope*.
+  **Now** below Mantine's `sm` breakpoint (`useMediaQuery("(max-width: 48em)")`, read synchronously) each target is
+  a stacked row: the same name, wishlist star and badges (one shared `TargetSummary`, so the layouts cannot
+  disagree), its numbers on one labelled line (`tonight.targetSpecsLine`: "peaks 62° at 23:10 · up 3.2 h,
+  21:05–00:20 · Moon 80° away · Moon up 40% of its window", unknowns left out rather than dashed), and the score
+  badge pinned top-right. One layout or the other renders, never both. **Desktop table unchanged; nothing removed.**
+- **Upgrade-safe (§9):** frontend only; no endpoint, config, schema, layout or default change.
+- **Tests:** +5 vitest — the phone rows (no `table`, one row per target, both scores and the labelled line), the
+  wide-screen table, and three `targetSpecsLine` cases. **Fail-before:** the phone test is red with the media query
+  forced off.
+- The two other scroll tables left as they are: the Target page's frames table (a sortable 620 px data grid with
+  `mah` scrolling, where a sideways scroll is the expected idiom) and the Nights card (420 px, fits).
+
 ## v0.505.11 — 2026-11-03 (Builder, branch `claude/fervent-allen-gsmulj`) — the Calibration page's masters list fits a phone
 
 - **Polish (UX & polish backlog, "Mobile layout polish across the newer pages").** Found on a `--mosaic --calibration

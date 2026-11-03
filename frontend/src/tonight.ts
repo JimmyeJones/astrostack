@@ -262,6 +262,29 @@ export function usableWindowNote(
   return `${a}–${b}`;
 }
 
+// The planner table's Max alt / Transit / Time up / Moon columns as one line,
+// for the phone layout where those columns don't fit. With no headings above
+// it each number says what it is: "peaks 62° at 23:10 · up 3.2 h, 21:05–00:20 ·
+// Moon 80° away · Moon down for its window". A missing transit, window or time
+// up is left out rather than printed as "—" ("up —" would read as a typo).
+export function targetSpecsLine(t: Pick<PlannedTarget,
+  "max_altitude_deg" | "transit_utc" | "minutes_above_min_alt" | "usable_start_utc"
+  | "usable_end_utc" | "moon_separation_deg" | "moon_up_fraction">): string {
+  const parts: string[] = [];
+  const transit = formatClock(t.transit_utc);
+  const alt = `${t.max_altitude_deg.toFixed(0)}°`;
+  parts.push(transit === "—" ? `peaks ${alt}` : `peaks ${alt} at ${transit}`);
+  const up = formatMinutes(t.minutes_above_min_alt);
+  if (up !== "—") {
+    const win = usableWindowNote(t.usable_start_utc, t.usable_end_utc);
+    parts.push(win ? `up ${up}, ${win}` : `up ${up}`);
+  }
+  parts.push(`Moon ${t.moon_separation_deg.toFixed(0)}° away`);
+  const cue = moonCueForTarget(t.moon_up_fraction);
+  if (cue) parts.push(cue);
+  return parts.join(" · ");
+}
+
 // The furthest ahead the date picker lets you plan, matching the backend's
 // `_MAX_LOOKAHEAD_DAYS` cap (keeps the offline ephemeris cheap; further out is
 // almost always a typo).
