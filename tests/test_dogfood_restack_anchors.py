@@ -41,7 +41,7 @@ def test_it_runs_before_the_ordinary_stack_step():
     pair, and the "is the newest deeper?" line it prints becomes a lie."""
     src = _script()
     assert src.index('if [ "$DO_RESTACK" = 1 ]') \
-        < src.index('if [ "$DO_STACK" = 1 ]; then\n  stack_target')
+        < src.index('if [ "$DO_STACK" = 1 ] || [ "$DO_COMBINE" = 1 ]; then\n  stack_target')
 
 
 def test_the_endpoints_it_calls_all_exist():

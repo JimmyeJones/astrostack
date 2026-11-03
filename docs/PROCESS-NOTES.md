@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-11-03 (Builder, branch `claude/fervent-allen-6uov9m`) — nothing ungated to build; first-ever dogfood `--mosaic --combine --restack --incoming-lag --big --editor` found the `--combine` pass silently skipping every sample check (dev script fixed), then CLEAN.
+
+- **Suite:** 8556 passed / 7 skipped on `547063b0` (xdist `-n 4`, BLAS capped, 21m12s). No open PRs at start.
+  Branch before merge: 8557 passed / 7 skipped (the first branch run failed `test_dogfood_restack_anchors`, which
+  anchored on the old stack-step gate text; same assertion re-anchored on the new gate).
+- **Why no app task:** every Bugs entry still carries its owner/observer gate or a measured stand-down (FOCUS.md);
+  the LP-filter beginner idea still waits on the observer's `FILTER`-card count.
+- **The finding (dev script only):** `--combine` sets `DO_STACK=0` (it stacks its own targets in the journey's
+  order), and the sample stack step was gated on `DO_STACK` alone — so the samples `--mosaic`/`--big` loaded beside
+  it were never stacked. The scale-pair diff printed "skipped: needs BOTH mosaic samples, stacked (--mosaic --big)"
+  with both flags given; the §1 mosaic-trim check and the full-size preview probe printed **nothing**; `--restack` was
+  dropped silently; and only one editor drive ran (on the combined target). **Every earlier `--combine --mosaic`
+  record — including 2026-11-02's `--mosaic --deep --combine --calibration --editor` — had no mosaic stack under
+  it,** so its "CLEAN" covers the combine journey only, not the mosaic checks. Fixed in `agent-dogfood.sh` (stack
+  step also runs under `--combine`; `stack_target` skips a target that already has a run), and the trim, full-size
+  and `--restack` checks now print `NOT MEASURED` / `NOT RUN` instead of nothing. Pinned by
+  `tests/test_dogfood_scale_pair.py::test_a_combine_pass_still_stacks_the_samples_it_loads` (fails on the old script).
+- **Re-run, read as paragraphs:** scale pair 0 of 16 canvas-independent answers moved; mosaic trim 7.9 %; full-size
+  preview 1693×1150 shrunk 1/2, full-size check available and its window follows the navigator. Combine journey as
+  before (§10: `incoming/` unchanged, only the create-new sub added; stays combined across two rescans). On the
+  mosaic Target page the next-best-move and readiness cards agree (4 min spread over ~3 fields of sky, one thinner
+  part); the "+3 waiting" on the board is the combined target's own count. Three editor drives clean, nothing
+  overflowing, no console errors, page heights on the standing baseline (`/life-list` 14,513 px).
+
 ## 2026-11-02 (Builder, branch `claude/fervent-allen-s1pgbe`) — v0.505.9; first-ever dogfood `--mosaic --deep --combine --calibration --editor`.
 
 - **Setup:** `agent-setup.sh`'s `pip install -e .[dev,web,gui]` hung >12 min on a download (process asleep, no
