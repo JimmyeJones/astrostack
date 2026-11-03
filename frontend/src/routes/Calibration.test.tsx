@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CalibrationView } from "./Calibration";
+import { CalibrationView, masterSpecsLine } from "./Calibration";
 import * as client from "../api/client";
 import type { CalibrationCoverage, CalibrationMaster } from "../api/client";
 
@@ -371,4 +371,71 @@ describe("CalibrationView", () => {
       expect(screen.queryByRole("button", { name: /Repair them|Turn off/ }))
         .not.toBeInTheDocument();
     });
+});
+
+// The phone layout (Mobile layout polish, UX & polish backlog). The table only
+// fits a phone as a 680 px sideways scroll, which hid Exp / Gain / Temp / Size
+// and the delete button off the right edge with nothing to say they were there.
+describe("CalibrationView on a phone", () => {
+  // The shared setup answers every media query "no"; this answers the one the
+  // page asks ("max-width: 48em", Mantine's `sm`) "yes", as a 420 px phone would.
+  function asPhone() {
+    const real = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      ...real(query), matches: /max-width:\s*48em/.test(query),
+    })) as typeof window.matchMedia;
+    return () => { window.matchMedia = real; };
+  }
+
+  it("stacks each master instead of hiding half the table off-screen", async () => {
+    const restore = asPhone();
+    try {
+      vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+        mk({}), mk({ id: 2, name: "Flat 2s", kind: "flat", exposure_s: 2, gain: null }),
+      ]);
+      vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
+      const del = vi.spyOn(client.api, "deleteCalibrationMaster")
+        .mockResolvedValue(undefined as never);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderView();
+      await waitFor(() => expect(screen.getByText("Dark 30s")).toBeInTheDocument());
+
+      // No sideways-scrolling table: one stacked row per master.
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      expect(screen.getAllByTestId("calibration-master-row")).toHaveLength(2);
+      // Every number the table's columns held is on screen, on one line.
+      expect(screen.getByText("20 frames · 30s · gain 80 · -5°C · 1080×1920"))
+        .toBeInTheDocument();
+      expect(screen.getByText("20 frames · 2s · -5°C · 1080×1920")).toBeInTheDocument();
+      expect(screen.getByText("flat")).toBeInTheDocument();
+      // …and the delete button is reachable and still works.
+      fireEvent.click(screen.getByRole("button", { name: /Delete master Flat 2s/ }));
+      await waitFor(() => expect(del).toHaveBeenCalledWith(2));
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the table on a wide screen", async () => {
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
+    renderView();
+    await waitFor(() => expect(screen.getByText("Dark 30s")).toBeInTheDocument());
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.queryByTestId("calibration-master-row")).not.toBeInTheDocument();
+  });
+});
+
+describe("masterSpecsLine", () => {
+  it("leaves unknown values out instead of printing dashes", () => {
+    expect(masterSpecsLine(mk({ exposure_s: null, gain: null, sensor_temp_c: null })))
+      .toBe("20 frames · 1080×1920");
+  });
+  it("says frame, not frames, for one", () => {
+    expect(masterSpecsLine(mk({ n_frames: 1 }))).toBe("1 frame · 30s · gain 80 · -5°C · 1080×1920");
+  });
+  it("keeps a zero, which is a real reading", () => {
+    expect(masterSpecsLine(mk({ gain: 0, sensor_temp_c: 0 })))
+      .toBe("20 frames · 30s · gain 0 · 0°C · 1080×1920");
+  });
 });

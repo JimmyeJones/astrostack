@@ -1,14 +1,17 @@
 import {
-  ActionIcon, Alert, Badge, Button, Center, Group, Loader, Paper, Select,
+  ActionIcon, Alert, Badge, Box, Button, Center, Group, Loader, Paper, Select,
   Stack, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import {
   IconFlask, IconInfoCircle, IconPlus, IconTrash,
 } from "@tabler/icons-react";
+import { useMediaQuery } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, type CalibrationMaster } from "../api/client";
+import {
+  api, type CalibrationCoverage, type CalibrationDefects, type CalibrationMaster,
+} from "../api/client";
 import {
   masterCoverageLine, masterMissesTooltip, masterPartialTooltip,
   uncoveredTargetsNote,
@@ -80,6 +83,112 @@ function BuildForm({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** One line of a master's numbers, for the phone layout where the table's
+ *  Frames / Exp / Gain / Temp / Size columns do not fit. Unknown values are
+ *  left out rather than printed as "—", so a flat with no gain card reads
+ *  "6 frames · 2s · 1080×1920" instead of a row of dashes. */
+export function masterSpecsLine(m: Pick<CalibrationMaster,
+  "n_frames" | "exposure_s" | "gain" | "sensor_temp_c" | "width_px" | "height_px">): string {
+  const parts = [`${m.n_frames} frame${m.n_frames === 1 ? "" : "s"}`];
+  if (m.exposure_s !== null && m.exposure_s !== undefined) parts.push(`${m.exposure_s}s`);
+  if (m.gain !== null && m.gain !== undefined) parts.push(`gain ${m.gain}`);
+  if (m.sensor_temp_c !== null && m.sensor_temp_c !== undefined) parts.push(`${m.sensor_temp_c}°C`);
+  if (m.width_px && m.height_px) parts.push(`${m.width_px}×${m.height_px}`);
+  return parts.join(" · ");
+}
+
+/** A master's name and every note about it — what the table's Name cell
+ *  holds, shared with the phone layout so the two can never say different
+ *  things about one master. */
+function MasterSummary({ m, coverage, nTargets, defectNote }: {
+  m: CalibrationMaster;
+  coverage: CalibrationCoverage["masters"][number] | undefined;
+  nTargets: number;
+  defectNote: CalibrationDefects["masters"][number]["note"] | undefined;
+}) {
+  return (
+    <>
+      <Text size="sm">{m.name}</Text>
+      {!m.exists ? (
+        <Badge size="xs" color="red" variant="light">file missing</Badge>
+      ) : null}
+      {/* Do these frames say they're the kind of frame this
+          master claims to be? The build takes a folder path and
+          a dropdown, and nothing else checks the two agree — so
+          a folder of subs silently becomes a "master dark".
+          Self-hiding: null when no frame carried an IMAGETYP we
+          recognise, and on every master built before v0.356.0. */}
+      {m.header_note ? (
+        <Text size="xs"
+          c={m.header_note.severity === "warn" ? "yellow.7" : "dimmed"}>
+          {m.header_note.message}
+        </Text>
+      ) : null}
+      {/* …and was it all shot on one night? The Temp column
+          shows one number because the master stamps one, but
+          that number is a median — a dark built from a cold
+          night and a warm one is stamped with a temperature no
+          frame in it was shot at. Self-hiding the same way:
+          darks only, and only when the range is wide enough to
+          have moved the dark current. */}
+      {m.temp_note ? (
+        <Text size="xs"
+          c={m.temp_note.severity === "warn" ? "yellow.7" : "dimmed"}>
+          {m.temp_note.message}
+        </Text>
+      ) : null}
+      {/* Which of the user's targets this master can actually be
+          applied to — the question the page otherwise makes them
+          answer one target at a time. */}
+      {(() => {
+        const row = coverage;
+        if (!row) return null;
+        const line = masterCoverageLine(row, nTargets);
+        if (!line) return null;
+        const misses = masterMissesTooltip(row, nTargets);
+        // Two different claims about one master, joined into the
+        // one tooltip this line already has: what it can't be
+        // applied to at all, and what it only partly reaches.
+        const partly = masterPartialTooltip(row);
+        const tip = [misses, partly].filter(Boolean).join("\n\n");
+        const text = (
+          <Text size="xs"
+            c={row.n_covered === 0 ? "yellow.7"
+              : (row.n_partial ?? 0) > 0 ? "yellow.7" : "dimmed"}>
+            {line}
+          </Text>
+        );
+        return tip ? (
+          // `pre-line` so the per-target reasons stay one to a
+          // line instead of running together into a paragraph.
+          <Tooltip label={tip} multiline w={300}
+            styles={{ tooltip: { whiteSpace: "pre-line" } }}>
+            {text}
+          </Tooltip>
+        ) : text;
+      })()}
+      {/* What this master says about the *sensor*: how many
+          photosites are hot or stuck dark, and the one switch
+          that repairs exactly those. Self-hiding three ways —
+          only pedestal masters (dark/bias) are censused at all,
+          a master that couldn't be read has no row, and a clean
+          sensor gets no note (there is nothing to act on). */}
+      {(() => {
+        const note = defectNote;
+        if (!note) return null;
+        return (
+          <HintAnchor label={note.detail} multiline w={320}>
+            <Text size="xs"
+              c={note.severity === "warn" ? "yellow.7" : "dimmed"}>
+              {note.message}
+            </Text>
+          </HintAnchor>
+        );
+      })()}
+    </>
+  );
+}
+
 export function CalibrationView() {
   const qc = useQueryClient();
   const masters = useQuery({
@@ -116,6 +225,29 @@ export function CalibrationView() {
     queryFn: api.calibrationDefects,
     refetchInterval: 60_000,
   });
+
+  const deleteButton = (m: CalibrationMaster) => (
+    <Tooltip label="Delete master">
+      <ActionIcon color="red" variant="subtle" loading={del.isPending}
+        aria-label={`Delete master ${m.name}`}
+        onClick={() => {
+          if (window.confirm(`Delete master "${m.name}"?`)) del.mutate(m.id);
+        }}>
+        <IconTrash size={16} />
+      </ActionIcon>
+    </Tooltip>
+  );
+
+  // Below Mantine's `sm` breakpoint the eight-column table only fits as a
+  // 680 px sideways scroll, so on a phone it showed Name / Type / Frames and
+  // hid the exposure, gain, temperature, size *and the delete button* off the
+  // right edge with nothing to say they were there (measured on a
+  // `--calibration` dogfood at 420 px). There each master becomes a stacked
+  // row instead — the same notes, the same numbers on one line, the same
+  // button. One list or the other is rendered, never both, so nothing is in
+  // the page twice. Read synchronously so a phone never flashes the table.
+  const narrow = useMediaQuery("(max-width: 48em)", false,
+    { getInitialValueInEffect: false });
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["calibration-masters"] });
@@ -220,6 +352,35 @@ export function CalibrationView() {
                 </Button>
               </Group>
             ) : null}
+            {narrow ? (
+              <Stack gap={0}>
+                {list.map((m: CalibrationMaster, i: number) => (
+                  <Box key={m.id} p="sm" opacity={m.exists ? 1 : 0.5}
+                    data-testid="calibration-master-row"
+                    style={i > 0 ? {
+                      borderTop: "1px solid var(--mantine-color-default-border)",
+                    } : undefined}>
+                    <Group justify="space-between" align="flex-start" gap="xs"
+                      wrap="nowrap">
+                      {/* The text wraps; the badge and button never do — the
+                          same `minWidth: 0` / `flexShrink: 0` pair as the
+                          repair row above. */}
+                      <Box style={{ minWidth: 0, flex: 1 }}>
+                        <MasterSummary m={m} coverage={coverageById.get(m.id)}
+                          nTargets={nTargets} defectNote={defectsById.get(m.id)?.note} />
+                        <Text size="xs" c="dimmed" mt={2}>{masterSpecsLine(m)}</Text>
+                      </Box>
+                      <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+                        <Badge color={KIND_COLORS[m.kind] ?? "gray"} variant="light">
+                          {m.kind}
+                        </Badge>
+                        {deleteButton(m)}
+                      </Group>
+                    </Group>
+                  </Box>
+                ))}
+              </Stack>
+            ) : (
             <Table.ScrollContainer minWidth={680}>
             <Table highlightOnHover>
               <Table.Thead>
@@ -238,83 +399,8 @@ export function CalibrationView() {
                 {list.map((m: CalibrationMaster) => (
                   <Table.Tr key={m.id} opacity={m.exists ? 1 : 0.5}>
                     <Table.Td>
-                      <Text size="sm">{m.name}</Text>
-                      {!m.exists ? (
-                        <Badge size="xs" color="red" variant="light">file missing</Badge>
-                      ) : null}
-                      {/* Do these frames say they're the kind of frame this
-                          master claims to be? The build takes a folder path and
-                          a dropdown, and nothing else checks the two agree — so
-                          a folder of subs silently becomes a "master dark".
-                          Self-hiding: null when no frame carried an IMAGETYP we
-                          recognise, and on every master built before v0.356.0. */}
-                      {m.header_note ? (
-                        <Text size="xs"
-                          c={m.header_note.severity === "warn" ? "yellow.7" : "dimmed"}>
-                          {m.header_note.message}
-                        </Text>
-                      ) : null}
-                      {/* …and was it all shot on one night? The Temp column
-                          shows one number because the master stamps one, but
-                          that number is a median — a dark built from a cold
-                          night and a warm one is stamped with a temperature no
-                          frame in it was shot at. Self-hiding the same way:
-                          darks only, and only when the range is wide enough to
-                          have moved the dark current. */}
-                      {m.temp_note ? (
-                        <Text size="xs"
-                          c={m.temp_note.severity === "warn" ? "yellow.7" : "dimmed"}>
-                          {m.temp_note.message}
-                        </Text>
-                      ) : null}
-                      {/* Which of the user's targets this master can actually be
-                          applied to — the question the page otherwise makes them
-                          answer one target at a time. */}
-                      {(() => {
-                        const row = coverageById.get(m.id);
-                        if (!row) return null;
-                        const line = masterCoverageLine(row, nTargets);
-                        if (!line) return null;
-                        const misses = masterMissesTooltip(row, nTargets);
-                        // Two different claims about one master, joined into the
-                        // one tooltip this line already has: what it can't be
-                        // applied to at all, and what it only partly reaches.
-                        const partly = masterPartialTooltip(row);
-                        const tip = [misses, partly].filter(Boolean).join("\n\n");
-                        const text = (
-                          <Text size="xs"
-                            c={row.n_covered === 0 ? "yellow.7"
-                              : (row.n_partial ?? 0) > 0 ? "yellow.7" : "dimmed"}>
-                            {line}
-                          </Text>
-                        );
-                        return tip ? (
-                          // `pre-line` so the per-target reasons stay one to a
-                          // line instead of running together into a paragraph.
-                          <Tooltip label={tip} multiline w={300}
-                            styles={{ tooltip: { whiteSpace: "pre-line" } }}>
-                            {text}
-                          </Tooltip>
-                        ) : text;
-                      })()}
-                      {/* What this master says about the *sensor*: how many
-                          photosites are hot or stuck dark, and the one switch
-                          that repairs exactly those. Self-hiding three ways —
-                          only pedestal masters (dark/bias) are censused at all,
-                          a master that couldn't be read has no row, and a clean
-                          sensor gets no note (there is nothing to act on). */}
-                      {(() => {
-                        const note = defectsById.get(m.id)?.note;
-                        if (!note) return null;
-                        return (
-                          <HintAnchor label={note.detail} multiline w={320}>
-                            <Text size="xs"
-                              c={note.severity === "warn" ? "yellow.7" : "dimmed"}>
-                              {note.message}
-                            </Text>
-                          </HintAnchor>
-                        );
-                      })()}
+                      <MasterSummary m={m} coverage={coverageById.get(m.id)}
+                        nTargets={nTargets} defectNote={defectsById.get(m.id)?.note} />
                     </Table.Td>
                     <Table.Td>
                       <Badge color={KIND_COLORS[m.kind] ?? "gray"} variant="light">{m.kind}</Badge>
@@ -324,22 +410,13 @@ export function CalibrationView() {
                     <Table.Td>{NUM(m.gain)}</Table.Td>
                     <Table.Td>{NUM(m.sensor_temp_c, "°C")}</Table.Td>
                     <Table.Td>{m.width_px}×{m.height_px}</Table.Td>
-                    <Table.Td>
-                      <Tooltip label="Delete master">
-                        <ActionIcon color="red" variant="subtle" loading={del.isPending}
-                          aria-label={`Delete master ${m.name}`}
-                          onClick={() => {
-                            if (window.confirm(`Delete master "${m.name}"?`)) del.mutate(m.id);
-                          }}>
-                          <IconTrash size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                    </Table.Td>
+                    <Table.Td>{deleteButton(m)}</Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
             </Table>
             </Table.ScrollContainer>
+            )}
           </>
         )}
       </Paper>
