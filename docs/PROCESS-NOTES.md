@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-11-03 (Builder, branch `claude/fervent-allen-dq0u87`) — nothing ungated to build; first-ever dogfood `--mosaic --dithered --deep --combine --calibration --editor` CLEAN.
+
+- **Suite:** 8557 passed / 7 skipped on `4ecc54f7` + this record (xdist `-n 4`, BLAS capped, 22m45s).
+- **Why this combination:** every `--combine` record before 2026-11-03's stack-step fix had no sample stack under it,
+  so `--deep`/`--dithered`/`--calibration` beside `--combine` had never actually been checked. No open PRs at start.
+- **Read as paragraphs:** combine journey as before (§10: `incoming/` unchanged, only the create-new sub added; stays
+  combined across two rescans; the one server-log traceback is the journey's deliberate no-solve refusal). Mosaic trim
+  7.9 %; dithered canvas 1212×784 / 78 subs, trim 30.7 % against its recorded 30.3 % apron; calibrated re-process applied
+  both masters and the calibration note withdrew. Mosaic panel map, grain-uneven and seams notes agree (top-right part
+  ~30 s behind). Three editor drives clean (21 ops each, Undo/Redo, taste chips answer at once), nothing overflowing, no
+  console errors; `/life-list [Still to shoot]` 14,513 px on the standing baseline. Deep frames table: 301 of 1,200 rows,
+  7,524 nodes, grows on scroll.
+- **Read and set aside:** `/tonight`'s "Plan my week" calls the deep M42 single field "Needs 3×3 mosaic" while the 2×2
+  mosaic sample frames M42 completely. Not a bug for the owner: `find_mosaic_companion` keys on the Seestar's
+  `<T>_mosaic_sub` → `(mosaic)` name, which the bundled samples (`Sample_M42_mosaic_2_2`) do not carry, so the companion
+  hint cannot fire on this fixture. His folders do carry it.
+
 ## 2026-11-03 (Builder, branch `claude/fervent-allen-6uov9m`) — nothing ungated to build; first-ever dogfood `--mosaic --combine --restack --incoming-lag --big --editor` found the `--combine` pass silently skipping every sample check (dev script fixed), then CLEAN.
 
 - **Suite:** 8556 passed / 7 skipped on `547063b0` (xdist `-n 4`, BLAS capped, 21m12s). No open PRs at start.
