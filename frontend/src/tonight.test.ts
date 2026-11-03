@@ -5,8 +5,8 @@ import {
   isoDate, minAltOptions, MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel,
   moonShootColor, moonShootLabel, moonShootWindowNote,
   moonWindowNote, notUpTonightNote, objectTypeBucket, partitionByUpTonight,
-  planDateBounds, planNightLabel, shownNightDate, scoreColor, splitTargets, targetRowLabel, typeFilterOptions,
-  usableWindowNote,
+  planDateBounds, planNightLabel, shownNightDate, scoreColor, splitTargets, targetRowLabel, targetSpecsLine,
+  typeFilterOptions, usableWindowNote,
 } from "./tonight";
 import type { NightPlan, PlannedTarget } from "./api/client";
 
@@ -580,5 +580,35 @@ describe("moonShoot* — tonight's Moon as a subject", () => {
       shoot({ peak_altitude_deg: undefined as unknown as number }));
     expect(note).toMatch(/^Up /);
     expect(note).not.toContain("highest");
+  });
+});
+
+// The phone layout's one line standing in for the Max alt / Transit / Time up /
+// Moon columns — with no headings above it, each number says what it is.
+describe("targetSpecsLine", () => {
+  const base = {
+    max_altitude_deg: 61.6, transit_utc: "2026-01-15T22:00:00+00:00",
+    minutes_above_min_alt: 192, usable_start_utc: "2026-01-15T20:00:00+00:00",
+    usable_end_utc: "2026-01-15T23:12:00+00:00", moon_separation_deg: 80.4,
+    moon_up_fraction: 0.4,
+  };
+  it("names every number the table's columns held", () => {
+    const line = targetSpecsLine(base);
+    const clock = formatClock(base.transit_utc);
+    const win = usableWindowNote(base.usable_start_utc, base.usable_end_utc);
+    expect(line).toBe(
+      `peaks 62° at ${clock} · up 3.2 h, ${win} · Moon 80° away · Moon up 40% of its window`);
+  });
+  it("leaves out what is unknown instead of printing dashes", () => {
+    const line = targetSpecsLine({
+      ...base, transit_utc: null, minutes_above_min_alt: 0,
+      usable_start_utc: null, usable_end_utc: null, moon_up_fraction: null,
+    });
+    expect(line).toBe("peaks 62° · Moon 80° away");
+    expect(line).not.toContain("—");
+  });
+  it("keeps the time up when only the window is unknown", () => {
+    expect(targetSpecsLine({ ...base, usable_end_utc: null, moon_up_fraction: 1 }))
+      .toBe(`peaks 62° at ${formatClock(base.transit_utc)} · up 3.2 h · Moon 80° away`);
   });
 });

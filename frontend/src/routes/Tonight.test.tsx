@@ -829,3 +829,53 @@ describe("TonightView", () => {
     expect(screen.getByText("Retry")).toBeInTheDocument();
   });
 });
+
+// The phone layout (Mobile layout polish, UX & polish backlog). The planner table
+// only fits a phone as a 520 px sideways scroll, which hid the Moon and Score
+// columns off the right edge — on the page that is read at the scope.
+describe("TonightView on a phone", () => {
+  // The shared setup answers every media query "no"; this answers the one the
+  // tables ask ("max-width: 48em", Mantine's `sm`) "yes", as a 420 px phone would.
+  function asPhone() {
+    const real = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      ...real(query), matches: /max-width:\s*48em/.test(query),
+    })) as typeof window.matchMedia;
+    return () => { window.matchMedia = real; };
+  }
+
+  it("stacks each target instead of hiding the score off-screen", async () => {
+    const restore = asPhone();
+    try {
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+        targets: [
+          target({ id: "M13", name: "Hercules Cluster", score: 82, max_altitude_deg: 71,
+            moon_separation_deg: 95 }),
+          target({ id: "M27", name: "Dumbbell Nebula", score: 47 }),
+        ],
+      }));
+      renderTonight();
+      await waitFor(() => expect(screen.getByText(/Hercules Cluster/)).toBeInTheDocument());
+      // No sideways-scrolling table: one stacked row per target.
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      expect(screen.getAllByTestId("tonight-target-row")).toHaveLength(2);
+      // The score and every column's number are on screen.
+      expect(screen.getByText("82")).toBeInTheDocument();
+      expect(screen.getByText("47")).toBeInTheDocument();
+      expect(screen.getByText(/^peaks 71° at .* · up 3\.0 h · Moon 95° away$/))
+        .toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the table on a wide screen", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [target({ id: "M13", name: "Hercules Cluster", score: 82 })],
+    }));
+    renderTonight();
+    await waitFor(() => expect(screen.getByText(/Hercules Cluster/)).toBeInTheDocument());
+    expect(screen.getAllByRole("table").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("tonight-target-row")).not.toBeInTheDocument();
+  });
+});

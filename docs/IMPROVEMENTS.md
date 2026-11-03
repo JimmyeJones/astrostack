@@ -2581,7 +2581,7 @@ any of them.)*
   If it writes none, drop the idea.
 
 ### UX & polish
-- Mobile layout polish on Combine. (S) *(Calibration's masters table done v0.505.11; Combine is the deprioritised
+- Mobile layout polish on Combine. (S) *(Calibration's masters table done v0.505.11, Tonight's planner tables v0.505.12; Combine is the deprioritised
   channel-combine page — touch it only for an outright bug.)*
 - Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7.)*
 
@@ -3399,6 +3399,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.12 **On a phone the Tonight planner lists each target as a stacked row — name and badges, the numbers on one labelled line, the score top-right — instead of a 520 px sideways-scrolling table that hid the Moon and Score columns** (`TargetTable`, `TargetSummary`, `tonight.targetSpecsLine`; desktop table unchanged). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.11 **On a phone the Calibration page lists each master as a stacked row — name, notes, every number on one line, type and delete button — instead of a 680 px sideways-scrolling table that hid Exp / Gain / Temp / Size and the delete button off the right edge** (`CalibrationView`, `MasterSummary`, `masterSpecsLine`, `useMediaQuery` at Mantine `sm`; desktop table unchanged). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.10 **A macOS `._<name>.fit` sidecar in `incoming/` is no longer read as a sub — it was counted as an unreadable sub on the Jobs page and as "still waiting" in the incoming-lag note, doubling every Mac-copied folder** (`ingest.is_appledouble_sidecar`, `is_fits_candidate`, used by `find_fits_files`, `scan_and_organize`, `plan_incoming_units`) — Scout sweep (3) part (a)
 - ✅ v0.505.9 **A one-target stack (Stack form, Process, auto-stack) after a Combine lifts the merge's app pin by the batch's rule, so the deeper picture shows and "N subs aren't in the picture yet" stops naming subs it already holds** (`pipeline._settle_app_pin_after_stack`, `_settle_cover_after_restack`, `PIN_REASON_MERGE`) — dogfood find

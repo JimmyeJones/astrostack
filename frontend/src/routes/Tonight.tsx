@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import {
-  Alert, Anchor, Badge, Button, Card, Center, Group, Loader, Paper, Select,
+  Alert, Anchor, Badge, Box, Button, Card, Center, Group, Loader, Paper, Select,
   SegmentedControl, SimpleGrid, Stack, Table, Text, TextInput, Title,
 } from "@mantine/core";
 import { IconMoon, IconStars, IconTelescope } from "@tabler/icons-react";
+import { useMediaQuery } from "@mantine/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type PlannedTarget } from "../api/client";
@@ -27,7 +28,7 @@ import {
   moonCueForTarget, moonPhaseLabel, moonShootColor, moonShootLabel,
   moonShootWindowNote, moonWindowNote, notUpTonightNote,
   partitionByUpTonight, planDateBounds, planNightLabel, scoreColor, shownNightDate, splitTargets,
-  targetRowLabel, typeFilterOptions, usableWindowNote,
+  targetRowLabel, targetSpecsLine, typeFilterOptions, usableWindowNote,
 } from "../tonight";
 
 function ScoreBadge({ score }: { score: number }) {
@@ -45,7 +46,10 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
-function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | null }) {
+/** A target's name and every badge about it — what the table's Target cell
+ *  holds, shared with the phone layout so the two can never say different
+ *  things about one target. */
+function TargetSummary({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | null }) {
   const label = targetRowLabel(t);
   // For a target already in the library: how many more clear nights would
   // finish it at the owner's own recent pace on it ("~1 more night"), or — when
@@ -95,8 +99,7 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
   // picture's own card says the same sentence, but the morning after.
   const nudgeBadge = recentreNudgeRowBadge(t.recentre_nudge);
   return (
-    <Table.Tr>
-      <Table.Td>
+    <>
         <Group gap={6} wrap="nowrap" align="center">
           {/* "I want that one" — the thought a beginner has while reading this
               very table, and until now it had nowhere to go. Only on catalog
@@ -150,6 +153,15 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
             </Badge>
           </HintAnchor>
         ) : null}
+    </>
+  );
+}
+
+function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | null }) {
+  return (
+    <Table.Tr>
+      <Table.Td>
+        <TargetSummary t={t} usualPaceS={usualPaceS} />
       </Table.Td>
       <Table.Td>{t.max_altitude_deg.toFixed(0)}°</Table.Td>
       <Table.Td>{formatClock(t.transit_utc)}</Table.Td>
@@ -218,8 +230,41 @@ function TargetTable(
   { targets, empty, usualPaceS }:
   { targets: PlannedTarget[]; empty: string; usualPaceS?: number | null },
 ) {
+  // Below Mantine's `sm` breakpoint the six-column table only fits as a 520 px
+  // sideways scroll, so on a phone — which is what this page is read on, at the
+  // scope — the Moon and Score columns sat off the right edge with nothing to
+  // say they were there. There each target becomes a stacked row instead: the
+  // same name and badges (shared TargetSummary), the numbers on one line
+  // (targetSpecsLine), the score top-right. One layout or the other renders,
+  // never both. Read synchronously so a phone never flashes the table.
+  const narrow = useMediaQuery("(max-width: 48em)", false,
+    { getInitialValueInEffect: false });
   if (targets.length === 0) {
     return <Text size="sm" c="dimmed">{empty}</Text>;
+  }
+  if (narrow) {
+    return (
+      <Stack gap={0}>
+        {targets.map((t, i) => (
+          <Box key={t.id} py="xs" data-testid="tonight-target-row"
+            style={i > 0 ? {
+              borderTop: "1px solid var(--mantine-color-default-border)",
+            } : undefined}>
+            <Group justify="space-between" align="flex-start" gap="xs" wrap="nowrap">
+              {/* The text wraps; the score never does — the same `minWidth: 0`
+                  / `flexShrink: 0` pair as the Calibration page's phone rows. */}
+              <Box style={{ minWidth: 0, flex: 1 }}>
+                <TargetSummary t={t} usualPaceS={usualPaceS} />
+                <Text size="xs" mt={4}>{targetSpecsLine(t)}</Text>
+              </Box>
+              <Box style={{ flexShrink: 0 }}>
+                <ScoreBadge score={t.score} />
+              </Box>
+            </Group>
+          </Box>
+        ))}
+      </Stack>
+    );
   }
   return (
     <Table.ScrollContainer minWidth={520}>
