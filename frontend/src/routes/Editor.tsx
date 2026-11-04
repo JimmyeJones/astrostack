@@ -62,8 +62,8 @@ import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBox
   from "../components/editor/mosaicTrim";
 import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps, reshapesFrame }
   from "../components/editor/splitCompare";
-import { applyCropDrag, bigCropNote, cropDragBlockedReason, cropFromParams, cropHandlePositions, existingCropUid,
-  cropKeptLabel, cropToParams, isFullFrame, pointerFraction, FULL_CROP,
+import { applyCropDrag, bigCropNote, cropDragBlockedReason, cropDragCommitParams, cropFromParams,
+  cropHandlePositions, existingCropUid, cropKeptLabel, cropToParams, isFullFrame, pointerFraction, FULL_CROP,
   type CropDragStart, type CropHandle }
   from "../components/editor/cropDrag";
 import { LookComparePicker, type LookChoice } from "../components/editor/LookComparePicker";
@@ -1499,10 +1499,6 @@ export function EditorView() {
   const cropBoxDims = cropDragActive && shownDims && shownDims.src === shownSrc
     ? shownDims : null;
   const cropDragReady = cropDragActive && !!shownSrc && !!cropBoxDims;
-  const setCrop = (crop: TrimCrop) => {
-    if (!cropDragOp) return;
-    setParams(cropDragOp.uid, { ...cropDragOp.params, ...cropToParams(crop) });
-  };
   // One set of pointer handlers serves the eight edge/corner handles and the
   // "slide the whole rectangle" body; only the handle name differs. Pointer
   // capture keeps the drag alive when the cursor outruns the small handle.
@@ -1529,7 +1525,19 @@ export function EditorView() {
     },
     onPointerUp: (e: ReactPointerEvent<HTMLElement>) => {
       try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* jsdom */ }
-      if (cropDragStart && liveCrop) setCrop(liveCrop);
+      // Only a drag that moved an edge is an edit: a tap re-rounding Auto's
+      // full-precision trim would nudge the crop, withdraw "What Auto did" and
+      // push an Undo step that undoes nothing (see `cropDragCommitParams`).
+      if (cropDragOp && cropDragStart && liveCrop) {
+        const next = cropDragCommitParams(cropDragStart.crop, liveCrop, cropDragOp.params);
+        if (next) setParams(cropDragOp.uid, next);
+      }
+      setCropDragStart(null);
+      setLiveCrop(null);
+    },
+    // The browser took the gesture away (a system swipe, a call, a palm): drop
+    // the drag rather than leave a rectangle on screen that the op never got.
+    onPointerCancel: () => {
       setCropDragStart(null);
       setLiveCrop(null);
     },

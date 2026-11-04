@@ -2988,6 +2988,55 @@ describe("EditorView", () => {
                      width: "40.00%", height: "40.00%" }));
   });
 
+  it("a tap on the rectangle or a handle is not an edit — Auto's exact trim stays put",
+    async () => {
+      // Auto's mosaic border trim carries full-precision fractions; re-rounding
+      // them on a tap moved the crop, and pushed an Undo step that undid nothing.
+      mockCropRecipe([cropOp({ x0: 0.0823456, y0: 0.0617, x1: 0.9134567, y1: 0.9456789 })]);
+      stubPreviewGeometry({ left: 0, top: 0, width: 400, height: 300 });
+
+      renderEditor();
+      fireEvent.click(await screen.findByLabelText("Select Crop"));
+      await loadPreviewImage();
+      // Selecting the op is not an edit either.
+      expect(screen.getByLabelText("Undo")).toBeDisabled();
+
+      const rect = await screen.findByLabelText("crop rectangle");
+      pointer(rect, "pointerdown", 200, 150);
+      pointer(rect, "pointerup", 200, 150);
+      const se = screen.getByLabelText("crop handle se");
+      pointer(se, "pointerdown", 365, 284);
+      pointer(se, "pointerup", 365, 284);
+
+      expect(screen.getByLabelText("Undo")).toBeDisabled();
+      expect(screen.getByLabelText("crop rectangle"))
+        .toHaveStyle({ left: "8.23%", width: "83.11%" });
+    });
+
+  it("drops a drag the browser cancels instead of leaving it on screen", async () => {
+    mockCropRecipe([cropOp({ x0: 0.1, y0: 0.1, x1: 0.5, y1: 0.5 })]);
+    stubPreviewGeometry({ left: 0, top: 0, width: 400, height: 300 });
+
+    renderEditor();
+    fireEvent.click(await screen.findByLabelText("Select Crop"));
+    await loadPreviewImage();
+
+    const rect = await screen.findByLabelText("crop rectangle");
+    pointer(rect, "pointerdown", 100, 75);
+    pointer(rect, "pointermove", 180, 135);
+    await waitFor(() => expect(screen.getByLabelText("crop rectangle"))
+      .toHaveStyle({ left: "30.00%" }));
+    pointer(rect, "pointercancel", 180, 135);
+
+    // Back where the op still has it — nothing was committed, nothing to undo.
+    await waitFor(() => expect(screen.getByLabelText("crop rectangle"))
+      .toHaveStyle({ left: "10.00%", top: "10.00%" }));
+    expect(screen.getByLabelText("Undo")).toBeDisabled();
+    // And a later hover cannot drag it: the gesture is over.
+    pointer(rect, "pointermove", 300, 200);
+    expect(screen.getByLabelText("crop rectangle")).toHaveStyle({ left: "10.00%" });
+  });
+
   it("puts the rectangle away on 'Done cropping' without changing the crop", async () => {
     mockCropRecipe([cropOp({ x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.9 })]);
     stubPreviewGeometry();
