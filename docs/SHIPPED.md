@@ -1,5 +1,26 @@
 # Shipped — the record
 
+## v0.505.19 — 2026-11-04 (Builder, branch `claude/fervent-allen-lrf9oe`) — an upload never writes a macOS sidecar into `incoming/`
+
+- **Bug (PRIORITY 2–3, "drop your frames in"; the §10 folder), found by a code read of the upload path after
+  v0.505.10; no backlog entry.** v0.505.10 taught every walker of `incoming/` to skip a macOS `._<name>.fit`
+  AppleDouble twin, but the **upload endpoint** still wrote them there. Every zip made with macOS "Compress"
+  carries a `__MACOSX/…/._<name>.fit` twin of each sub, and a folder dragged off a Mac share carries `._<name>`
+  beside each one — all with the `.fit` suffix, so `upload.is_fits_name` let them through. A Mac user's 1,000-sub
+  zip therefore wrote 1,000 junk files (and an `__MACOSX/` tree) into the one folder the app may never tidy, and
+  counted them as saved. Worse, without "keep folders" `safe_relname` flattened `M 31_sub/._x.fit` to
+  `M 31_sub__._x.fit`, a name the scanner's sidecar check no longer recognises — so each one came back as an
+  unreadable sub, the v0.505.10 symptom, re-created by the app itself.
+- **Fix:** `upload.is_mac_metadata_name` judges the client's *unflattened* name (last segment `._*`, or any
+  `__MACOSX` segment). Zip members that match are left out silently (the archiver's bookkeeping, as the Mac's own
+  unzip does); a dropped one is refused with *"a macOS sidecar file (._name), not a sub — left out"*. The browser
+  side (`UploadFits.isMacMetadataName`) never sends them; the existing "Ignored N non-FITS files" line covers it.
+- **Upgrade-safe (§9):** no config, schema, layout or default change; the response shape is unchanged. Read and
+  create-new on `incoming/` only — this writes *less* there.
+- **Tests:** `test_upload.py` +5 (a Mac-made zip writes only the real sub; a dropped sidecar is refused with
+  "keep folders" on and off; `is_fits_name` cases); `UploadFits.test.tsx` +1. **Fail-before:** with
+  `upload.py` reverted, all 6 Python cases are red.
+
 ## v0.505.18 — 2026-11-04 (Builder, branch `claude/fervent-allen-aje4n8`) — the Presets menu asks before deleting a saved preset
 
 - **Editor bug (PRIORITY 1), found by a code read of the editor's menus (`PresetMenu`, `LookComparePicker`,

@@ -74,6 +74,7 @@ def test_safe_relname(raw: str, expected: str | None) -> None:
 @pytest.mark.parametrize("name,ok", [
     ("x.fit", True), ("x.FITS", True), ("x.fts", True),
     ("x.png", False), ("x.fit.gz", False), ("x", False), ("x.txt", False),
+    ("._x.fit", False), ("M 31_sub/._x.fit", False), ("__MACOSX/M 31_sub/x.fit", False),
 ])
 def test_is_fits_name(name: str, ok: bool) -> None:
     assert is_fits_name(name) is ok
@@ -759,6 +760,65 @@ def test_zip_non_fits_members_are_reported_as_one_line(client, data_root, tmp_pa
     assert payload["rejected"][0]["name"] == "mixed.zip"
     assert "2 other file(s)" in payload["rejected"][0]["reason"]
     assert not (data_root / "incoming" / "M 31_sub" / "thumbnail.jpg").exists()
+
+
+def test_a_mac_made_zip_never_writes_its_sidecars_into_incoming(
+    client, data_root, tmp_path
+) -> None:
+    """macOS "Compress" puts an AppleDouble twin of every file under
+    ``__MACOSX/`` (``__MACOSX/M 31_sub/._Light_0001.fit``), and a folder copied
+    from a Mac share carries ``._<name>`` beside each sub. Both keep the ``.fit``
+    suffix. Uploaded, they landed in ``incoming/`` — the one folder the app may
+    never tidy (AGENTS.md §10) — and were counted as saved subs. They are the
+    archiver's bookkeeping, not the user's files: left out, silently."""
+    good = _fits_bytes(tmp_path)
+    sidecar = b"\x00\x05\x16\x07" + b"\x00" * 60
+    inc = data_root / "incoming"
+    before = {p for p in inc.rglob("*") if p.is_file()}
+    blob = _zip_bytes({
+        "M 31_sub/Light_0001.fit": good,
+        "M 31_sub/._Light_0001.fit": sidecar,
+        "__MACOSX/M 31_sub/._Light_0001.fit": sidecar,
+        "__MACOSX/M 31_sub/Light_0002.fit": sidecar,
+    })
+    r = client.post("/api/upload", files=[("files", ("mac.zip", blob, "application/zip"))])
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert [f["name"] for f in payload["saved"]] == ["M 31_sub/Light_0001.fit"]
+    assert payload["rejected"] == []
+    assert payload["folders"] == ["M 31_sub"]
+    assert not (inc / "__MACOSX").exists()
+    new = {p for p in inc.rglob("*") if p.is_file()} - before
+    assert new == {inc / "M 31_sub" / "Light_0001.fit"}
+
+
+@pytest.mark.parametrize("preserve", ["true", "false"])
+def test_a_dropped_mac_sidecar_is_refused_not_saved(
+    client, data_root, tmp_path, preserve
+) -> None:
+    """A folder dragged off a Mac share sends ``M 31_sub/._Light_0001.fit``.
+    Flattened (preserve off) it became ``M 31_sub__._Light_0001.fit`` — a name
+    the scanner's sidecar check no longer recognises, so it read as a damaged
+    sub. Refused by the original name's last segment, before flattening."""
+    good = _fits_bytes(tmp_path)
+    inc = data_root / "incoming"
+    before = {p for p in inc.rglob("*") if p.is_file()}
+    r = client.post(
+        "/api/upload",
+        data={"target": "M_99", "preserve_folders": preserve},
+        files=[
+            ("files", ("M 31_sub/Light_0001.fit", good, "application/octet-stream")),
+            ("files", ("M 31_sub/._Light_0001.fit", b"\x00\x05\x16\x07", "application/octet-stream")),
+        ],
+    )
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert len(payload["saved"]) == 1
+    assert "._" not in payload["saved"][0]["name"]
+    assert len(payload["rejected"]) == 1
+    assert "macOS" in payload["rejected"][0]["reason"]
+    new = [p.name for p in {p for p in inc.rglob("*") if p.is_file()} - before]
+    assert len(new) == 1 and "._" not in new[0], new
 
 
 def test_a_file_that_is_not_really_a_zip_is_reported_plainly(client, data_root) -> None:
