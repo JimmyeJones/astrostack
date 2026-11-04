@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-11-04 (Builder, branch `claude/fervent-allen-8ytsh9`) — nothing ungated to build; dogfood `--mosaic --editor` run to completion CLEAN.
+
+- **Suite:** 8567 passed / 7 skipped on `edbf6e4c` (xdist `-n 4`, BLAS capped, 19m11s). No open PRs at start.
+- **Why this combination again:** the previous Builder's `--mosaic --editor` was cut off by its own 10-minute tool
+  timeout after the 21 op re-renders, so Undo/Redo, Auto-process and the taste row had not been read on the mosaic
+  run. This time it ran in the background with no timeout. **Read as one paragraph:** all 21 ops re-render, Undo and
+  Redo apply; "What Auto-process did" names the panel levelling, the 8 % trim (canvas trim 7.9 %) and the blown-core
+  nudge, and offers "Hold back highlights (0.05)"; 10 live chips, 2 marked "already at its limit" (Over-smoothed, Core
+  looks flat) and both answer at once with consistent wording; nothing overflowing, no console errors; heights on the
+  standing baseline.
+- **Code read, nothing to file:** `CurvesWidget` (pointer capture, keyboard nudges, add/remove), `OpParamPanel`
+  (reset, suggestions), `useUndoable` (coalesce window), `SkylineEditor` (drag paint; presets plus the numeric list
+  are its keyboard path). The `merge.py` `n_skipped_missing_file` minor is read only by the deprioritised desktop GUI,
+  so it was left alone.
+
 ## 2026-11-04 (Scout, branch `claude/exciting-wozniak-9ddn2i`) — QA rotation sweep (4), new angle — every GET route against a byte/mtime snapshot of an owner-shaped data root (subs read in place from `incoming/`): CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8567 passed / 7 skipped on `8753ce87` (xdist `-n 4`, BLAS capped, 29m27s). **Inbox:** the same four
