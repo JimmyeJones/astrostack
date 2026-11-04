@@ -1,5 +1,20 @@
 # Shipped — the record
 
+## v0.505.18 — 2026-11-04 (Builder, branch `claude/fervent-allen-aje4n8`) — the Presets menu asks before deleting a saved preset
+
+- **Editor bug (PRIORITY 1), found by a code read of the editor's menus (`PresetMenu`, `LookComparePicker`,
+  `UnsavedLookGuard`); no backlog entry.** In the editor's **Presets** menu, each of the user's own presets carries a
+  12 px trash icon *inside the row whose click applies the preset*. One tap on it called `DELETE
+  /api/editor/presets/{id}` at once — no question, no message, no Undo (the editor's Undo covers the recipe, not
+  the preset list) — while the harmless action in the same row, applying a preset, already asked first. A
+  slightly-off tap on a phone threw away a look the owner had tuned by hand, and a failed delete said nothing.
+- **Fix:** `PresetMenu.deletePreset` asks *"Delete your preset "…"? This can't be undone."* (the app's
+  `window.confirm` idiom, as applying does), then says *Deleted preset "…"*; a failure shows its error. Also, Enter
+  in the **Save preset** dialog's one name field now saves (it did nothing).
+- **Upgrade-safe (§9):** frontend only; no endpoint, config, schema, layout or default change.
+- **Tests:** `PresetMenu.test.tsx` +3 — declining keeps the preset, confirming deletes it, Enter saves.
+  **Fail-before:** with `PresetMenu.tsx` reverted, "declining keeps the preset" and "Enter saves" are red.
+
 ## v0.505.17 — 2026-11-04 (Builder, branch `claude/fervent-allen-sxqaq7`) — every split before/after divider moves with the arrow keys
 
 - **Editor bug (PRIORITY 1), found by a code read of the app's drag widgets (the class v0.505.15/16 worked); no

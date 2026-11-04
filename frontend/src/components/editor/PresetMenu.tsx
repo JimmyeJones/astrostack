@@ -36,10 +36,25 @@ export function PresetMenu({ currentOps, onApply }: {
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
+  // Deleting a saved preset cannot be undone (there is no trash and no Undo for
+  // it — the editor's Undo covers the recipe, not the preset list), and the
+  // trash icon sits inside the very row whose click *applies* the preset, so a
+  // slightly-off tap on a phone deleted a look the user had tuned by hand with
+  // no question asked — while the harmless half (applying) did ask. Confirm, and
+  // say what happened either way.
   const del = useMutation({
-    mutationFn: (id: string) => api.deletePreset(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["presets"] }),
+    mutationFn: (p: Preset) => api.deletePreset(p.id),
+    onSuccess: (_d, p) => {
+      notifications.show({ message: `Deleted preset "${p.label}"`, color: "gray" });
+      qc.invalidateQueries({ queryKey: ["presets"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
+  const deletePreset = (p: Preset) => {
+    if (!window.confirm(
+      `Delete your preset "${p.label}"? This can't be undone.`)) return;
+    del.mutate(p);
+  };
 
   // The user's library-wide default recipe ("my house style"): setting it lets the
   // editor offer it as a one-click seed on any run with no saved edit. Off until set.
@@ -95,7 +110,7 @@ export function PresetMenu({ currentOps, onApply }: {
               rightSection={
                 <ActionIcon size="xs" variant="subtle" color="red" component="div"
                   aria-label={`Delete preset ${p.label}`}
-                  onClick={(e) => { e.stopPropagation(); del.mutate(p.id); }}>
+                  onClick={(e) => { e.stopPropagation(); deletePreset(p); }}>
                   <IconTrash size={12} />
                 </ActionIcon>
               }>{p.label}</Menu.Item>
@@ -121,7 +136,11 @@ export function PresetMenu({ currentOps, onApply }: {
 
       <Modal opened={saveOpen} onClose={saveCtl.close} title="Save preset" centered>
         <TextInput label="Preset name" value={name} data-autofocus
-          onChange={(e) => setName(e.currentTarget.value)} placeholder="e.g. My nebula look" />
+          onChange={(e) => setName(e.currentTarget.value)} placeholder="e.g. My nebula look"
+          onKeyDown={(e) => {
+            // Enter in the only field saves, as it does in any one-field dialog.
+            if (e.key === "Enter" && !save.isPending) { e.preventDefault(); save.mutate(); }
+          }} />
         <Group justify="flex-end" mt="md">
           <Button variant="default" onClick={saveCtl.close}>Cancel</Button>
           <Button loading={save.isPending} onClick={() => save.mutate()}>Save</Button>
