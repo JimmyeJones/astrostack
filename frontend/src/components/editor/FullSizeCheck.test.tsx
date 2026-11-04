@@ -213,6 +213,28 @@ describe("FullSizeCheck", () => {
     expect(marker.style.left).toMatch(/^20\.7/);
   });
 
+  it("moves the window with the arrow keys, for a reader without a pointer", async () => {
+    // The navigator is a focusable role="button"; before this a keyboard user
+    // could reach it and then do nothing — the window stayed on the centre.
+    wrap();
+    fireEvent.click(await screen.findByTestId("full-size-check-open"));
+    const nav = await screen.findByTestId("full-size-check-navigator");
+    await waitFor(() => expect(loupeCalls[loupeCalls.length - 1]).toContain("fx=0.5000&fy=0.5000"));
+
+    // Half a window (512 of 6000 px) to the right per press.
+    fireEvent.keyDown(nav, { key: "ArrowRight" });
+    await waitFor(() => expect(loupeCalls[loupeCalls.length - 1]).toContain("fx=0.5427&fy=0.5000"));
+    // A held key's auto-repeat does not queue a render per tick.
+    const before = loupeCalls.length;
+    fireEvent.keyDown(nav, { key: "ArrowRight", repeat: true });
+    fireEvent.keyDown(nav, { key: "Enter" });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(loupeCalls.length).toBe(before);
+    // Shift moves a whole window; Up moves the other axis (512 of 4000 px).
+    fireEvent.keyDown(nav, { key: "ArrowUp", shiftKey: true });
+    await waitFor(() => expect(loupeCalls[loupeCalls.length - 1]).toContain("fx=0.5427&fy=0.3720"));
+  });
+
   it("draws the marker where the server says the window is, not where it guessed", async () => {
     // The guide re-derives the rectangle from the click and clamps it inside the
     // preview; the server reports the window it actually cut, mapped back through

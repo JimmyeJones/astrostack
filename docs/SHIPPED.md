@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## v0.505.15 — 2026-11-04 (Builder, branch `claude/fervent-allen-mfjvsj`) — the full-size check's navigator moves with the arrow keys
+
+- **Editor bug (PRIORITY 1), found by reading `FullSizeCheck` this run (the editor-widget code read the last two
+  run logs pointed at); no backlog entry.** The "Check it at full size" modal's navigator — the small preview you
+  tap to choose which part of the picture to inspect — is a focusable `role="button"` with `tabIndex={0}` but had
+  only an `onClick`. A keyboard user could tab to it and then do nothing: Enter/Space fire no click on a `div`, and
+  no key moved the window, so the full-resolution check was stuck on the picture's centre (the codebase's own
+  `HintAnchor` comment names exactly this — a `role="button"` without keyboard operation).
+- **Fix:** `loupe.nudgeSpot(spot, key, shift, sizePx, shownSourceW, shownSourceH)` — the arrow keys move the window
+  half its own width per press (Shift: a whole width), so consecutive views overlap; the spot is kept inside
+  `[w/2, 1 − w/2]`, where the server's clamped window actually moves, so the way back from an edge has no dead
+  presses (and a tap on the very border still gets a whole step on its first press). Without the picture's size it
+  falls back to tenths. The navigator's `onKeyDown` uses it and ignores auto-repeat, since each press is a real
+  full-resolution render on the NAS; its label says "tap it, or use the arrow keys".
+- **Upgrade-safe (§9):** frontend only; no endpoint, config, schema, layout or default change.
+- **Tests:** +3 vitest on `nudgeSpot` (step sizes, edge clamp and border start, too-big window, fallback, other
+  keys) and +1 `FullSizeCheck` test (Right moves fx 0.5 → 0.5427 on a 6000 px picture, a repeat and Enter render
+  nothing, Shift+Up moves a whole window). **Fail-before:** with `FullSizeCheck.tsx` reverted the component test is red.
+
 ## v0.505.14 — 2026-11-04 (Builder, branch `claude/fervent-allen-lsjgul`) — a tap on the crop rectangle is no longer an edit
 
 - **Editor bug (PRIORITY 1), found by reading `cropDrag` / the drag-to-crop handlers in `Editor.tsx` this run (the

@@ -4,7 +4,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, type Recipe } from "../../api/client";
 import {
-  FULL_SIZE_CHECK_LABEL, clickFraction, loupeCaption, loupeMarkerFromWindow,
+  FULL_SIZE_CHECK_LABEL, clickFraction, loupeCaption, loupeMarkerFromWindow, nudgeSpot,
   loupeMarkerRect, loupePreviewCrop, loupeWhereText,
 } from "./loupe";
 import { splitClipLeft, splitFraction, splitLeftPct } from "./splitCompare";
@@ -183,10 +183,23 @@ export function FullSizeCheck({
                 data-testid="full-size-check-navigator"
                 role="button"
                 tabIndex={0}
-                aria-label="Choose which part of the picture to see at full size"
+                aria-label="Choose which part of the picture to see at full size — tap it, or use the arrow keys"
                 onClick={(e) => {
                   const r = boxRef.current?.getBoundingClientRect();
                   if (r) setSpot(clickFraction(e.clientX, e.clientY, r));
+                }}
+                // The keyboard half of "tap to look somewhere else": without it
+                // this focusable button did nothing at all once focused. A held
+                // key's auto-repeat is ignored — every press is a real
+                // full-resolution render on the NAS, and thirty a second of them
+                // would only queue work the reader has already moved past.
+                onKeyDown={(e) => {
+                  if (e.repeat && e.key.startsWith("Arrow")) { e.preventDefault(); return; }
+                  const next = nudgeSpot(spot, e.key, e.shiftKey, size,
+                    shownSourceW, shownSourceH);
+                  if (!next) return;
+                  e.preventDefault();
+                  setSpot(next);
                 }}
                 style={{ position: "relative", width: 240, background: "#000",
                          borderRadius: 6, overflow: "hidden", cursor: "crosshair" }}>
