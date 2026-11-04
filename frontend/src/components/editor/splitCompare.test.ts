@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps, reshapesFrame } from "./splitCompare";
+import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps, reshapesFrame, nudgeSplit, splitSliderProps } from "./splitCompare";
 
 describe("splitFraction", () => {
   it("maps a pointer inside the box to its fractional x", () => {
@@ -79,5 +79,51 @@ describe("reshapesFrame", () => {
     expect(reshapesFrame("detail.sharpen")).toBe(false);
     expect(reshapesFrame("stars.reduce")).toBe(false);
     expect(reshapesFrame("background.level_coverage")).toBe(false);
+  });
+});
+
+describe("nudgeSplit", () => {
+  it("moves the divider a twentieth per arrow press, a quarter with Shift", () => {
+    expect(nudgeSplit(0.5, "ArrowRight", false)).toBe(0.55);
+    expect(nudgeSplit(0.5, "ArrowLeft", false)).toBe(0.45);
+    expect(nudgeSplit(0.5, "ArrowRight", true)).toBe(0.75);
+    expect(nudgeSplit(0.5, "ArrowLeft", true)).toBe(0.25);
+    // Up/Down follow the ARIA slider convention (up = larger value).
+    expect(nudgeSplit(0.5, "ArrowUp", false)).toBe(0.55);
+    expect(nudgeSplit(0.5, "ArrowDown", false)).toBe(0.45);
+  });
+
+  it("jumps to either edge on Home/End and stops there", () => {
+    expect(nudgeSplit(0.4, "Home", false)).toBe(0);
+    expect(nudgeSplit(0.4, "End", false)).toBe(1);
+    expect(nudgeSplit(0.98, "ArrowRight", false)).toBe(1);
+    expect(nudgeSplit(0.02, "ArrowLeft", true)).toBe(0);
+  });
+
+  it("lands on clean twentieths however many presses it takes", () => {
+    let f = 0.5;
+    for (let i = 0; i < 7; i++) f = nudgeSplit(f, "ArrowLeft", false)!;
+    expect(f).toBe(0.15);
+  });
+
+  it("leaves every other key to the page (Tab, Ctrl+Z, letters)", () => {
+    for (const k of ["Tab", "z", "Enter", " ", "Escape"]) {
+      expect(nudgeSplit(0.5, k, false)).toBeNull();
+    }
+  });
+
+  it("treats a non-finite position as the centre", () => {
+    expect(nudgeSplit(Number.NaN, "ArrowRight", false)).toBe(0.55);
+  });
+});
+
+describe("splitSliderProps", () => {
+  it("makes the drag surface a focusable slider that announces its position", () => {
+    const p = splitSliderProps(0.25, () => {}, "split divider");
+    expect(p.role).toBe("slider");
+    expect(p.tabIndex).toBe(0);
+    expect(p["aria-label"]).toBe("split divider");
+    expect(p["aria-valuenow"]).toBe(25);
+    expect(p["aria-valuetext"]).toBe("divider at 25% from the left");
   });
 });

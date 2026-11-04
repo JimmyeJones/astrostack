@@ -1,3 +1,5 @@
+import type { KeyboardEvent } from "react";
+
 /** Pure geometry for the editor's split before/after compare.
  *
  * Compare's default mode toggles the whole preview between "Original" and
@@ -72,4 +74,54 @@ export function lookCompareOps<T extends { id: string }>(
     ...lookOps.filter((o) => !o.id.startsWith("geometry.")),
     ...currentGeometryOps,
   ];
+}
+
+/** The keyboard half of every split divider (the editor's before/after split,
+ * the full-size check's preview-vs-real split, "One frame vs your stack" and
+ * Compare's split). Each was drag-only: the divider was not focusable, so a
+ * reader without a pointer could never see anything but the half the split
+ * opened on. ←/→ move it a twentieth of the picture (Shift: a quarter), Home and
+ * End put it at either edge, and any other key is `null` so the caller leaves
+ * it alone (Tab, the editor's Ctrl+Z, …). Clamped to [0,1]. Pure. */
+export function nudgeSplit(fraction: number, key: string, shift: boolean): number | null {
+  const f = Number.isFinite(fraction) ? Math.min(1, Math.max(0, fraction)) : 0.5;
+  const step = shift ? 0.25 : 0.05;
+  let next: number;
+  if (key === "ArrowLeft" || key === "ArrowDown") next = f - step;
+  else if (key === "ArrowRight" || key === "ArrowUp") next = f + step;
+  else if (key === "Home") next = 0;
+  else if (key === "End") next = 1;
+  else return null;
+  // Round away float drift (0.1 + 0.05 + …) so repeated presses land on clean
+  // twentieths and the announced percentage reads as a whole number.
+  return Math.min(1, Math.max(0, Math.round(next * 1000) / 1000));
+}
+
+/** The props that make a split's drag surface a keyboard-operable slider:
+ * focusable, announced as a slider with its position, and answering
+ * {@link nudgeSplit}'s keys. `label` names what the two sides are, since the
+ * reader cannot see which half is which. Spread onto the element that already
+ * takes the pointer drag. */
+export function splitSliderProps(
+  fraction: number,
+  setFraction: (f: number) => void,
+  label: string,
+) {
+  const pct = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
+  return {
+    role: "slider" as const,
+    tabIndex: 0,
+    "aria-label": label,
+    "aria-orientation": "horizontal" as const,
+    "aria-valuemin": 0,
+    "aria-valuemax": 100,
+    "aria-valuenow": pct,
+    "aria-valuetext": `divider at ${pct}% from the left`,
+    onKeyDown: (e: KeyboardEvent<HTMLElement>) => {
+      const next = nudgeSplit(fraction, e.key, e.shiftKey);
+      if (next == null) return;
+      e.preventDefault();
+      setFraction(next);
+    },
+  };
 }
