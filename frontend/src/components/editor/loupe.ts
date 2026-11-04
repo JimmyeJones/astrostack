@@ -82,6 +82,51 @@ export function clickFraction(
 }
 
 /**
+ * Where the window goes when a keyboard user presses an arrow key on the
+ * navigator — or `null` for any other key, so the caller leaves it alone.
+ *
+ * The navigator is a focusable `role="button"`; until this existed, a keyboard
+ * user could tab to it and then do nothing at all, and the full-size window was
+ * stuck on the middle of the picture. One press moves the window **half its own
+ * width** (Shift: a whole width), so consecutive views overlap and nothing is
+ * skipped. The spot is kept inside the range where the window actually moves
+ * (`[w/2, 1 − w/2]`) — the server clamps the window inside the canvas, so a spot
+ * past that line is a press that changes the number and not the picture, and the
+ * reader pressing the other way would get a run of dead presses back. Without the
+ * picture's size in source pixels it falls back to tenths of the preview.
+ */
+export function nudgeSpot(
+  spot: { fx: number; fy: number },
+  key: string,
+  shift: boolean,
+  sizePx: number,
+  shownSourceW: number | null | undefined,
+  shownSourceH: number | null | undefined,
+): { fx: number; fy: number } | null {
+  const dirs: Record<string, [number, number]> = {
+    ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+  };
+  const d = dirs[key];
+  if (!d) return null;
+  const share = (src: number | null | undefined) =>
+    sizePx > 0 && src && Number.isFinite(src) && src > 0 ? Math.min(1, sizePx / src) : null;
+  const move = (v: number, dir: number, w: number | null) => {
+    if (dir === 0) return clampUnit(v);
+    const span = w ?? 0;
+    const step = w != null ? (shift ? w : w / 2) : (shift ? 0.25 : 0.1);
+    const lo = span / 2;
+    const hi = 1 - span / 2;
+    const into = (x: number) => Math.min(Math.max(x, lo), hi);
+    // Start from where the window really is (a tap on the very edge leaves the
+    // spot outside the moving range), so the first press is a whole step.
+    return into(into(clampUnit(v)) + dir * step);
+  };
+  const wx = share(shownSourceW);
+  const wy = share(shownSourceH);
+  return { fx: move(spot.fx, d[0], wx), fy: move(spot.fy, d[1], wy) };
+}
+
+/**
  * The marker rectangle the **server** measured, when it sent one — its window
  * expressed as fractions of the rendered preview, which is the frame the marker
  * is drawn in.

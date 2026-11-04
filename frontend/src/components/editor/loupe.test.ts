@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clickFraction, loupeCaption, loupeMarkerFromWindow, loupeMarkerRect,
-  loupePreviewCrop, loupeWhereText,
+  loupePreviewCrop, loupeWhereText, nudgeSpot,
 } from "./loupe";
 
 describe("loupeMarkerRect", () => {
@@ -56,6 +56,36 @@ describe("clickFraction", () => {
     expect(clickFraction(9999, 9999, box)).toEqual({ fx: 1, fy: 1 });
     expect(clickFraction(10, 10, { left: 0, top: 0, width: 0, height: 0 }))
       .toEqual({ fx: 0.5, fy: 0.5 });
+  });
+});
+
+describe("nudgeSpot", () => {
+  const mid = { fx: 0.5, fy: 0.5 };
+
+  it("moves half a window per press, a whole one with Shift", () => {
+    // 512 of 4096 px wide is an eighth of the picture: a press moves a sixteenth.
+    expect(nudgeSpot(mid, "ArrowRight", false, 512, 4096, 2048)).toEqual({ fx: 0.5625, fy: 0.5 });
+    expect(nudgeSpot(mid, "ArrowLeft", true, 512, 4096, 2048)).toEqual({ fx: 0.375, fy: 0.5 });
+    expect(nudgeSpot(mid, "ArrowDown", false, 512, 4096, 2048)).toEqual({ fx: 0.5, fy: 0.625 });
+  });
+
+  it("stops where the window stops, so the way back has no dead presses", () => {
+    // The server clamps the window inside the canvas: past w/2 from the edge a
+    // press would change the number and not the picture.
+    const edge = nudgeSpot({ fx: 0.05, fy: 0.5 }, "ArrowLeft", true, 512, 4096, 2048)!;
+    expect(edge.fx).toBeCloseTo(0.0625);
+    // A tap on the very border leaves the spot outside that range; the first
+    // press back is still a whole half-window move of the window itself.
+    expect(nudgeSpot({ fx: 0, fy: 0.5 }, "ArrowRight", false, 512, 4096, 2048)!.fx).toBeCloseTo(0.125);
+    // A window bigger than the picture has nowhere to go.
+    expect(nudgeSpot(mid, "ArrowRight", false, 8192, 4096, 2048)).toEqual(mid);
+  });
+
+  it("falls back to tenths without the picture's size, and ignores other keys", () => {
+    expect(nudgeSpot(mid, "ArrowRight", false, 512, null, null)!.fx).toBeCloseTo(0.6);
+    expect(nudgeSpot({ fx: 0.95, fy: 0.5 }, "ArrowRight", true, 0, 4096, 2048)!.fx).toBe(1);
+    expect(nudgeSpot(mid, "Enter", false, 512, 4096, 2048)).toBeNull();
+    expect(nudgeSpot(mid, "a", false, 512, 4096, 2048)).toBeNull();
   });
 });
 
