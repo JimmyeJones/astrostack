@@ -100,6 +100,25 @@ describe("ImagingCalendarCard", () => {
     expect(screen.getByText(/3 Jul 2026 · .* across M13/)).toBeInTheDocument();
   });
 
+  it("Enter or Space on the focused night reads it out, like a tap", async () => {
+    // Fail-before: the cell was a focusable `role="button"` with only an
+    // `onClick`. Tab landed on the most recent night and Enter/Space did
+    // nothing, so the read-out kept inviting a tap the keyboard could not make.
+    vi.spyOn(client.api, "getActivityCalendar").mockResolvedValue(cal());
+    renderCard();
+    await screen.findByText("Your imaging calendar");
+
+    const recent = screen.getByRole("button", { name: /20 Jul 2026/ });
+    fireEvent.keyDown(recent, { key: "Enter" });
+    expect(await screen.findByText(/20 Jul 2026 · .* across M42/)).toBeInTheDocument();
+    expect(recent).toHaveAttribute("aria-pressed", "true");
+
+    const older = screen.getByRole("button", { name: /3 Jul 2026/ });
+    // Space is consumed, so it picks the night instead of scrolling the page.
+    expect(fireEvent.keyDown(older, { key: " " })).toBe(false);
+    expect(await screen.findByText(/3 Jul 2026 · .* across M13/)).toBeInTheDocument();
+  });
+
   it("renders nothing on a library with no imaged nights", async () => {
     vi.spyOn(client.api, "getActivityCalendar").mockResolvedValue(
       cal({ nights: [], n_nights: 0, total_exposure_s: 0, nights_this_month: 0 }),
