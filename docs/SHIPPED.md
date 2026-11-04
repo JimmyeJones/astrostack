@@ -1,5 +1,18 @@
 # Shipped — the record
 
+## v0.505.16 — 2026-11-04 (Builder, branch `claude/fervent-allen-pist1v`) — the imaging calendar's night answers Enter and Space
+
+- **Friendliness/accessibility bug (PRIORITY 3), the lead v0.505.15's run log left (other focusable
+  `role="button"`s of the same class); no backlog entry.** On the Dashboard's "Your imaging calendar", each night
+  cell is a `role="button"` in a roving tab order — Tab lands on the most recent night and the arrow keys walk the
+  rest — but the cell had only an `onClick`. Enter/Space on the focused night did nothing (and Space scrolled the
+  page), so a keyboard user could only read the night they had tabbed to by stepping away from it and back.
+  `OpList`'s rows and `HintIcon` already handle both keys; `NightsCard`'s badge goes through `HintAnchor`, which does.
+- **Fix:** `ImagingCalendarCard`'s `Cell` answers Enter and Space by picking its night (Space is consumed).
+- **Upgrade-safe (§9):** frontend only; no endpoint, config, schema, layout or default change.
+- **Tests:** +1 `ImagingCalendarCard` test (Enter on the tabbed-to night reads it out and presses it; Space on
+  another night is consumed and reads that one). **Fail-before:** with `ImagingCalendarCard.tsx` reverted it is red.
+
 ## v0.505.15 — 2026-11-04 (Builder, branch `claude/fervent-allen-mfjvsj`) — the full-size check's navigator moves with the arrow keys
 
 - **Editor bug (PRIORITY 1), found by reading `FullSizeCheck` this run (the editor-widget code read the last two

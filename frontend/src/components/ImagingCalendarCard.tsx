@@ -71,6 +71,15 @@ function Cell(
         // hundred of them on the Dashboard before the rest of the page.
         tabIndex={roving ? 0 : -1}
         onClick={() => onPick(date)}
+        // A `role="button"` must answer the keys a button does: Tab lands on the
+        // most recent night, and until this existed Enter/Space there did
+        // nothing, so a keyboard user could only read a night by stepping away
+        // from it and back. Space is held so it does not scroll the Dashboard.
+        onKeyDown={(e: React.KeyboardEvent) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          onPick(date);
+        }}
         style={{
           width: CELL,
           height: CELL,
