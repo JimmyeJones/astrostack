@@ -60,7 +60,7 @@ import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBox
   cropCoveragePct, removeCropOps, overTrimmedVerdict, overTrimmedSentence,
   type TrimCrop }
   from "../components/editor/mosaicTrim";
-import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps, reshapesFrame }
+import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps, reshapesFrame, splitSliderProps }
   from "../components/editor/splitCompare";
 import { applyCropDrag, bigCropNote, cropDragBlockedReason, cropDragCommitParams, cropFromParams,
   cropHandlePositions, existingCropUid, cropKeptLabel, cropToParams, isFullFrame, pointerFraction, FULL_CROP,
@@ -1934,7 +1934,11 @@ export function EditorView() {
                                  height: "100%", objectFit: "contain",
                                  clipPath: splitClipLeft(splitFrac),
                                  pointerEvents: "none" }} />
-                      <div aria-label="split divider"
+                      <div
+                        // The label stays the bare "split divider" it has always
+                        // had (tests and the dogfood find it by it); the slider's
+                        // value text says where it sits.
+                        {...splitSliderProps(splitFrac, setSplitFrac, "split divider")}
                         onPointerDown={(e) => {
                           e.currentTarget.setPointerCapture(e.pointerId);
                           setSplitDragging(true);
@@ -1948,6 +1952,7 @@ export function EditorView() {
                           setSplitDragging(false);
                           try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
                         }}
+                        onPointerCancel={() => setSplitDragging(false)}
                         style={{ position: "absolute", top: 0, bottom: 0,
                                  left: splitLeftPct(splitFrac), width: 24,
                                  transform: "translateX(-50%)", cursor: "ew-resize",

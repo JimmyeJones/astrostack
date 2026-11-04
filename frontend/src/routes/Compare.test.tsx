@@ -457,6 +457,10 @@ describe("CompareView", () => {
     expect(screen.getByAltText("B: out7")).toBeInTheDocument();
     // Plain-language drag hint naming both stacks.
     expect(screen.getByText(/Drag the divider/)).toBeInTheDocument();
+    // …and the divider answers the keyboard too: it was drag-only.
+    const slider = screen.getByRole("slider", { name: "Drag to reveal — left is A, right is B" });
+    fireEvent.keyDown(slider, { key: "ArrowRight", shiftKey: true });
+    expect(slider).toHaveAttribute("aria-valuenow", "75");
   });
 
   // The page's whole job is "which of these is better?", and a picture that is

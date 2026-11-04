@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## v0.505.17 — 2026-11-04 (Builder, branch `claude/fervent-allen-sxqaq7`) — every split before/after divider moves with the arrow keys
+
+- **Editor bug (PRIORITY 1), found by a code read of the app's drag widgets (the class v0.505.15/16 worked); no
+  backlog entry.** All four split comparisons — the editor's before/after **Split** (and "Split this op" / compare
+  another look), the full-size check's preview-vs-real-pixels split, "One frame vs your stack" and Compare's
+  **Split** mode — were drag-only. None of the drag surfaces was focusable, so a reader without a pointer could
+  only ever see the half the split opened on (50 %) and never sweep the divider across the picture. Three of them
+  also lacked `onPointerCancel`, so a browser-cancelled drag (a touch turned into a scroll) left `dragging` set.
+- **Fix:** `splitCompare.nudgeSplit(fraction, key, shift)` — ←/→ (and ↓/↑, per the ARIA slider convention) move the
+  divider a twentieth of the picture, Shift a quarter, Home/End to either edge; every other key is left to the page
+  (the editor's Ctrl+Z still works). `splitSliderProps(...)` makes each drag surface a `role="slider"` with
+  `tabIndex 0`, `aria-valuenow` and a value text; the editor's divider keeps its "split divider" label and Compare
+  its "Drag to reveal — left is A, right is B". The full-size check's window is a slider only while the comparison
+  is shown. Compare's hint adds "(Or click it and use the arrow keys.)". `onPointerCancel` ends the drag on all four.
+- **Upgrade-safe (§9):** frontend only; no endpoint, config, schema, layout or default change.
+- **Tests:** +6 `splitCompare` unit tests; a keyboard test in each of `FullSizeCheck` (+2, including "no slider
+  while off"), `OneFrameVsStackCard`, `Compare` and `Editor`. **Fail-before:** with the four components reverted
+  the four component tests are red.
+
 ## v0.505.16 — 2026-11-04 (Builder, branch `claude/fervent-allen-pist1v`) — the imaging calendar's night answers Enter and Space
 
 - **Friendliness/accessibility bug (PRIORITY 3), the lead v0.505.15's run log left (other focusable

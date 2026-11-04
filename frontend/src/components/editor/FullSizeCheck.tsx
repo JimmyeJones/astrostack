@@ -7,7 +7,7 @@ import {
   FULL_SIZE_CHECK_LABEL, clickFraction, loupeCaption, loupeMarkerFromWindow, nudgeSpot,
   loupeMarkerRect, loupePreviewCrop, loupeWhereText,
 } from "./loupe";
-import { splitClipLeft, splitFraction, splitLeftPct } from "./splitCompare";
+import { splitClipLeft, splitFraction, splitLeftPct, splitSliderProps } from "./splitCompare";
 import { unvouchedOpsCaption } from "./windowFidelity";
 
 /** What the split's left half is, said plainly. It is the preview blown up, not
@@ -249,6 +249,10 @@ export function FullSizeCheck({
                       ? (e) => { if (dragging.current) moveDivider(e.clientX); }
                       : undefined}
                     onPointerUp={split ? () => { dragging.current = false; } : undefined}
+                    onPointerCancel={split ? () => { dragging.current = false; } : undefined}
+                    {...(split && crop ? splitSliderProps(frac, setFrac,
+                      "Comparison divider — left is the preview, right is your real pixels; use the arrow keys to move it")
+                      : {})}
                   >
                     <img
                       data-testid="full-size-check-image"

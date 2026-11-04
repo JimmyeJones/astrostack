@@ -881,7 +881,12 @@ describe("EditorView", () => {
     await screen.findByRole("button", { name: "Hide split" });
     const original = await screen.findByAltText("original");
     expect((original as HTMLElement).style.clipPath).toBe("inset(0 50% 0 0)");
-    expect(screen.getByLabelText("split divider")).toBeInTheDocument();
+    const divider = screen.getByLabelText("split divider");
+    // The divider answers the keyboard, not only a drag.
+    expect(divider).toHaveAttribute("role", "slider");
+    fireEvent.keyDown(divider, { key: "ArrowLeft", shiftKey: true });
+    expect((original as HTMLElement).style.clipPath).toBe("inset(0 75% 0 0)");
+    expect(divider).toHaveAttribute("aria-valuenow", "25");
     // Split is its own mode: the plain Compare toggle is disabled while it's on.
     expect(screen.getByRole("button", { name: "Compare" })).toBeDisabled();
 

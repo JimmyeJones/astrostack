@@ -15,7 +15,7 @@ import { CalibrationBadge } from "../components/CalibrationBadge";
 import { RejectionBadge } from "../components/RejectionBadge";
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import { QueryError } from "../components/QueryError";
-import { splitClipLeft, splitFraction, splitLeftPct } from "../components/editor/splitCompare";
+import { splitClipLeft, splitFraction, splitLeftPct, splitSliderProps } from "../components/editor/splitCompare";
 import {
   NorthUpViewToggle, loadNorthUpView, saveNorthUpView,
 } from "../components/NorthUpViewToggle";
@@ -513,7 +513,9 @@ function Split(
         }}
         onPointerMove={(e) => { if (dragging.current) moveTo(e.clientX); }}
         onPointerUp={() => { dragging.current = false; }}
-        aria-label="Drag to reveal — left is A, right is B"
+        onPointerCancel={() => { dragging.current = false; }}
+        {...splitSliderProps(frac, setFrac,
+          "Drag to reveal — left is A, right is B")}
         style={{
           position: "relative", width: "100%",
           // On a placed pair the box is exactly the frame the SVG draws, so the
@@ -554,7 +556,7 @@ function Split(
           color="grape" variant="filled">B</Badge>
       </Box>
       <Text size="xs" c="dimmed">
-        Drag the divider — left is A, right is B.
+        Drag the divider — left is A, right is B. (Or click it and use the arrow keys.)
       </Text>
     </Stack>
   );

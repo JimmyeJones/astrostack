@@ -3,7 +3,7 @@ import { Box, Button, Group, Paper, Stack, Text, ThemeIcon } from "@mantine/core
 import { IconArrowsHorizontal, IconDownload, IconPhoto } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { splitClipLeft, splitFraction, splitLeftPct } from "./editor/splitCompare";
+import { splitClipLeft, splitFraction, splitLeftPct, splitSliderProps } from "./editor/splitCompare";
 import { noiseReductionBadge, noiseVsExpectedNote, oneFrameCaption } from "./oneFrameVsStack";
 
 /**
@@ -87,6 +87,9 @@ export function OneFrameVsStackCard({
               }}
               onPointerMove={(e) => { if (dragging.current) moveTo(e.clientX); }}
               onPointerUp={() => { dragging.current = false; }}
+              onPointerCancel={() => { dragging.current = false; }}
+              {...splitSliderProps(frac, setFrac,
+                "Comparison divider — left is one raw frame, right is your stack; use the arrow keys to move it")}
               style={{
                 position: "relative", width: "100%", maxHeight: 420,
                 overflow: "hidden", borderRadius: 6, cursor: "ew-resize",

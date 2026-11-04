@@ -362,6 +362,27 @@ describe("FullSizeCheck — compare with the preview", () => {
       .toBe("inset(0 25% 0 0)");
   });
 
+  it("moves the divider with the arrow keys — it was drag-only", async () => {
+    fireEvent.click(await open(WITH_FRACTIONS));
+    await screen.findByTestId("full-size-check-image");
+    fireEvent.click(screen.getByTestId("full-size-check-split-toggle"));
+    const box = screen.getByTestId("full-size-check-window");
+    expect(box).toHaveAttribute("role", "slider");
+    expect(box).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(box, { key: "ArrowRight", shiftKey: true });
+    expect(screen.getByTestId("full-size-check-split-divider").style.left).toBe("75%");
+    expect(box).toHaveAttribute("aria-valuenow", "75");
+    fireEvent.keyDown(box, { key: "Home" });
+    expect(screen.getByTestId("full-size-check-split-before").style.clipPath)
+      .toBe("inset(0 100% 0 0)");
+  });
+
+  it("is no slider while the comparison is off", async () => {
+    fireEvent.click(await open(WITH_FRACTIONS));
+    await screen.findByTestId("full-size-check-image");
+    expect(screen.getByTestId("full-size-check-window")).not.toHaveAttribute("role");
+  });
+
   it("can be turned back off", async () => {
     fireEvent.click(await open(WITH_FRACTIONS));
     await screen.findByTestId("full-size-check-image");

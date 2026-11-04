@@ -56,6 +56,23 @@ describe("OneFrameVsStackCard", () => {
       "Stacking your 505 subs cut the background noise about 15×.");
   });
 
+  it("moves its divider with the arrow keys, not only by dragging", async () => {
+    vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
+      available: true, n_frames: 505, sub_exposure_s: 30, integration_s: 15150,
+    });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: null });
+    renderCard("M_42", 7);
+    fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
+    const sub = await screen.findByAltText("A single raw sub");
+    const slider = screen.getByRole("slider", { name: /one raw frame/ });
+    expect(slider).toHaveAttribute("aria-valuenow", "50");
+    fireEvent.keyDown(slider, { key: "ArrowLeft" });
+    expect(slider).toHaveAttribute("aria-valuenow", "45");
+    expect((sub as HTMLElement).style.clipPath).toBe("inset(0 55% 0 0)");
+    fireEvent.keyDown(slider, { key: "End" });
+    expect((sub as HTMLElement).style.clipPath).toBe("inset(0 0% 0 0)");
+  });
+
   it("omits the noise badge when the ratio can't be measured", async () => {
     vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
       available: true, n_frames: 505, sub_exposure_s: 30, integration_s: 15150,
