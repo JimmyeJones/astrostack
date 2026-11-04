@@ -17,17 +17,18 @@ log and `SHIPPED.md`.
 **Gated, do not start:** the un-located-panel entry (second in Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
 re-litigate a stand-down that carries numbers. **Issue inbox:** #878, #880, #903, #1015 — all previously acted-on
-and owner-gated, none updated since 2026-10-12 (re-checked 2026-11-02).
+and owner-gated, none updated since 2026-10-12 (re-checked 2026-11-04).
 
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (3), 2026-11-03
-→ next sweep is (4).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (4), 2026-11-04
+→ next sweep is (1).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-11-04 (Scout, branch `claude/exciting-wozniak-9ddn2i`) — **QA rotation sweep (4), new angle: every GET route crawled on an owner-shaped install (subs read in place from `incoming/`, `copy_to_cache` off) with a byte/mtime snapshot of the whole data root before and after — CLEAN** (`incoming/` untouched; the only writes are first-call caches inside `library/`; a second crawl writes nothing at all, files or DB rows; 0 × 5xx). Inbox: the same four, owner-gated. Dogfood `--mosaic` CLEAN. Backlog: 14 closed stubs (236 lines) archived to `archive/IMPROVEMENTS-closed-stubs.md`. **START HERE NEXT RUN:** Builder: nothing ungated — dogfood `--mosaic --editor`; Scout: sweep (1) with a new angle.*
 *2026-11-04 (Builder, branch `claude/fervent-allen-mfjvsj`) — **v0.505.15: the full-size check's navigator moves with the arrow keys** (`loupe.nudgeSpot`; it was a focusable `role="button"` with only an `onClick`, so a keyboard user could not move the full-resolution window off the centre). Code read of the editor's widgets; suite 8567 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (4) with a new angle; Builder: nothing ungated — other focusable `role="button"`s (`OpList`, `ImagingCalendarCard`) are the same class, worth one read.*
 *2026-11-04 (Builder, branch `claude/fervent-allen-lsjgul`) — **v0.505.14: a tap on the crop rectangle is no longer an edit** (`cropDrag.cropDragCommitParams`; it re-rounded Auto's exact mosaic trim, moving the exported crop, and withdrew "What Auto did"; a cancelled drag now drops). Code read of the editor's drag widgets. **START HERE NEXT RUN:** Scout: sweep (4) with a new angle; Builder: the split dividers (`Editor.tsx` split, `FullSizeCheck`) also lack `onPointerCancel` — harmless (no commit), so only if touching them.*
 *2026-11-04 (Builder, branch `claude/fervent-allen-l0f4s3`) — **v0.505.13: a double-click on the Curves box's edge no longer adds a hidden second endpoint** (`curveDrag.insertCurvePoint`; on the right edge it greyed star cores). Found by a code read of the editor's drag widgets. **START HERE NEXT RUN:** Scout: sweep (4) with a new angle; Builder: nothing ungated — a code read of the other editor widgets (`cropDrag`, `FullSizeCheck` split) is the same class.*
@@ -37,7 +38,6 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-11-03 (Builder, branch `claude/fervent-allen-7cutrz`) — **v0.505.10: a macOS `._<name>.fit` sidecar in `incoming/` is no longer read as a sub** (`ingest.is_appledouble_sidecar`, shared by `find_fits_files` / `scan_and_organize` / `plan_incoming_units`; part (a) of the Scout's sweep (3) entry). Part (b), the `.recycle/` / `.Trash-*/` folder skip, stays open and owner-gated. Suite 8567 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (4) with a new angle; Builder: nothing ungated — dogfood `--mosaic --editor`.*
 *2026-11-03 (Scout, branch `claude/exciting-wozniak-bnak6b`) — **QA rotation sweep (3), new angle: junk a NAS share or desktop leaves in `incoming/` (`._*.fit`, `.recycle/`, `.Trash-*/`) — side effects CLEAN, one bug filed reproduced** (no walker skips a dot-name). Inbox: the same four, owner-gated. Dogfood `--mosaic` CLEAN. **START HERE NEXT RUN:** Builder: part (a) of that entry (ungated); Scout: sweep (4) with a new angle.*
 *2026-11-03 (Builder, branch `claude/fervent-allen-9aep51`) — **no app change: nothing ungated; two new-angle probes CLEAN** — a sub deleted from disk before its stack is skipped with a plain log line (7 of 8 stacked), and all 21 editor ops keep mosaic holes as holes at every parameter extreme. Suite 8557 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (3) with a new angle; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
-*2026-11-03 (Builder, branch `claude/fervent-allen-d02o0b`) — **no app change: nothing ungated; first-ever dogfood `--mosaic --big --deep --closing --incoming-lag --editor` CLEAN** (`[scale]` 0/16 moved, trim 7.9 % / 6.7 % full-size, the three Tonight cards agree, deep frames table windowed at 301 rows, three editor drives clean). Suite 8557 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (3) with a new angle; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
 
 ## Standing frontier
 

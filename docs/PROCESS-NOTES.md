@@ -1,5 +1,34 @@
 # Process notes & QA sweep records
 
+## 2026-11-04 (Scout, branch `claude/exciting-wozniak-9ddn2i`) — QA rotation sweep (4), new angle — every GET route against a byte/mtime snapshot of an owner-shaped data root (subs read in place from `incoming/`): CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8567 passed / 7 skipped on `8753ce87` (xdist `-n 4`, BLAS capped, 29m27s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (nothing overflowing, no console errors; the Target page's next-best-move, readiness,
+  panel-map and framing notes agree on the 2×2's thin top-right panel; heights on the standing baseline).
+- **Sweep (4).** The 2026-10-21 crawl read GET *answers*; none had asked what a GET *writes*. That matters twice over:
+  the observer is promised a read-only surface, and with `copy_to_cache` off every frame-reading GET opens a raw in
+  `incoming/` (§10). Probe (session scratchpad, not landed): the dogfood's mosaic + single-field data root copied,
+  its 27 subs moved into `incoming/M_42_mosaic_sub/` and `incoming/M_42/` with `frames.source_path` pointed there and
+  `cached_path` cleared (the owner's in-place shape); a real `python -m webapp.main` on it; `/openapi.json` → every
+  `/api` GET with real `{safe}` / `{run_id}` / `{frame_id}` (job, `{ip}`, `{year}`, SSE, archive/download skipped);
+  snapshot = every file's size + mtime_ns (+ sha1 under `incoming/` and of `config.json`) and a hash of every table
+  of every non-jobs SQLite, before and after. **First crawl:** 395 calls (15 routes skipped), 302 × 200, 79 × 404, 14 × 422, 0 × 5xx (the
+  404/422s are the deliberate answers the 10-21 record lists, plus run-less targets). `incoming/` byte-, mtime- and
+  listing-identical; `config.json` unchanged. The only new files are first-call caches inside `library/targets/*/`
+  (`cache/thumbs/web_*.png`, `output/master_fullres.cache`, `master_zoom.webp/.sig`); the DB diffs were the
+  watcher's boot scan running alongside (its job finished mid-crawl). **Second crawl, job idle:** the same 395
+  answers, **zero** file changes and **zero** DB-row changes — GETs are idempotent once their caches exist.
+- **Setup artefact, not a bug:** the boot scan made `M_42` / `M_42 (mosaic)` targets beside the two `Sample:` ones,
+  because the samples are not named after the folders the probe moved their subs into — a shape a real ingest cannot
+  produce. Not filed.
+- **Not run:** the same snapshot around the *mutating* routes (expected writes are the point there; a per-route
+  allow-list of what each may touch would be the next angle), and a non-root server against a share it cannot write.
+- **Backlog curation:** 14 struck-through stubs of entries already shipped or closed (each with its write-up in
+  `SHIPPED.md`) moved verbatim from the Ideas sections to `docs/archive/IMPROVEMENTS-closed-stubs.md` (236 lines).
+  The DECLINED stubs under "Needs owner sign-off" stay — they are the do-not-re-ask guards.
+- **Rotation: (4) done → next sweep is (1).**
+
 ## 2026-11-03 (Builder, branch `claude/fervent-allen-6hrl7o`) — nothing ungated to build; first-ever dogfood `--mosaic --dithered --big --deep --incoming-lag --editor` CLEAN.
 
 - **Suite:** 8567 passed / 7 skipped on `82c42196` (xdist `-n 4`, BLAS capped, 17m31s). No open PRs at start; inbox
