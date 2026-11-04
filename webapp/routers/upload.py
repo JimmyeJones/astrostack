@@ -49,7 +49,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from seestack.io.ingest import FITS_SUFFIXES
+from seestack.io.ingest import FITS_SUFFIXES, is_appledouble_sidecar
 from webapp import deps, pipeline
 
 router = APIRouter(tags=["upload"])
@@ -162,9 +162,26 @@ def safe_relpath(name: str) -> str | None:
     return "/".join(segments)
 
 
+def is_mac_metadata_name(name: str) -> bool:
+    """True for macOS's own bookkeeping files: an AppleDouble ``._<name>`` twin
+    (written beside every file copied onto a share) or anything under the
+    ``__MACOSX/`` folder its "Compress" adds to every zip.
+
+    They keep their twin's ``.fit`` suffix, and whatever this endpoint saves
+    lands in ``incoming/`` — the folder the app may never tidy (AGENTS.md §10)
+    — so they must be refused *before* a write. Judged on the client's own,
+    unflattened name: :func:`safe_relname` turns ``M31/._x.fit`` into
+    ``M31__._x.fit``, which the scanner's sidecar check no longer recognises.
+    """
+    segs = [s for s in name.replace("\\", "/").split("/") if s.strip()]
+    if not segs:
+        return False
+    return is_appledouble_sidecar(segs[-1].strip()) or "__MACOSX" in (s.strip() for s in segs)
+
+
 def is_fits_name(base: str) -> bool:
     """True when ``base`` is a FITS file the scanner would actually ingest."""
-    return Path(base).suffix.lower() in FITS_SUFFIXES
+    return Path(base).suffix.lower() in FITS_SUFFIXES and not is_mac_metadata_name(base)
 
 
 def is_zip_name(base: str) -> bool:
@@ -508,6 +525,11 @@ def extract_zip_to(zip_path: Path, dest_root: Path, *, archive_name: str) -> Zip
             if info.filename[:1] in ("/", "\\"):
                 n_unsafe += 1
                 continue
+            if is_mac_metadata_name(info.filename):
+                # macOS "Compress" bookkeeping (``__MACOSX/``, ``._*``): the
+                # archiver's, not the user's — left out without a word, the way
+                # the Mac's own unzip does.
+                continue
             rel = safe_relpath(info.filename)
             if rel is None:
                 n_unsafe += 1
@@ -709,6 +731,11 @@ async def upload_files(
             # sharing a basename across session subfolders don't collide onto one
             # destination and silently drop one (Seestar restarts per-session
             # frame numbering). Either way the result is traversal-safe.
+            if is_mac_metadata_name(upload.filename or ""):
+                rejected.append(RejectedFile(
+                    name=upload.filename or "(unnamed)",
+                    reason="a macOS sidecar file (._name), not a sub — left out"))
+                continue
             base = (safe_relpath(upload.filename or "") if preserve_folders
                     else safe_relname(upload.filename or ""))
             if base is None:

@@ -3153,6 +3153,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.19 **An upload never writes a macOS `._<name>.fit` sidecar or `__MACOSX/` entry into `incoming/` — a Mac-made zip wrote one junk twin per sub there (counted as saved; flattened, re-read as an unreadable sub)** (`upload.is_mac_metadata_name`, `UploadFits.isMacMetadataName`).
 - ✅ v0.505.18 **The editor's Presets menu asks before deleting a saved preset — one tap on the trash icon inside the row that applies it deleted the look for good, with no question and no message** (`PresetMenu` `deletePreset`; Enter in the save dialog now saves) — Builder code read. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.17 **Every split before/after divider (editor Split, full-size check, One frame vs your stack, Compare) moves with the arrow keys — they were drag-only, so a keyboard user only ever saw the 50 % split** (`splitCompare.nudgeSplit`, `splitSliderProps`, `onPointerCancel`) — Builder code read. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.16 **The imaging calendar's focused night answers Enter and Space — it was a keyboard-reachable button that did nothing when pressed** (`ImagingCalendarCard` `Cell` `onKeyDown`).
