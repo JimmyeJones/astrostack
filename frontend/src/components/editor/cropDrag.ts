@@ -84,12 +84,41 @@ export function cropFromParams(params: Record<string, unknown> | undefined | nul
   return { x0, y0, x1, y1 };
 }
 
-/** The crop as the op's four params, rounded to the sliders' own 0.01 step so a
- * dragged value and a typed one are the same kind of number (and the undo
- * history doesn't fill with 17-decimal noise). */
+/** The crop as the op's four params, rounded to a 0.001 step (a tenth of the
+ * sliders' own 0.01) so the undo history doesn't fill with 17-decimal noise. */
 export function cropToParams(crop: TrimCrop): Record<string, number> {
   const q = (v: number) => Math.round(clamp01(v) * 1000) / 1000;
   return { x0: q(crop.x0), y0: q(crop.y0), x1: q(crop.x1), y1: q(crop.y1) };
+}
+
+/** The params a finished drag should write, or `null` when it moved nothing.
+ *
+ * A press-and-release on the rectangle or a handle without moving it (a tap,
+ * a click, a finger's sub-quantum jitter) is not an edit, and must not write
+ * one. Writing it anyway cost three things on exactly the crop a beginner
+ * meets first, Auto's mosaic border trim — whose edges are full-precision
+ * fractions such as 0.0823: (a) every edge was re-rounded to {@link
+ * cropToParams}'s 0.001 step, so the crop the export applies *moved* (by up to
+ * six pixels on a 12,000 px canvas) from a tap; (b) the recipe changed, so the
+ * "What Auto did" note withdrew as if the user had edited; (c) a do-nothing
+ * Undo step was pushed and a mosaic-sized preview re-rendered.
+ *
+ * So: an edge counts as moved only when it shifted by at least half the stored
+ * step (smaller than that is not a value the op can hold differently), and an
+ * edge that did not move keeps its *exact* starting value — dragging the right
+ * edge leaves Auto's left, top and bottom edges bit-for-bit alone. Pure. */
+export function cropDragCommitParams(
+  start: TrimCrop,
+  end: TrimCrop,
+  params: Record<string, unknown> | undefined | null,
+): Record<string, unknown> | null {
+  const rounded = cropToParams(end);
+  const keys = ["x0", "y0", "x1", "y1"] as const;
+  const moved = keys.filter((k) => Math.abs(end[k] - start[k]) >= 0.0005);
+  if (moved.length === 0) return null;
+  const next: Record<string, unknown> = { ...(params ?? {}) };
+  for (const k of keys) next[k] = moved.includes(k) ? rounded[k] : start[k];
+  return next;
 }
 
 /** Where a pointer sits inside the preview image box, as a (0..1, 0..1)

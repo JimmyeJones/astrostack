@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   MIN_CROP_FRAC, FULL_CROP, applyCropDrag, bigCropNote, cropDragBlockedReason,
+  cropDragCommitParams,
   cropFromParams, cropHandlePositions, cropKeptLabel, cropToParams, existingCropUid,
   geometryOpReshapesFrame, isFullFrame,
   pointerFraction, type CropDragStart, type CropHandle,
@@ -50,6 +51,38 @@ describe("cropToParams", () => {
   it("round-trips through cropFromParams", () => {
     const c = { x0: 0.25, y0: 0.125, x1: 0.75, y1: 0.875 };
     expect(cropFromParams(cropToParams(c))).toEqual(c);
+  });
+});
+
+describe("cropDragCommitParams", () => {
+  // Auto's mosaic border trim writes full-precision fractions.
+  const auto = { x0: 0.0823456, y0: 0.0617, x1: 0.9134567, y1: 0.9456789 };
+
+  it("writes nothing for a press-and-release that moved nothing", () => {
+    const c = cropFromParams(auto);
+    expect(cropDragCommitParams(c, { ...c }, auto)).toBeNull();
+    // A zero-delta body "move" recomputes x1 as x0 + width, which is not
+    // bit-identical in floating point; that is still not an edit.
+    const start: CropDragStart = { handle: "move", crop: c, fx: 0.5, fy: 0.5 };
+    expect(cropDragCommitParams(c, applyCropDrag(start, 0.5, 0.5), auto)).toBeNull();
+    // Nor is a finger's jitter smaller than the stored step.
+    expect(cropDragCommitParams(c, { ...c, x1: c.x1 + 0.0003 }, auto)).toBeNull();
+  });
+
+  it("keeps the edges a drag did not touch exactly as they were", () => {
+    const c = cropFromParams(auto);
+    const start: CropDragStart = { handle: "e", crop: c, fx: c.x1, fy: 0.5 };
+    const next = cropDragCommitParams(c, applyCropDrag(start, 0.7, 0.5),
+                                      { ...auto, extra: "kept" });
+    expect(next).toEqual({ x0: 0.0823456, y0: 0.0617, x1: 0.7, y1: 0.9456789,
+                           extra: "kept" });
+  });
+
+  it("rounds every edge of a real slide, which moves them all", () => {
+    const c = cropFromParams(auto);
+    const start: CropDragStart = { handle: "move", crop: c, fx: 0.5, fy: 0.5 };
+    const next = cropDragCommitParams(c, applyCropDrag(start, 0.45, 0.5), auto);
+    expect(next).toMatchObject({ x0: 0.032, x1: 0.863, y0: 0.0617, y1: 0.9456789 });
   });
 });
 

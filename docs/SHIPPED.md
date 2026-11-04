@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## v0.505.14 — 2026-11-04 (Builder, branch `claude/fervent-allen-lsjgul`) — a tap on the crop rectangle is no longer an edit
+
+- **Editor bug (PRIORITY 1), found by reading `cropDrag` / the drag-to-crop handlers in `Editor.tsx` this run (the
+  lead v0.505.13's run log left); no backlog entry.** Releasing the pointer on the crop rectangle or a handle
+  always wrote `cropToParams(liveCrop)` back to the op — even when nothing had moved. Auto's mosaic border trim
+  writes full-precision fractions (`presets.py`, e.g. `x0 = 0.0823456`), so a mere tap **re-rounded every edge to
+  0.001**: the crop the export applies moved (up to ~6 px on a 12,000 px canvas), the recipe changed so the "What
+  Auto did" note withdrew, a do-nothing Undo step was pushed and a mosaic-sized preview re-rendered. A real drag of
+  one edge likewise re-rounded the three untouched edges. And with no `onPointerCancel`, a gesture the browser
+  took away (phone system swipe) left the dragged rectangle on screen although the op never received it.
+- **Fix:** `cropDrag.cropDragCommitParams(start, end, params)` — `null` when no edge moved by at least half the
+  stored step (so the handler writes nothing), otherwise only the moved edges are rounded and the rest keep their
+  exact starting values. `onPointerUp` uses it; a new `onPointerCancel` drops the drag without committing.
+- **Upgrade-safe (§9):** frontend only; no endpoint, config, schema, layout or default change.
+- **Tests:** +3 vitest on `cropDragCommitParams` (tap / zero-delta move / sub-step jitter → `null`; untouched edges
+  exact; a real slide rounds all four) and +2 Editor tests (a tap on the body and a handle leaves Undo disabled and
+  Auto's 8.23 % edge in place; a cancelled drag snaps back and a later hover cannot move it). **Fail-before:** with
+  the `Editor.tsx` fix reverted, both Editor tests are red.
+
 ## v0.505.13 — 2026-11-04 (Builder, branch `claude/fervent-allen-l0f4s3`) — a double-click on the Curves box's edge no longer makes a hidden second endpoint
 
 - **Editor bug (PRIORITY 1), found by reading `CurvesWidget` this run; no backlog entry.** "Double-click empty
