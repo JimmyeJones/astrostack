@@ -82,3 +82,31 @@ describe("CurvesWidget auto-contrast ghost", () => {
     expect(screen.queryByLabelText("auto contrast preview curve")).toBeNull();
   });
 });
+
+describe("CurvesWidget double-click to add", () => {
+  /** Lay the 220-unit viewBox out at 220 px so clientX/Y are viewBox units. */
+  function svgOf() {
+    const svg = document.querySelector("svg") as SVGSVGElement;
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 220, height: 220,
+      right: 220, bottom: 220, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    return svg;
+  }
+
+  it("adds an interior point where the user double-clicks", () => {
+    const { onChange } = setup([[0, 0], [1, 1]]);
+    fireEvent.doubleClick(svgOf(), { clientX: 110, clientY: 110 });
+    const [next, coalesce] = onChange.mock.calls[0];
+    expect(coalesce).toBe(false);
+    expect(next).toHaveLength(3);
+    expect(next[1][0]).toBeCloseTo(0.5, 6);
+  });
+
+  it("does not turn a double-click on the right padding into a new endpoint", () => {
+    const { onChange } = setup([[0, 0], [1, 1]]);
+    // x=216 is in the 10-unit padding right of the plot → clamps to x=1.
+    fireEvent.doubleClick(svgOf(), { clientX: 216, clientY: 120 });
+    const next = onChange.mock.calls[0][0] as Pt[];
+    expect(next[next.length - 1]).toEqual([1, 1]);
+    expect(next[1][0]).toBeLessThan(1);
+  });
+});

@@ -1,5 +1,26 @@
 # Shipped — the record
 
+## v0.505.13 — 2026-11-04 (Builder, branch `claude/fervent-allen-l0f4s3`) — a double-click on the Curves box's edge no longer makes a hidden second endpoint
+
+- **Editor bug (PRIORITY 1), found by reading `CurvesWidget` this run; no backlog entry.** "Double-click empty
+  space to add" appended the clicked point and re-sorted by x. The box has a 10-unit padding round the plot and
+  `fromSvg` clamps into [0, 1], so a double-click on the right padding (or the plot's very edge) added a second
+  point at **x = 1**; the stable sort put it *after* the old `[1, 1]` endpoint, so the new point became the locked
+  endpoint and the old one an interior handle stacked on top of it. The drawn curve gained a vertical drop at the
+  right edge, and the engine's piecewise-linear LUT (`tone._curves`, `np.interp` over `xs=[…, 1, 1]`) followed it:
+  input 1.0 → the new point's height (0.6 in the test case) while 0.996 → ~0.996, so **the brightest pixels — star
+  cores — went grey** from one stray double-click. The left padding did the same at x = 0 (a step at black).
+- **Fix:** `curveDrag.insertCurvePoint` — the inserted x is kept `MIN_GAP` inside both endpoints, it is spliced in
+  at its x-order position (never after the last endpoint), and a point landing within `MIN_GAP` of an existing one
+  is not added. `CurvesWidget.addPoint` uses it and skips `onChange` when nothing was added. Drag, keyboard, "add
+  point" and reset paths unchanged.
+- **Not changed:** the engine still renders an already-saved recipe exactly as before (a look saved with the
+  duplicate point keeps its output) — flipping saved-look output is a §9 behaviour change.
+- **Upgrade-safe (§9):** frontend only; no endpoint, config, schema, layout or default change.
+- **Tests:** +5 vitest on `insertCurvePoint` (interior insert, right/left padding, strictly increasing x, on top
+  of an existing point) and +2 on the widget's double-click. **Fail-before:** with the widget fix reverted, "does
+  not turn a double-click on the right padding into a new endpoint" is red.
+
 ## v0.505.12 — 2026-11-03 (Builder, branch `claude/fervent-allen-dlwmrz`) — the Tonight planner's target tables fit a phone
 
 - **Polish (UX & polish backlog, "Mobile layout polish"; the lead v0.505.11's run log left: other pages'

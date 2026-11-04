@@ -74,3 +74,24 @@ export function addCurvePointInLargestGap(pts: Pt[]): { points: Pt[]; index: num
   const points = [...base.slice(0, gi + 1), [mx, my] as Pt, ...base.slice(gi + 1)];
   return { points, index: gi + 1 };
 }
+
+/** Insert a point the user placed by double-clicking empty space, keeping the
+ * list a valid curve. The box has padding around the plot and `fromSvg` clamps
+ * into [0, 1], so a double-click on the padding (or the plot's very edge) used to
+ * add a second point at x=0 or x=1: the stable sort then put it *after* the old
+ * x=1 endpoint, so the new point silently became the locked endpoint and the
+ * old one an interior handle stacked on it, with a vertical jump in the drawn
+ * curve. The inserted x is kept {@link MIN_GAP} inside the endpoints, and a
+ * point landing within {@link MIN_GAP} of an existing one is not added at all
+ * (it would sit on that handle). Returns the new list and the inserted index,
+ * or `index: -1` with an unchanged copy when nothing was added. Pure. */
+export function insertCurvePoint(pts: Pt[], p: Pt): { points: Pt[]; index: number } {
+  const base = pts.length >= 2 ? pts : ([[0, 0], [1, 1]] as Pt[]);
+  const x = Math.min(1 - MIN_GAP, Math.max(MIN_GAP, p[0]));
+  const y = Math.min(1, Math.max(0, p[1]));
+  const copy = base.map((q) => [...q] as Pt);
+  if (base.some((q) => Math.abs(q[0] - x) < MIN_GAP)) return { points: copy, index: -1 };
+  let index = base.findIndex((q) => q[0] > x);
+  if (index <= 0) index = base.length - 1; // never before the x=0 endpoint
+  return { points: [...copy.slice(0, index), [x, y] as Pt, ...copy.slice(index)], index };
+}
