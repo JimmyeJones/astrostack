@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  addCurvePointInLargestGap, moveCurvePoint, MIN_GAP, nudgeCurvePoint,
+  addCurvePointInLargestGap, insertCurvePoint, moveCurvePoint, MIN_GAP, nudgeCurvePoint,
   removeCurvePoint, type Pt,
 } from "./curveDrag";
 
@@ -109,5 +109,45 @@ describe("addCurvePointInLargestGap (keyboard access)", () => {
     expect(index).toBe(1);
     expect(points[1][0]).toBeCloseTo(0.5, 6);
     expect(points[1][1]).toBeCloseTo(0.5, 6);
+  });
+});
+
+describe("insertCurvePoint (double-click to add)", () => {
+  it("inserts an interior point in x order", () => {
+    const { points, index } = insertCurvePoint([[0, 0], [0.5, 0.5], [1, 1]], [0.25, 0.4]);
+    expect(points).toEqual([[0, 0], [0.25, 0.4], [0.5, 0.5], [1, 1]]);
+    expect(index).toBe(1);
+  });
+
+  it("never adds a second endpoint at x=1 (a double-click on the right padding)", () => {
+    const { points, index } = insertCurvePoint([[0, 0], [1, 1]], [1, 0.6]);
+    // The old endpoint stays last and locked; the new point sits just inside it.
+    expect(points[points.length - 1]).toEqual([1, 1]);
+    expect(points).toHaveLength(3);
+    expect(index).toBe(1);
+    expect(points[1][0]).toBeCloseTo(1 - MIN_GAP, 9);
+    expect(points[1][1]).toBe(0.6);
+  });
+
+  it("never adds a second endpoint at x=0 (a double-click on the left padding)", () => {
+    const { points, index } = insertCurvePoint([[0, 0], [1, 1]], [0, 0.3]);
+    expect(points[0]).toEqual([0, 0]);
+    expect(index).toBe(1);
+    expect(points[1][0]).toBeCloseTo(MIN_GAP, 9);
+  });
+
+  it("keeps every x strictly increasing", () => {
+    for (const p of [[0, 0.2], [1, 0.9], [0.5, 0.1], [0.9995, 0.5]] as Pt[]) {
+      const { points } = insertCurvePoint([[0, 0], [0.5, 0.5], [1, 1]], p);
+      for (let j = 1; j < points.length; j++) expect(points[j][0]).toBeGreaterThan(points[j - 1][0]);
+    }
+  });
+
+  it("adds nothing on top of an existing point", () => {
+    const pts: Pt[] = [[0, 0], [0.5, 0.5], [1, 1]];
+    const { points, index } = insertCurvePoint(pts, [0.5, 0.9]);
+    expect(index).toBe(-1);
+    expect(points).toEqual(pts);
+    expect(points).not.toBe(pts);
   });
 });

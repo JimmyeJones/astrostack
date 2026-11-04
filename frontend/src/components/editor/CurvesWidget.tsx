@@ -2,7 +2,7 @@ import { Anchor, Box, Group, Text } from "@mantine/core";
 import { useRef } from "react";
 import type { Histogram } from "../../api/client";
 import {
-  addCurvePointInLargestGap, moveCurvePoint, nudgeCurvePoint, removeCurvePoint, type Pt,
+  addCurvePointInLargestGap, insertCurvePoint, moveCurvePoint, nudgeCurvePoint, removeCurvePoint, type Pt,
 } from "./curveDrag";
 
 // Keyboard nudge step for a focused curve point (Shift = coarse). Small enough
@@ -82,8 +82,10 @@ export function CurvesWidget({ points, onChange, histogram, ghost }: {
 
   const addPoint = (e: React.MouseEvent) => {
     if (drag.current != null) return;
-    const p = evtPt(e);
-    onChange([...pts, p].sort((a, b) => a[0] - b[0]) as Pt[], false);
+    // insertCurvePoint keeps the new point strictly between the endpoints, so a
+    // double-click on the box's padding can't add a second x=0 / x=1 endpoint.
+    const { points: next, index } = insertCurvePoint(pts, evtPt(e));
+    if (index >= 0) onChange(next, false);
   };
 
   const removePoint = (i: number) => {

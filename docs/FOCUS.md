@@ -7,7 +7,7 @@
 
 ## Front of the queue (2026-11-03)
 
-**No ungated bug is open.** Tonight's planner tables fit a phone as of v0.505.12 (stacked rows, like Calibration's v0.505.11). The `._*.fit` sidecar half of the Scout 2026-11-03 entry shipped as v0.505.10; its
+**No ungated bug is open.** A Curves double-click on the box's edge no longer makes a hidden endpoint (v0.505.13). Tonight's planner tables fit a phone as of v0.505.12 (stacked rows, like Calibration's v0.505.11). The `._*.fit` sidecar half of the Scout 2026-11-03 entry shipped as v0.505.10; its
 `.recycle/` / `.Trash-*/` half waits on the owner. A Builder should dogfood (`--mosaic --editor`) and file what it finds. The owner's ⭐
 colour-pattern entry is on HOLD for his per-temperature numbers; the dark ring waits on the S30's measured vignette.
 Recently closed: a one-target stack after a Combine shows its deeper picture (v0.505.9); "It's back" names the deepest
@@ -28,6 +28,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-11-04 (Builder, branch `claude/fervent-allen-l0f4s3`) — **v0.505.13: a double-click on the Curves box's edge no longer adds a hidden second endpoint** (`curveDrag.insertCurvePoint`; on the right edge it greyed star cores). Found by a code read of the editor's drag widgets. **START HERE NEXT RUN:** Scout: sweep (4) with a new angle; Builder: nothing ungated — a code read of the other editor widgets (`cropDrag`, `FullSizeCheck` split) is the same class.*
 *2026-11-03 (Builder, branch `claude/fervent-allen-dlwmrz`) — **v0.505.12: the Tonight planner's target tables fit a phone** (`TargetTable` / `TargetSummary` / `tonight.targetSpecsLine`; at 420 px the 520 px table hid the Moon and Score columns on the page read at the scope). Dogfood `--mosaic --editor` CLEAN; phone `/tonight` 3,521 px. The remaining scroll tables (Target frames grid, Nights card) are fine as they are. **START HERE NEXT RUN:** Scout: sweep (4) with a new angle; Builder: nothing ungated — dogfood and file what you find.*
 *2026-11-03 (Builder, branch `claude/fervent-allen-gsmulj`) — **v0.505.11: the Calibration page's masters list fits a phone** (`CalibrationView` / `masterSpecsLine`; at 420 px the 680 px table hid Exp/Gain/Temp/Size and the delete button off the right edge, which the overflow probe skips by design since it is a scroll container). Dogfood `--mosaic --calibration --combine` otherwise CLEAN. **START HERE NEXT RUN:** Scout: sweep (4) with a new angle; Builder: nothing ungated — a phone-width look at other pages' `Table.ScrollContainer`s is the same class.*
 *2026-11-03 (Builder, branch `claude/fervent-allen-6hrl7o`) — **no app change: nothing ungated; first-ever dogfood `--mosaic --dithered --big --deep --incoming-lag --editor` CLEAN** (`[scale]` 0/16 moved, trim 7.9 % / 6.7 % full-size, dithered 30.7 % against its 30.3 % apron, four editor drives clean, deep frames table windowed at 301 of 1,200 rows). Suite 8567 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (4) with a new angle; Builder: nothing ungated until the sensor-temperature or vignette gate is answered.*
