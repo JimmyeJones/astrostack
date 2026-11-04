@@ -15,17 +15,28 @@ import {
 // plus the .zip the server unpacks for us.
 const UPLOAD_ACCEPT = ".fit,.fits,.fts,.zip";
 
+/** True for the bookkeeping files macOS writes beside every file it copies
+ *  onto a share (``._Light_001.fit``) and into every zip it makes
+ *  (``__MACOSX/…``). They keep their twin's ``.fit`` name but are not subs, and
+ *  anything uploaded lands in ``incoming/``, which the app may never tidy — so
+ *  they are never sent (matches the server's ``is_mac_metadata_name``). Pure. */
+export function isMacMetadataName(name: string): boolean {
+  const segs = name.split(/[\\/]/).filter((s) => s !== "");
+  const base = segs[segs.length - 1] ?? "";
+  return base.startsWith("._") || segs.includes("__MACOSX");
+}
+
 /** True when the filename is one the server will accept — so we don't bother
  *  uploading a stray .txt/.jpg the user grabbed alongside their subs. */
 export function isFitsFilename(name: string): boolean {
-  return /\.(fit|fits|fts)$/i.test(name);
+  return /\.(fit|fits|fts)$/i.test(name) && !isMacMetadataName(name);
 }
 
 /** True for a ``.zip`` — the server unpacks it and keeps the folders inside, so
  *  "right-click → compress your Seestar folder" is one upload instead of
  *  thousands. */
 export function isZipFilename(name: string): boolean {
-  return /\.zip$/i.test(name);
+  return /\.zip$/i.test(name) && !isMacMetadataName(name);
 }
 
 /** Everything the server accepts: raw subs, or a zip of them. */

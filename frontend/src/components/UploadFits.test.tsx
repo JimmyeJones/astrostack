@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   UploadFits, collectDroppedFiles, filesFromFolderInput, folderPreserveNote,
-  isFitsFilename, isUploadableFilename, isZipFilename, pickedFolders,
+  isFitsFilename, isMacMetadataName, isUploadableFilename, isZipFilename, pickedFolders,
   pickedReadyLabel, readEntryFiles, uploadSummary,
   uploadProgressLabel, uploadProgressPercent, zipUnpackNote,
   type FsEntry,
@@ -81,6 +81,17 @@ describe("isFitsFilename", () => {
     expect(isFitsFilename("notes.txt")).toBe(false);
     expect(isFitsFilename("x.fit.gz")).toBe(false);
     expect(isFitsFilename("x")).toBe(false);
+  });
+  it("never sends a macOS sidecar, loose or inside a dropped folder", () => {
+    // macOS writes ``._<name>`` beside every file copied onto a share; it keeps
+    // the ``.fit`` suffix, and once uploaded it sits in incoming/ for good.
+    expect(isFitsFilename("._Light_001.fit")).toBe(false);
+    expect(isFitsFilename("M 31_sub/._Light_001.fit")).toBe(false);
+    expect(isFitsFilename("__MACOSX/M 31_sub/Light_001.fit")).toBe(false);
+    expect(isZipFilename("._seestar.zip")).toBe(false);
+    expect(isMacMetadataName("M 31_sub/Light_001.fit")).toBe(false);
+    // A dot elsewhere in the name is an ordinary sub.
+    expect(isFitsFilename("M 31_sub/Light_.001.fit")).toBe(true);
   });
 });
 
