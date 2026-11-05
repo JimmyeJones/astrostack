@@ -118,6 +118,19 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   with him; its result decides whether (1) needs one master per temperature range, like a matched dark. This
   line is replaced with the numbers when they arrive.
 
+- **🟡 MEASURED (Builder 2026-11-05, after v0.505.22) — the "Hold back highlights" severity falls with the
+  proxy step for a small core, so the nudge is still silent on the full-size dogfood twin.** *(Pillar: editor,
+  PRIORITY 1; severity low; confidence **measured**; ungated; size **M**.)* v0.505.22 fixed the size floor (the
+  twin's 24-proxy-px core now clears 13, was 46), but `_recoverable_flat_fraction` reads **0.042** on
+  `Sample_M42_mosaic_2_2_full_size` (step 2) against **0.176** for the same ≈ 91–96 native-px core on
+  `Sample_M42_mosaic_2_2` (step 1), under `_MIN_SEVERITY` 0.10. Cause: `_local_gradient` takes each pixel's
+  largest neighbour difference, so every core pixel next to the plateau's edge reads non-flat. A core of radius
+  `r/s` proxy px has a flat interior of about `(r/s − 1)²`, so a coarser proxy loses most of a small core.
+  Repro: `solve_highlight_protect` on both runs of a `--big --mosaic` data root, with a spy on
+  `_recoverable_flat_fraction`. **Fix shape (measure first):** judge the flat share on the core minus a one-pixel
+  rim on both proxies, or scale the rim with the step. Check that a core saturated at capture still stays silent
+  (`_MIN_SEVERITY`'s calibration) before shipping. Larger cores (his real ones, hundreds of native px) suffer less.
+
 - **🟡 (Scout 2026-11-03, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/` or `.Trash-*/` folder
   a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
   *(Pillar: trust — PRIORITY 2–3; size **S**; severity moderate *if* his share has a recycle bin or sees a desktop
