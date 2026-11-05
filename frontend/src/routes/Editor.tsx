@@ -1670,8 +1670,10 @@ export function EditorView() {
     restoreCoverageAfterTrim();
     // Select the crop op so its (adjustable) bounds are visible immediately — it's
     // a normal op the user can fine-tune or remove, not a baked-in change.
-    const crop = next.find((o) => o.id === "geometry.crop");
-    if (crop) setSelected(crop.uid);
+    // The crop that took the bounds (`applyTrimCrop` writes only that one) — not
+    // simply the first, which can be a disabled leftover.
+    const cropUid = existingCropUid(next);
+    if (cropUid) setSelected(cropUid);
     notifications.show({
       message: (kind === "recentre"
         ? `Re-centred on your target (${recentreKeptLabel(proposedCrop)})`

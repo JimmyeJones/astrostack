@@ -1,5 +1,26 @@
 # Shipped — the record
 
+## v0.505.21 — 2026-11-05 (Builder, branch `claude/fervent-allen-rammv4`) — a trim lands in one crop, not in every crop
+
+- **Bug (PRIORITY 1, the editor's controls), found by a code read of `mosaicTrim`; no backlog entry.** The
+  one-click "Trim border", "Re-trim border" and "Re-centre on your target" offers all go through
+  `applyTrimCrop`, which wrote the proposed bounds into **every** `geometry.crop` op in the recipe and switched each
+  one on. Crops compound — each is in fractions of what the one before it left (`cropCoverageFraction`,
+  `stale_crop.combined_crop_keep_fraction`) — and the header's Crop button already refuses to add a second one
+  for that reason (`existingCropUid`), but the Add menu can add one. On a mosaic with Auto's trim plus a framing
+  crop the beginner added by hand, a Re-trim cut the picture twice (a 90 % × 90 % trim kept 81 % × 81 %, off
+  centre) and **overwrote the user's own framing** with the trim; a disabled leftover crop was switched back on
+  and trimmed again too. The toast still said "keeps the central 90 % × 90 %".
+- **Fix:** the bounds go into the one crop `existingCropUid` picks — the first live crop, else the first leftover —
+  which is the crop that sees the whole canvas, as the server's crop re-aim (`pipeline` first-reshaping-crop rule)
+  already assumes. Every other crop is left exactly as it was. `applyProposedCrop` selects that same crop
+  afterwards instead of the first one found, which could be the disabled leftover.
+- **Upgrade-safe (§9):** frontend only; no config, schema, layout, default or API change. A one-crop recipe (every
+  recipe Auto writes) behaves exactly as before.
+- **Tests:** `mosaicTrim.test.ts` +2 (a two-crop recipe keeps the second crop's framing untouched; a disabled
+  leftover stays off with its own bounds while the live crop takes the trim) — **both fail on the old
+  `applyTrimCrop`** (checked).
+
 ## v0.505.20 — 2026-11-05 (Builder, branch `claude/fervent-allen-ptpf1h`) — Levels/Curves guides on the histogram they belong to
 
 - **Bug (PRIORITY 1, the editor's controls), found by a code read of the histogram guides; no backlog entry.**
