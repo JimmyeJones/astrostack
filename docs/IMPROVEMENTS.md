@@ -118,18 +118,25 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   with him; its result decides whether (1) needs one master per temperature range, like a matched dark. This
   line is replaced with the numbers when they arrive.
 
-- **🟡 MEASURED (Builder 2026-11-05, after v0.505.22) — the "Hold back highlights" severity falls with the
-  proxy step for a small core, so the nudge is still silent on the full-size dogfood twin.** *(Pillar: editor,
-  PRIORITY 1; severity low; confidence **measured**; ungated; size **M**.)* v0.505.22 fixed the size floor (the
-  twin's 24-proxy-px core now clears 13, was 46), but `_recoverable_flat_fraction` reads **0.042** on
-  `Sample_M42_mosaic_2_2_full_size` (step 2) against **0.176** for the same ≈ 91–96 native-px core on
-  `Sample_M42_mosaic_2_2` (step 1), under `_MIN_SEVERITY` 0.10. Cause: `_local_gradient` takes each pixel's
-  largest neighbour difference, so every core pixel next to the plateau's edge reads non-flat. A core of radius
-  `r/s` proxy px has a flat interior of about `(r/s − 1)²`, so a coarser proxy loses most of a small core.
-  Repro: `solve_highlight_protect` on both runs of a `--big --mosaic` data root, with a spy on
-  `_recoverable_flat_fraction`. **Fix shape (measure first):** judge the flat share on the core minus a one-pixel
-  rim on both proxies, or scale the rim with the step. Check that a core saturated at capture still stays silent
-  (`_MIN_SEVERITY`'s calibration) before shipping. Larger cores (his real ones, hundreds of native px) suffer less.
+- **🟡 MEASURED (Builder 2026-11-05, after v0.505.22; re-measured same day) — the "Hold back highlights" severity
+  drifts with the proxy step for a small core, in *both* directions, so the nudge is still silent on the full-size
+  dogfood twin.** *(Pillar: editor, PRIORITY 1; severity low; confidence **measured**; ungated; size **L**.)*
+  v0.505.22 fixed the size floor, but `_recoverable_flat_fraction` reads **0.042** on
+  `Sample_M42_mosaic_2_2_full_size` (step 2; 1 px of a 24-proxy-px core) against **0.176** on `Sample_M42_mosaic_2_2`
+  (step 1), under `_MIN_SEVERITY` 0.10. Cause: `_local_gradient` takes each pixel's largest neighbour difference, so
+  the score carries one-*proxy*-pixel rim effects whose share of the core grows with the step — the display core's
+  rim reads non-flat (pulls the score **down**), and a capture-saturated plateau's own rim reads "structured" (pushes
+  it **up**). Measured with the real `tone.stretch` at defaults on exponential cores (600×900, noise 5e-4, strided
+  like `build_proxy`): r=3 core 0.092 / 0.093 / 0.023 at steps 1/2/3; and **the reverse — a core clipped at capture
+  (amp 1.0, `min(…, 0.3)`, r=12) gets no button at step 1 but 0.05 / 0.30 / 0.50 at steps 2/3/4** (0.25-clip: none,
+  none, 0.15, 0.20). **Two fix shapes measured and rejected** (both inflate that saturated core past `_MIN_SEVERITY`
+  on a coarse proxy, i.e. they trade a silence for a false button): (a) scoring the core minus a one-pixel rim —
+  saturated case 0.065 / 0.143 / 0.212; (b) bilinear-upsampling a window round the core back to native and measuring
+  there — 0.06 / 0.208 / 0.243. **Next shape (L):** measure the core on a *native* crop of the linear stack
+  (stretch statistics taken from the proxy, applied to the crop), so the rim is one native pixel at every step; this
+  needs `tone.stretch` to accept pre-resolved statistics. Pin both directions (the small core and the
+  capture-saturated one) across steps 1–4 before shipping. Larger cores (his real ones, hundreds of native px)
+  drift much less (r=12: 0.506 / 0.494 / 0.503).
 
 - **🟡 (Scout 2026-11-03, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/` or `.Trash-*/` folder
   a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
