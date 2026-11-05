@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- `claude/fervent-allen-6fqsbn` — the "Hold back highlights" severity drifts with the proxy step (`highlights._recoverable_flat_fraction`): measuring the core on a native window (`suggest_highlight_protect(native_window=…)`).
+*No live claims.*
 
 ---
 
@@ -117,26 +117,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   "when it is cold". A per-sensor-temperature version of the diagnostic (`FrameRow.sensor_temp_c` bins) is
   with him; its result decides whether (1) needs one master per temperature range, like a matched dark. This
   line is replaced with the numbers when they arrive.
-
-- **🟡 MEASURED (Builder 2026-11-05, after v0.505.22; re-measured same day) — the "Hold back highlights" severity
-  drifts with the proxy step for a small core, in *both* directions, so the nudge is still silent on the full-size
-  dogfood twin.** *(Pillar: editor, PRIORITY 1; severity low; confidence **measured**; ungated; size **L**.)*
-  v0.505.22 fixed the size floor, but `_recoverable_flat_fraction` reads **0.042** on
-  `Sample_M42_mosaic_2_2_full_size` (step 2; 1 px of a 24-proxy-px core) against **0.176** on `Sample_M42_mosaic_2_2`
-  (step 1), under `_MIN_SEVERITY` 0.10. Cause: `_local_gradient` takes each pixel's largest neighbour difference, so
-  the score carries one-*proxy*-pixel rim effects whose share of the core grows with the step — the display core's
-  rim reads non-flat (pulls the score **down**), and a capture-saturated plateau's own rim reads "structured" (pushes
-  it **up**). Measured with the real `tone.stretch` at defaults on exponential cores (600×900, noise 5e-4, strided
-  like `build_proxy`): r=3 core 0.092 / 0.093 / 0.023 at steps 1/2/3; and **the reverse — a core clipped at capture
-  (amp 1.0, `min(…, 0.3)`, r=12) gets no button at step 1 but 0.05 / 0.30 / 0.50 at steps 2/3/4** (0.25-clip: none,
-  none, 0.15, 0.20). **Two fix shapes measured and rejected** (both inflate that saturated core past `_MIN_SEVERITY`
-  on a coarse proxy, i.e. they trade a silence for a false button): (a) scoring the core minus a one-pixel rim —
-  saturated case 0.065 / 0.143 / 0.212; (b) bilinear-upsampling a window round the core back to native and measuring
-  there — 0.06 / 0.208 / 0.243. **Next shape (L):** measure the core on a *native* crop of the linear stack
-  (stretch statistics taken from the proxy, applied to the crop), so the rim is one native pixel at every step; this
-  needs `tone.stretch` to accept pre-resolved statistics. Pin both directions (the small core and the
-  capture-saturated one) across steps 1–4 before shipping. Larger cores (his real ones, hundreds of native px)
-  drift much less (r=12: 0.506 / 0.494 / 0.503).
 
 - **🟡 (Scout 2026-11-03, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/` or `.Trash-*/` folder
   a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
@@ -3173,6 +3153,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.23 **The "Hold back highlights" severity no longer drifts with the editor proxy's step — the core the proxy finds is measured on a native window of the master, so a small core keeps its button on a bigger canvas and a core clipped at capture gets none** (`highlights.suggest_highlight_protect(native_window=…)`, `editor._highlight_native_window`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.22 **The "Hold back highlights" nudge no longer goes silent on a bigger mosaic canvas for the same blown core — its size floor was a share of the whole canvas, counted in proxy pixels; it is now one frame's share, counted in native pixels** (`highlights._min_core_area`, `measure_blown_core(frame_px=)`, `editor._run_frame_px`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.21 **"Trim border" / "Re-trim border" / "Re-centre" write their bounds into one crop, not every crop — a recipe with two crops (Auto's trim plus one added from the Add menu) was cut twice and lost the user's own framing** (`mosaicTrim.applyTrimCrop`, `cropDrag.existingCropUid`) — Builder code read. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.20 **The Levels B/W points and the Curves points are drawn on the histogram of the picture *entering* the op — they were drawn on the finished picture's, where Levels has already sent its black point to 0, so "B" sat over faint data that is not black and disagreed with the dashed suggestion** (`tonalHistView`, `api.opInputHistogram`, `editor.op_input_histogram`) — Builder code read. Full entry in [`SHIPPED.md`](SHIPPED.md).
