@@ -49,6 +49,37 @@ describe("applyTrimCrop", () => {
     expect(out[0].params).toMatchObject(crop);
   });
 
+  // Two crops compound — the second one's fractions are of the first one's
+  // output — and the Add menu can add a second. The proposal is in fractions of
+  // the whole canvas, so it belongs in the crop that sees the whole canvas; writing
+  // it into every crop cut the picture twice and overwrote the user's own framing.
+  it("writes the bounds into one crop only when the recipe has two", () => {
+    const framing = { x0: 0.3, y0: 0.3, x1: 0.7, y1: 0.7 };
+    const ops: OpInstance[] = [
+      { uid: "auto", id: "geometry.crop", enabled: true,
+        params: { x0: 0.01, y0: 0.01, x1: 0.99, y1: 0.99 } },
+      { uid: "mine", id: "geometry.crop", enabled: true, params: { ...framing } },
+    ];
+    const out = applyTrimCrop(ops, crop, specs, makeUid);
+    expect(out).toHaveLength(2);
+    expect(out[0].params).toMatchObject(crop);
+    expect(out[1].params).toEqual(framing);   // the user's framing is untouched
+    expect(out[1].enabled).toBe(true);
+  });
+
+  it("prefers the live crop over a disabled leftover, and leaves the leftover off", () => {
+    const leftover = { x0: 0.4, y0: 0.4, x1: 0.6, y1: 0.6 };
+    const ops: OpInstance[] = [
+      { uid: "old", id: "geometry.crop", enabled: false, params: { ...leftover } },
+      { uid: "live", id: "geometry.crop", enabled: true,
+        params: { x0: 0, y0: 0, x1: 1, y1: 1 } },
+    ];
+    const out = applyTrimCrop(ops, crop, specs, makeUid);
+    expect(out[0]).toEqual(ops[0]);            // still off, still its own bounds
+    expect(out[1].params).toMatchObject(crop);
+    expect(cropCoverageFraction(out)).toBeCloseTo(0.6 * 0.8, 10);
+  });
+
   it("does not mutate the input array", () => {
     const ops: OpInstance[] = [
       { uid: "a", id: "tone.stretch", enabled: true, params: {} },

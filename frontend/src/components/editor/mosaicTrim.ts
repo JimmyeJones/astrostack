@@ -1,4 +1,5 @@
 import type { EditOp, OpInstance } from "../../api/client";
+import { existingCropUid } from "./cropDrag";
 import { insertOnCorrectSide } from "./stageConflicts";
 
 /** Fractional (0..1) crop rectangle for the largest well-covered mosaic area. */
@@ -211,7 +212,15 @@ export function trimKeptLabel(crop: TrimCrop): string {
  * one-click "trim the ragged mosaic border" action. If a crop op already exists
  * it's updated in place and enabled (so re-trimming never stacks duplicate crops);
  * otherwise a fresh crop op is inserted on the correct side of the stretch. Pure:
- * returns a new ops array and never mutates the input. */
+ * returns a new ops array and never mutates the input.
+ *
+ * Only **one** crop takes the bounds — the one the header's Crop button re-opens
+ * (`existingCropUid`: the first live crop, else the first leftover). Crops
+ * compound, each in fractions of what the one before it left, and the bounds are
+ * fractions of the whole canvas, so they belong in the first. Writing them into
+ * every crop (as this did) cut a two-crop recipe twice — a 90 % trim kept 81 % —
+ * and overwrote a framing crop the user added from the Add menu, while switching
+ * a disabled leftover back on. Any other crop is left exactly as it was. */
 export function applyTrimCrop(
   ops: OpInstance[],
   crop: TrimCrop,
@@ -219,9 +228,10 @@ export function applyTrimCrop(
   makeUid: () => string,
 ): OpInstance[] {
   const bounds = { x0: crop.x0, y0: crop.y0, x1: crop.x1, y1: crop.y1 };
-  if (ops.some((o) => o.id === "geometry.crop")) {
+  const target = existingCropUid(ops);
+  if (target !== null) {
     return ops.map((o) =>
-      o.id === "geometry.crop"
+      o.uid === target
         ? { ...o, enabled: true, params: { ...o.params, ...bounds } }
         : o,
     );
