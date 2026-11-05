@@ -1,5 +1,18 @@
 # Process notes & QA sweep records
 
+## 2026-11-05 (Builder, branch `claude/fervent-allen-nq37cj`) — one measured bug filed; dogfood `--big --mosaic --editor` otherwise CLEAN.
+
+- **Dogfood `--build --big --mosaic --editor`:** `[scale]` 0 of 16 canvas-independent answers moved; mosaic trim
+  7.9 %; the three editor drives re-render every op; the full-size check opens with its caveat; nothing
+  overflowing, no console errors.
+- **The one thing it did show:** "What Auto-process did" on the 2×2 offers *"Hold back highlights (0.05)"*, and on
+  its full-size twin it does not. Re-measured by calling `solve_highlight_protect` on both runs with a spy on
+  `measure_blown_core`: the same core is 91 px against a floor of 53 on the 2×2, and 24 proxy px (≈96 native)
+  against 46 on the full-size one. Filed in Bugs with the fix shape; not built this run (size M; needs a
+  per-frame pixel count threaded in from the frames table).
+- **Code read, nothing to file:** `stars._reduce` / `_boost_nebula`, `starmask.star_mask`, `background.py`,
+  `levels.py`, `tone._curves`, `_recipe_before_uid` / `op_input_histogram`, `blownCore.blownCoreStretchOp`.
+
 ## 2026-11-05 (Builder, branch `claude/fervent-allen-1b4gnh`) — nothing ungated to build; dogfood `--mosaic --editor` CLEAN.
 
 - **Suite:** 8574 passed / 7 skipped on `0a124315` (xdist `-n 4`, BLAS capped, 21m03s). No open PRs at start.

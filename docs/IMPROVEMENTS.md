@@ -118,6 +118,29 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   with him; its result decides whether (1) needs one master per temperature range, like a matched dark. This
   line is replaced with the numbers when they arrive.
 
+- **🟡 MEASURED (Builder 2026-11-05, read off a `--big --mosaic --editor` dogfood pass) — the "Hold back
+  highlights" nudge goes silent on a bigger mosaic canvas for the *same* blown core: `measure_blown_core`'s
+  area floor scales with the whole canvas and is counted in proxy pixels.** *(Pillar: editor, PRIORITY 1;
+  severity low–medium — the nudge and the passive record an auto-edit stamps are advisory, but they go quiet on
+  exactly his large mosaics; confidence **measured**; ungated; size **M**.)* The scale-pair samples (same sky,
+  same plate scale, same star catalogue) disagree: `Sample_M42_mosaic_2_2` (907×615 proxy, step 1) finds a
+  **91 px** core against a floor of 53 and offers *"Hold back highlights (0.05)"*. `…_full_size` (847×575
+  proxy, step 2) finds the same core as **24 proxy px (≈ 96 native)** against a floor of **46 proxy px**
+  (≈ 184 native) and returns `None`. Repro: `solve_highlight_protect(pdir, run, build_auto_recipe_for_run(...))`
+  on both runs of a `--big --mosaic` data root, with a spy printing `_largest_bright_component`'s area and
+  `max(_MIN_CORE_PX, int(_MIN_CORE_AREA_FRAC * n_covered))`. **Two causes:** (a) `_MIN_CORE_AREA_FRAC ×
+  n_covered` is a share of the *whole canvas*, so a canvas that catches 3.5× the sky raises the floor for the
+  same object — the whole-target-vs-per-panel trap (AGENTS.md sweep (2)); v0.502.x's per-native-pixel gradient
+  fix flagged this exact line as "not measured as biting" — now it is. (b) The core area and both floors are
+  in proxy pixels, so a step-`s` proxy sees the core at 1/s² while `_MIN_CORE_PX` stays fixed. **Fix shape:**
+  pass `proxy_scale` (already threaded in) and one *frame's* native pixel count (from the run's frames — the
+  run row carries no frame dims), and compare in native pixels: `core·s² ≥ max(_MIN_CORE_PX, FRAC ×
+  min(n_covered·s², frame_px))`. A single S30 field (one frame ≈ the canvas) must stay byte-for-byte; a
+  scale-1 test image is unchanged. **Do not just lower the constants** — the floor is what keeps a saturated
+  star from being called a core (a capture-saturated star is also caught by the linear-structure test, but
+  that is the second guard, not the first). Regression test: the same synthetic core on a one-frame canvas
+  and on a 2×2-frame canvas strided ×2 gets the same verdict (fails today).
+
 - **🟡 (Scout 2026-11-03, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/` or `.Trash-*/` folder
   a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
   *(Pillar: trust — PRIORITY 2–3; size **S**; severity moderate *if* his share has a recycle bin or sees a desktop
