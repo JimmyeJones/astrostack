@@ -208,9 +208,28 @@ def _strength_grid() -> list[float]:
     return [v for v in param_grid("tone.stretch", "highlights") if v > 0.0]
 
 
+def _linear_reference(linear: np.ndarray) -> tuple[float, float, float | None] | None:
+    """``(lo, hi, sigma)`` the linear-structure test is normalised by.
+
+    The linear image's own robust range (0.5–99.5th percentile of luminance) and
+    its grain in those units. Taken from the **whole picture**: a native window
+    round the core is dominated by the core, so measuring there would change the
+    yardstick along with the grid. ``None`` when the image has no range.
+    """
+    lin = as_rgb(np.asarray(linear, dtype=np.float32))
+    lum_l = luminance(lin)
+    lo = float(np.nanpercentile(lum_l, 0.5))
+    hi = float(np.nanpercentile(lum_l, 99.5))
+    if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
+        return None
+    return lo, hi, estimate_noise_sigma(lin)
+
+
 def measure_blown_core(display: np.ndarray, linear: np.ndarray,
                        proxy_scale: float = 1.0,
                        frame_px: float | None = None,
+                       *, reference: tuple[float, float, float | None] | None = None,
+                       min_area: float | None = None,
                        ) -> tuple[np.ndarray, np.ndarray, int] | None:
     """``(core_mask, linear_has_structure, core_px)`` for the largest blown core.
 
@@ -220,7 +239,10 @@ def measure_blown_core(display: np.ndarray, linear: np.ndarray,
     editor proxy's step), so gradients are judged per native pixel and the size
     floor is counted in native pixels. ``frame_px`` is one sub's footprint in
     canvas pixels, so a mosaic's floor is one frame's, not the whole canvas's
-    (:func:`_min_core_area`). ``None``
+    (:func:`_min_core_area`). ``reference`` is :func:`_linear_reference` of the
+    whole picture, for a caller measuring a *window* of it, and ``min_area``
+    replaces the size floor there (the window was chosen round a core that has
+    already passed it). ``None``
     means there is nothing to work with — no bright core at all, or one too
     small to be anything but a star.
     """
@@ -238,20 +260,20 @@ def measure_blown_core(display: np.ndarray, linear: np.ndarray,
     if found is None:
         return None
     core, area = found
-    if area < _min_core_area(n_covered, proxy_scale, frame_px):
+    floor = (_min_core_area(n_covered, proxy_scale, frame_px)
+             if min_area is None else float(min_area))
+    if area < floor:
         return None
 
     # Structure in linear: normalize to the linear image's own robust range so
     # the threshold is comparable across gains/exposures, then call a gradient
     # "real" only when it clears a quarter of the measured grain. A core flat
     # here too was saturated at capture — nothing for the knob to recover.
-    lum_l = luminance(lin)
-    lo = float(np.nanpercentile(lum_l, 0.5))
-    hi = float(np.nanpercentile(lum_l, 99.5))
-    if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
+    ref = _linear_reference(lin) if reference is None else reference
+    if ref is None:
         return None
-    norm_l = (lum_l - lo) / (hi - lo)
-    sigma = estimate_noise_sigma(lin)
+    lo, hi, sigma = ref
+    norm_l = (luminance(lin) - lo) / (hi - lo)
     tol = max(_FLAT_EPS, _LINEAR_STRUCTURE_SIGMA * sigma) if sigma else _FLAT_EPS
     return core, _per_native_px(_local_gradient(norm_l), proxy_scale) > tol, area
 
@@ -265,36 +287,57 @@ def _recoverable_flat_fraction(display: np.ndarray, core: np.ndarray,
     return float(np.count_nonzero(core & flat & linear_has_structure)) / float(area)
 
 
-def suggest_highlight_protect(
-    linear: np.ndarray,
-    restretch: Callable[[float], np.ndarray],
-    proxy_scale: float = 1.0,
-    frame_px: float | None = None,
-) -> BlownCore | None:
-    """Solve the "Hold back highlights" strength for the caller's own stretch.
+#: A native window round the core is read only when the proxy is decimated and
+#: the core is small enough for its rim to matter; a window bigger than this per
+#: side means a big core, whose proxy measurement already holds (r=12: 0.506 /
+#: 0.494 / 0.503 at steps 1/2/3), and is the same bound the full-size check reads.
+_NATIVE_WINDOW_MAX_PX = 1024
 
-    ``restretch(p)`` must render ``linear`` through the stretch the user has
-    configured with ``highlights=p`` — so the value returned is solved against
-    the very op that will draw it. ``proxy_scale`` is the editor proxy's step
-    (``EditContext.proxy_scale``): pass it so a decimated proxy is judged on
-    the export's scale and the same core gets the same answer at any step.
-    ``frame_px`` is one sub's footprint in canvas pixels (``None`` = unknown):
-    pass it so a mosaic's core is held to a single field's size floor rather
-    than one that grows with the canvas. Returns ``None`` when there is no recoverable
-    blown core: no bright core at all, one too small to be anything but a star,
-    one barely clipped, one already saturated in the linear data, or one the
-    knob can't meaningfully reopen even at full strength.
+#: Sky kept round the core's bounding box in the native window, in proxy pixels
+#: (at least; half the core's own extent when that is more), so the rim and the
+#: shoulder outside it are measured with their real neighbours.
+_NATIVE_WINDOW_PAD = 4
 
-    The search is a bisection over the op's own slider steps, which is sound
-    because more protection can only pull the shoulder in further — the flat
-    share is monotone non-increasing in the strength.
+#: ``native_window(y0, x0, h, w)`` — that rectangle of the picture in **source**
+#: (full-resolution) pixels, as ``(linear, restretch)``: the image the stretch
+#: receives there, and a function rendering it through the caller's stretch at a
+#: given ``highlights`` with the *whole picture's* fitted statistics. ``None`` when
+#: the window can't be rendered faithfully, and the proxy measurement stands.
+NativeWindow = Callable[[int, int, int, int],
+                        "tuple[np.ndarray, Callable[[float], np.ndarray]] | None"]
+
+_UNANSWERED = object()
+
+
+def _native_window_bounds(core: np.ndarray, proxy_scale: float,
+                          ) -> tuple[int, int, int, int] | None:
+    """``(y0, x0, h, w)`` in source pixels round the proxy core's bounding box,
+    or ``None`` when that window would be bigger than :data:`_NATIVE_WINDOW_MAX_PX`.
+
+    Proxy pixel ``(r, c)`` is source pixel ``(r·s, c·s)`` (``build_proxy``
+    strides from the origin), so the window holds every core pixel the proxy saw.
+    It is not clamped to the canvas here: the caller knows the canvas.
     """
-    base = restretch(0.0)
-    measured = measure_blown_core(base, linear, proxy_scale, frame_px)
-    if measured is None:
+    rows = np.flatnonzero(core.any(axis=1))
+    cols = np.flatnonzero(core.any(axis=0))
+    if rows.size == 0 or cols.size == 0:
         return None
-    core, linear_has_structure, area = measured
+    s = int(round(proxy_scale))
+    ext = max(int(rows[-1] - rows[0]), int(cols[-1] - cols[0])) + 1
+    pad = max(_NATIVE_WINDOW_PAD, ext // 2)
+    y0 = max(0, int(rows[0]) - pad) * s
+    x0 = max(0, int(cols[0]) - pad) * s
+    y1 = (int(rows[-1]) + 1 + pad) * s
+    x1 = (int(cols[-1]) + 1 + pad) * s
+    if max(y1 - y0, x1 - x0) > _NATIVE_WINDOW_MAX_PX:
+        return None
+    return y0, x0, y1 - y0, x1 - x0
 
+
+def _solve(base: np.ndarray, restretch: Callable[[float], np.ndarray],
+           core: np.ndarray, linear_has_structure: np.ndarray, area: int,
+           proxy_scale: float, core_px: int) -> BlownCore | None:
+    """The severity gate and the strength search, on one grid."""
     def flat_at(p: float) -> float:
         return _recoverable_flat_fraction(
             restretch(p), core, linear_has_structure, area, proxy_scale)
@@ -323,4 +366,101 @@ def suggest_highlight_protect(
                 hi = mid - 1
             else:
                 lo = mid + 1
-    return BlownCore(strength=strength, flat_fraction=round(severity, 3), core_px=area)
+    return BlownCore(strength=strength, flat_fraction=round(severity, 3), core_px=core_px)
+
+
+def _solve_on_native_window(core: np.ndarray, linear: np.ndarray,
+                            proxy_scale: float, native_window: NativeWindow,
+                            grain_ratio: float | None, core_px: int):
+    """The suggestion measured on a native window round the proxy's core, or
+    :data:`_UNANSWERED` when no window can be had (the proxy answer stands).
+
+    Why a window and not the proxy. Every per-pixel test here reads a pixel's
+    largest neighbour difference, so the core's *rim* — one pixel wide on any
+    grid — is scored on the grid's own terms, and on a step-``s`` proxy that rim
+    is ``s`` native pixels wide while the core is ``1/s²`` of its area. Measured
+    on exponential cores through the real stretch: a small recoverable core read
+    0.092 / 0.093 / 0.023 / 0.000 at steps 1–4 (the button went silent on a
+    bigger canvas), and a core clipped at capture read 0.060 / 0.120 / 0.164 /
+    0.188 (a false button that grew with it). Both are the same effect, and
+    cutting the rim off or upsampling the proxy each traded one for the other.
+    On the source grid the rim is one native pixel at every step, so the answer
+    is the export's own.
+
+    The yardstick is carried from the whole picture: the linear range from
+    ``linear`` (the proxy), its grain put back on the source grid by
+    ``grain_ratio`` (``seestack.edit.proxy.source_grain_ratio``; ``None`` leaves
+    the proxy's σ, which can only call *less* structure), and the stretch's
+    statistics by the caller's ``native_window``.
+    """
+    bounds = _native_window_bounds(core, proxy_scale)
+    if bounds is None:
+        return _UNANSWERED
+    try:
+        got = native_window(*bounds)
+    except (OSError, ValueError, MemoryError):
+        return _UNANSWERED
+    if got is None:
+        return _UNANSWERED
+    lin_w, restretch_w = got
+    ref = _linear_reference(linear)
+    if ref is None:
+        return _UNANSWERED
+    lo, hi, sigma = ref
+    if (sigma is not None and grain_ratio is not None
+            and np.isfinite(grain_ratio) and grain_ratio > 0):
+        sigma = float(sigma * grain_ratio)
+    base_w = restretch_w(0.0)
+    measured = measure_blown_core(base_w, lin_w, 1.0, reference=(lo, hi, sigma),
+                                  min_area=1)
+    if measured is None:
+        return _UNANSWERED
+    core_w, structure_w, area_w = measured
+    return _solve(base_w, restretch_w, core_w, structure_w, area_w, 1.0, core_px)
+
+
+def suggest_highlight_protect(
+    linear: np.ndarray,
+    restretch: Callable[[float], np.ndarray],
+    proxy_scale: float = 1.0,
+    frame_px: float | None = None,
+    native_window: NativeWindow | None = None,
+    grain_ratio: float | None = None,
+) -> BlownCore | None:
+    """Solve the "Hold back highlights" strength for the caller's own stretch.
+
+    ``restretch(p)`` must render ``linear`` through the stretch the user has
+    configured with ``highlights=p`` — so the value returned is solved against
+    the very op that will draw it. ``proxy_scale`` is the editor proxy's step
+    (``EditContext.proxy_scale``): pass it so a decimated proxy is judged on
+    the export's scale and the same core gets the same answer at any step.
+    ``frame_px`` is one sub's footprint in canvas pixels (``None`` = unknown):
+    pass it so a mosaic's core is held to a single field's size floor rather
+    than one that grows with the canvas. ``native_window`` (see
+    :data:`NativeWindow`) lets a decimated proxy's core be measured on the
+    source grid, where its rim is one native pixel at any step
+    (:func:`_solve_on_native_window`); ``grain_ratio`` puts the proxy's grain on
+    that grid. Without one — or when the window can't be had — the proxy
+    answers, as it always has. Returns ``None`` when there is no recoverable
+    blown core: no bright core at all, one too small to be anything but a star,
+    one barely clipped, one already saturated in the linear data, or one the
+    knob can't meaningfully reopen even at full strength.
+
+    *Whether* there is a core worth a word (the size floor) is always decided on
+    the proxy, against the whole picture; the window only measures it. The
+    search is a bisection over the op's own slider steps, which is sound
+    because more protection can only pull the shoulder in further — the flat
+    share is monotone non-increasing in the strength.
+    """
+    base = restretch(0.0)
+    measured = measure_blown_core(base, linear, proxy_scale, frame_px)
+    if measured is None:
+        return None
+    core, linear_has_structure, area = measured
+    scale = float(proxy_scale)
+    if native_window is not None and np.isfinite(scale) and scale > 1.0:
+        refined = _solve_on_native_window(core, linear, scale, native_window,
+                                          grain_ratio, area)
+        if refined is not _UNANSWERED:
+            return refined
+    return _solve(base, restretch, core, linear_has_structure, area, proxy_scale, area)

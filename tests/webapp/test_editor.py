@@ -3842,10 +3842,10 @@ def test_highlight_suggestion_passes_one_frames_footprint(
     captured = {}
     real_suggest = hl_mod.suggest_highlight_protect
 
-    def _spy(linear, restretch, proxy_scale=1.0, frame_px=None):
+    def _spy(linear, restretch, proxy_scale=1.0, frame_px=None, **kw):
         captured["frame_px"] = frame_px
         return real_suggest(linear, restretch, proxy_scale=proxy_scale,
-                            frame_px=frame_px)
+                            frame_px=frame_px, **kw)
 
     monkeypatch.setattr(hl_mod, "suggest_highlight_protect", _spy)
     q = _enc({"ops": [{"id": "tone.stretch", "uid": "s1", "params": {}}]})
@@ -3947,6 +3947,113 @@ def test_highlight_solver_without_a_uid_uses_the_recipes_own_stretch(
     assert seen, "the recipe's stretch op should have been re-run to solve the knob"
     assert all(p["mode"] == "asinh" and p["stretch"] == 0.7 and p["black"] == 0.2
                for p in seen)
+
+
+def _blown_core_master(data_root, safe, basename, h, w, rc, amp, clip=None):
+    """A run whose master is one exponential core on a soft disk, ``h × w``
+    native px (past ``PROXY_MAX_PX`` it is strided), and ``(project_dir, run)``."""
+    rid = _make_run(data_root, safe, basename=basename, h=8, w=8)
+    project_dir, run = _run_and_dir(data_root, safe, rid)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    r = np.hypot(yy - h / 2, xx - w / 2)
+    rng = np.random.default_rng(0)
+    img = (0.05 + 0.02 * np.exp(-r / 100.0) + amp * np.exp(-r / rc)
+           + rng.normal(0.0, 0.0005, (h, w)))
+    if clip is not None:
+        img = np.minimum(img, clip)
+    fits.writeto(run.fits_path, np.repeat(img.astype("float32")[None], 3, axis=0),
+                 overwrite=True)
+    return project_dir, run
+
+
+def _solve_with_and_without_window(monkeypatch, project_dir, run, rec):
+    import webapp.routers.editor as editor_mod
+
+    with_window = editor_mod.solve_highlight_protect(project_dir, run, rec)
+    with monkeypatch.context() as m:
+        m.setattr(editor_mod, "_highlight_native_window", lambda *a, **k: None)
+        proxy_only = editor_mod.solve_highlight_protect(project_dir, run, rec)
+    return with_window, proxy_only
+
+
+def test_highlight_solver_measures_a_decimated_core_on_the_master(
+        client, solved_library, monkeypatch):
+    """On a strided proxy the core's one-pixel rim is ``step`` native pixels
+    wide, so a partly capture-clipped core read as more recoverable than it is
+    (0.31 at step 3 against 0.22 on the master's own grid) and the button grew
+    with the canvas. The solver now measures the proxy's core on a native window
+    of the master (rendered like the full-size check), and reads what the
+    export's grid reads."""
+    from seestack.edit import highlights as hl
+    from seestack.edit.proxy import PROXY_MAX_PX, _load_fits_rgb
+    from seestack.edit.recipe import recipe_from_dict
+    from seestack.edit.registry import EditContext, get_op
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    h = 2 * PROXY_MAX_PX + 100                       # strided by 3
+    project_dir, run = _blown_core_master(solved_library, safe, "hilite_clip",
+                                          h=h, w=900, rc=12, amp=1.0, clip=0.1)
+    rec = recipe_from_dict({"ops": [
+        {"id": "tone.stretch", "uid": "s1", "params": {}}]})
+    with_window, proxy_only = _solve_with_and_without_window(
+        monkeypatch, project_dir, run, rec)
+
+    native = _load_fits_rgb(run.fits_path)
+    spec = get_op("tone.stretch")
+    params = dict(spec.defaults())
+    ctx = EditContext()
+    truth = hl.suggest_highlight_protect(
+        native, lambda p: spec.apply(native, {**params, "highlights": p}, ctx))
+    assert truth is not None and proxy_only is not None and with_window is not None
+    # The fixture shows the bug: the proxy alone overstates the severity.
+    assert proxy_only.flat_fraction - truth.flat_fraction > 0.05
+    assert with_window.flat_fraction == pytest.approx(truth.flat_fraction, abs=0.01)
+    assert with_window.core_px == proxy_only.core_px   # still the proxy's core size
+
+
+def test_highlight_solver_keeps_a_small_cores_button_on_a_decimated_proxy(
+        client, solved_library, monkeypatch):
+    from seestack.edit.proxy import PROXY_MAX_PX
+    from seestack.edit.recipe import recipe_from_dict
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    h = 3 * PROXY_MAX_PX + 100                       # strided by 4
+    project_dir, run = _blown_core_master(solved_library, safe, "hilite_small",
+                                          h=h, w=900, rc=4, amp=0.3)
+    rec = recipe_from_dict({"ops": [
+        {"id": "tone.stretch", "uid": "s1", "params": {"mode": "stf"}}]})
+    with_window, proxy_only = _solve_with_and_without_window(
+        monkeypatch, project_dir, run, rec)
+    assert proxy_only is None, "the fixture must show the proxy going silent"
+    assert with_window is not None and with_window.strength > 0
+
+
+def test_highlight_solver_keeps_the_proxy_answer_behind_a_crop(
+        client, solved_library, monkeypatch):
+    """A geometry op ahead of the Stretch moves the proxy off the master's grid,
+    so the window is declined (as the full-size check declines) and the master
+    is not read for it."""
+    import webapp.routers.editor as editor_mod
+    from seestack.edit import proxy as proxy_mod
+    from seestack.edit.proxy import PROXY_MAX_PX
+    from seestack.edit.recipe import recipe_from_dict
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    project_dir, run = _blown_core_master(solved_library, safe, "hilite_crop",
+                                          h=PROXY_MAX_PX + 100, w=600, rc=12,
+                                          amp=0.3)
+    rec = recipe_from_dict({"ops": [
+        {"id": "geometry.crop", "uid": "c1",
+         "params": {"x0": 0.1, "y0": 0.1, "x1": 0.9, "y1": 0.9}},
+        {"id": "tone.stretch", "uid": "s1", "params": {"mode": "stf"}}]})
+    seen = []
+    monkeypatch.setattr(editor_mod, "_auto_measure_grain_ratio",
+                        lambda *a, **k: 1.0)
+    monkeypatch.setattr(proxy_mod, "read_window_rgb",
+                        lambda *a, **k: seen.append(a) or (_ for _ in ()).throw(
+                            AssertionError("window read behind a crop")))
+    editor_mod.solve_highlight_protect(project_dir, run, rec)
+    assert seen == []
 
 
 def test_auto_edit_records_what_the_highlight_button_would_say(
