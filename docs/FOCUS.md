@@ -5,9 +5,9 @@
 > belongs in `docs/PROCESS-NOTES.md`, never here. The 2,559-line page this replaced is kept verbatim in
 > [`archive/FOCUS-to-2026-10-21.md`](archive/FOCUS-to-2026-10-21.md) — nothing was deleted.
 
-## Front of the queue (2026-11-04)
+## Front of the queue (2026-11-05)
 
-**No ungated bug is open.** The Levels/Curves histogram guides sit on the op's own input histogram (v0.505.20). Every split before/after divider answers the arrow keys (v0.505.17). The imaging calendar's night answers Enter/Space (v0.505.16). The full-size check's navigator answers the arrow keys (v0.505.15). A tap on the crop rectangle no longer re-rounds Auto's trim (v0.505.14). A Curves double-click on the box's edge no longer makes a hidden endpoint (v0.505.13). Tonight's planner tables fit a phone as of v0.505.12 (stacked rows, like Calibration's v0.505.11). The `._*.fit` sidecar half of the Scout 2026-11-03 entry shipped as v0.505.10; its
+**No ungated bug is open.** A trim lands in one crop, not every crop (v0.505.21). The Levels/Curves histogram guides sit on the op's own input histogram (v0.505.20). Every split before/after divider answers the arrow keys (v0.505.17). The imaging calendar's night answers Enter/Space (v0.505.16). The full-size check's navigator answers the arrow keys (v0.505.15). A tap on the crop rectangle no longer re-rounds Auto's trim (v0.505.14). A Curves double-click on the box's edge no longer makes a hidden endpoint (v0.505.13). Tonight's planner tables fit a phone as of v0.505.12 (stacked rows, like Calibration's v0.505.11). The `._*.fit` sidecar half of the Scout 2026-11-03 entry shipped as v0.505.10; its
 `.recycle/` / `.Trash-*/` half waits on the owner. A Builder should dogfood (`--mosaic --editor`) and file what it finds. The owner's ⭐
 colour-pattern entry is on HOLD for his per-temperature numbers; the dark ring waits on the S30's measured vignette.
 Recently closed: a one-target stack after a Combine shows its deeper picture (v0.505.9); "It's back" names the deepest
@@ -17,17 +17,18 @@ log and `SHIPPED.md`.
 **Gated, do not start:** the un-located-panel entry (second in Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
 re-litigate a stand-down that carries numbers. **Issue inbox:** #878, #880, #903, #1015 — all previously acted-on
-and owner-gated, none updated since 2026-10-12 (re-checked 2026-11-04).
+and owner-gated, none updated since 2026-10-12 (re-checked 2026-11-05).
 
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (4), 2026-11-04
-→ next sweep is (1).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (1), 2026-11-05
+→ next sweep is (2).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-11-05 (Scout, branch `claude/exciting-wozniak-djc6th`) — **QA rotation sweep (1), new angle: the keepsake matte and nameplate on a native North-up turn of a trimmed auto-edit vs its stored-preview twin — CLEAN** (card aspect ≤ 0.002, caption bar ≤ 0.002 of the frame, at 30°, −71° and 12° on mosaic-size canvases). Inbox: the same four, owner-gated. Dogfood `--mosaic` CLEAN. Suite 8574 passed / 7 skipped. **START HERE NEXT RUN:** Builder: nothing ungated — dogfood `--mosaic --editor`; Scout: sweep (2) with a new angle.*
 *2026-11-05 (Builder, branch `claude/fervent-allen-rammv4`) — **v0.505.21: Trim / Re-trim / Re-centre write their bounds into one crop** (`mosaicTrim.applyTrimCrop`; it wrote them into every `geometry.crop`, so a recipe with a second crop from the Add menu was cut twice and lost its framing). Suite 8574 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (1) with a new angle; Builder: nothing ungated.*
 *2026-11-05 (Builder, branch `claude/fervent-allen-1b4gnh`) — **no app change: nothing ungated; dogfood `--mosaic --editor` CLEAN** (both editor drives: 21 ops re-render, Undo/Redo, Auto-process notes and the taste chips answer; mosaic trim 7.9 %; nothing overflowing, no console errors). Code read of `stageConflicts`, `coverageLeveling`, `recentreCrop`, `savedLookCrop`, `pollJob`, `previewDebounce`, `geometry.py`, `tone._levels`: nothing to file. Suite 8574 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (1) with a new angle; Builder: nothing ungated until an owner gate is answered.*
 *2026-11-05 (Builder, branch `claude/fervent-allen-ptpf1h`) — **v0.505.20: the Levels B/W and Curves guides are drawn on the histogram of the picture *entering* the op** (`tonalHistView`, `editor.op_input_histogram`; they sat on the finished picture's histogram, where Levels has already moved its black point to 0). **START HERE NEXT RUN:** Scout: sweep (1) with a new angle; Builder: nothing ungated — other editor captions that read the finished histogram (`clippingCaption`, sky cast) are correct by design.*
@@ -37,7 +38,6 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-11-04 (Builder, branch `claude/fervent-allen-sxqaq7`) — **v0.505.17: every split before/after divider moves with the arrow keys** (`splitCompare.nudgeSplit` / `splitSliderProps`; the editor's Split, the full-size check, One frame vs your stack and Compare were drag-only and not focusable). Dogfood `--mosaic --editor` CLEAN as far as it ran (the editor drive was cut off by the run's own 10-min timeout after all 21 ops re-rendered). **START HERE NEXT RUN:** Scout: sweep (1) with a new angle; Builder: nothing ungated — dogfood `--mosaic --editor` with a longer timeout.*
 *2026-11-04 (Scout, branch `claude/exciting-wozniak-9ddn2i`) — **QA rotation sweep (4), new angle: every GET route crawled on an owner-shaped install (subs read in place from `incoming/`, `copy_to_cache` off) with a byte/mtime snapshot of the whole data root before and after — CLEAN** (`incoming/` untouched; the only writes are first-call caches inside `library/`; a second crawl writes nothing at all, files or DB rows; 0 × 5xx). Inbox: the same four, owner-gated. Dogfood `--mosaic` CLEAN. Backlog: 14 closed stubs (236 lines) archived to `archive/IMPROVEMENTS-closed-stubs.md`. **START HERE NEXT RUN:** Builder: nothing ungated — dogfood `--mosaic --editor`; Scout: sweep (1) with a new angle.*
 *2026-11-04 (Builder, branch `claude/fervent-allen-pist1v`) — **v0.505.16: the imaging calendar's focused night answers Enter/Space** (`ImagingCalendarCard` `Cell`; Tab landed on a `role="button"` that ignored both keys). Read of every focusable `role="button"`: `OpList`, `HintIcon`, `HintAnchor` already handle the keys. **START HERE NEXT RUN:** Scout: sweep (4) with a new angle; Builder: nothing ungated — dogfood `--mosaic --editor`.*
-*2026-11-04 (Builder, branch `claude/fervent-allen-mfjvsj`) — **v0.505.15: the full-size check's navigator moves with the arrow keys** (`loupe.nudgeSpot`; it was a focusable `role="button"` with only an `onClick`, so a keyboard user could not move the full-resolution window off the centre). Code read of the editor's widgets; suite 8567 passed / 7 skipped. **START HERE NEXT RUN:** Scout: sweep (4) with a new angle; Builder: nothing ungated — other focusable `role="button"`s (`OpList`, `ImagingCalendarCard`) are the same class, worth one read.*
 
 ## Standing frontier
 
