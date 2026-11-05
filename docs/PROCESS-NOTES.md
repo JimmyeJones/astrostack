@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-11-05 (Builder, branch `claude/fervent-allen-6qs7s9`) — nothing ungated; dogfood `--mosaic --editor --big` CLEAN; v0.505.23 confirmed end to end.
+
+- **Suite:** 8590 passed / 7 skipped on `27614d51` (xdist `-n 4`, BLAS capped, 18m30s). Every Bugs entry is gated
+  or carries a stand-down; the Features section holds only gated or declined ideas.
+- **Dogfood `--mosaic --editor --big`:** `[scale]` 0 of 16 canvas-independent answers moved; mosaic trim 7.9 %
+  (7 % on the full-size twin); the single-field, mosaic and full-size editor drives re-render all 21 ops, Undo/Redo
+  apply, the full-size check opens, follows the navigator and hugs its window; taste chips answer; nothing
+  overflowing, no console errors. Target / Dashboard / Tonight paragraphs agree on each target. The full-size
+  twin's "Nicely framed" against the 2×2's "bigger than this mosaic" is honest: the pair shares a plate scale, not a
+  sensor, so the bigger panels cover more sky.
+- **v0.505.23 seen in the browser:** the full-size twin's "What Auto-process did" now offers *Hold back highlights
+  (0.05)*, the same as the 2×2 — the run before v0.505.22/23 recorded it silent there.
+- **Trap hit:** a backgrounded dogfood with `timeout: 600000` is killed at that limit mid editor drive (the
+  `page.waitForTimeout … browser has been closed` trace is the kill, not a bug). Give it the 3,600,000 ms limit.
+- **Code read, nothing to file:** `opModified`, `levelsReset`, `suggestionMatch`, `curveMatch`, `starMaskSize`
+  (defaults agree with `stars.py`), `clipping.clippingCaption`, `histogram.compute_histogram` (NaN skipped), the
+  v0.505.23 `_highlight_native_window` path.
+
 ## 2026-11-05 (Builder, branch `claude/fervent-allen-lfctn2`) — measure-first on the "Hold back highlights" proxy-step entry; no app change, entry re-sized L.
 
 - Took the one ungated Bugs entry. Its fix shape said "measure first", and the measurement stopped the fix. Scratch
