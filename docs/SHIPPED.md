@@ -1,5 +1,62 @@
 # Shipped — the record
 
+## v0.505.23 — 2026-11-05 (Builder, branch `claude/fervent-allen-6fqsbn`) — the "Hold back highlights" core is measured on the master's own grid
+
+- **Bug (PRIORITY 1, the editor), the Builder 2026-11-05 measured entry (verbatim below).** On a decimated proxy
+  the severity `_recoverable_flat_fraction` drifted with the step in both directions: every per-pixel test reads a
+  pixel's largest neighbour difference, so the core's rim (one pixel on any grid) is `step` native pixels wide on
+  the proxy while the core is `1/step²` of its area. A small recoverable core faded and went silent on a bigger
+  canvas, and a core clipped at capture got a false button that grew with it.
+- **Fix:** `highlights.suggest_highlight_protect(native_window=…, grain_ratio=…)`. The proxy still decides
+  *whether* there is a core worth a word (the size floor, against the whole picture). When the proxy is decimated,
+  the solver then *measures* that core on a native window round its bounding box (`_native_window_bounds`: pad
+  ≥ 4 proxy px or half the core's extent, at most `_NATIVE_WINDOW_MAX_PX` = 1024 per side; past that the core is
+  big and the proxy answer stands). The yardstick comes from the whole picture: the linear range from the proxy
+  (`_linear_reference`), the grain put on the source grid by `source_grain_ratio`, and the stretch's statistics
+  frozen. `webapp.routers.editor._highlight_native_window` renders the window the way the full-size check does
+  (`read_window_rgb`, frozen fits and sky fields, geometry off). It declines, so the proxy answer stands, behind a
+  reshaping geometry op ahead of the Stretch or an op whose window render is not the picture's. Any failure to read
+  the window also leaves the proxy answer. `core_px` stays the proxy's measured size, so the API shape is unchanged.
+- **Measured** (exponential cores, 600×900, through the real `tone.stretch` defaults, steps 1/2/3/4), proxy → window:
+  small core rc=4: 0.15 / 0.10 / 0.15 / *none* → 0.15 at every step; rc=6: 0.35 / 0.25 / 0.20 / 0.15 → 0.35 / 0.35 /
+  0.35 / 0.30; rc=12: 0.40 / 0.35 / 0.35 / 0.30 → 0.40 everywhere; a core clipped at capture (amp 1.0, clip 0.3):
+  none / 0.05 / 0.30 / 0.50 → none everywhere; clip 0.25: none / none / 0.15 / 0.20 → none everywhere. On a tall
+  step-3 master with a partly clipped core the severity reads 0.31 on the proxy, 0.22 on the full native image and
+  0.219 through the window. One more thing came out of the measurements: switching the gradient to a one-sided
+  (plateau-aware) difference fixes the small-core direction but not the clipped one. A ring thinner than one proxy
+  pixel still rounds up to a whole proxy pixel, so only a native measurement fixes both.
+- **Upgrade-safe (§9):** no config, schema, layout, default or API-shape change. New optional trailing keywords
+  on `suggest_highlight_protect`, `measure_blown_core` (`reference`, `min_area`). An undecimated proxy (every
+  single field at step 1) never reads the window and is byte-for-byte the old answer.
+- **Tests:** `test_highlight_suggestion.py` +6 (the clipped core silent at steps 2–4, the small core keeping its
+  native strength, the bigger core steady, the window holding the core and asked only when decimated, the proxy
+  answer when the window refuses or raises, the window cap). `tests/webapp/test_editor.py` +3 (a strided master
+  reads the native severity, a small core keeps its button at step 4, a crop ahead of the Stretch never reads the
+  master). The six behavioural tests **fail with the window path disabled**, checked in a scratch worktree, and
+  each fixture also asserts the proxy-only bug it guards against.
+- **Dogfood scale pair, measured after the fix** (both samples stacked, Auto recipe, `solve_highlight_protect`): the step-1 2×2 is unchanged at "Hold back highlights (0.05)", severity 0.174; its full-size step-2 twin goes from **nothing** (proxy only) to **0.05, severity 0.189**.
+- Original entry:
+
+  - **🟡 MEASURED (Builder 2026-11-05, after v0.505.22; re-measured same day) — the "Hold back highlights" severity
+    drifts with the proxy step for a small core, in *both* directions, so the nudge is still silent on the full-size
+    dogfood twin.** *(Pillar: editor, PRIORITY 1; severity low; confidence **measured**; ungated; size **L**.)*
+    v0.505.22 fixed the size floor, but `_recoverable_flat_fraction` reads **0.042** on
+    `Sample_M42_mosaic_2_2_full_size` (step 2; 1 px of a 24-proxy-px core) against **0.176** on `Sample_M42_mosaic_2_2`
+    (step 1), under `_MIN_SEVERITY` 0.10. Cause: `_local_gradient` takes each pixel's largest neighbour difference, so
+    the score carries one-*proxy*-pixel rim effects whose share of the core grows with the step — the display core's
+    rim reads non-flat (pulls the score **down**), and a capture-saturated plateau's own rim reads "structured" (pushes
+    it **up**). Measured with the real `tone.stretch` at defaults on exponential cores (600×900, noise 5e-4, strided
+    like `build_proxy`): r=3 core 0.092 / 0.093 / 0.023 at steps 1/2/3; and **the reverse — a core clipped at capture
+    (amp 1.0, `min(…, 0.3)`, r=12) gets no button at step 1 but 0.05 / 0.30 / 0.50 at steps 2/3/4** (0.25-clip: none,
+    none, 0.15, 0.20). **Two fix shapes measured and rejected** (both inflate that saturated core past `_MIN_SEVERITY`
+    on a coarse proxy, i.e. they trade a silence for a false button): (a) scoring the core minus a one-pixel rim —
+    saturated case 0.065 / 0.143 / 0.212; (b) bilinear-upsampling a window round the core back to native and measuring
+    there — 0.06 / 0.208 / 0.243. **Next shape (L):** measure the core on a *native* crop of the linear stack
+    (stretch statistics taken from the proxy, applied to the crop), so the rim is one native pixel at every step; this
+    needs `tone.stretch` to accept pre-resolved statistics. Pin both directions (the small core and the
+    capture-saturated one) across steps 1–4 before shipping. Larger cores (his real ones, hundreds of native px)
+    drift much less (r=12: 0.506 / 0.494 / 0.503).
+
 ## v0.505.22 — 2026-11-05 (Builder, branch `claude/fervent-allen-qlw3h6`) — the "Hold back highlights" size floor is one frame's, in native pixels
 
 - **Bug (PRIORITY 1, the editor), the Builder 2026-11-05 measured entry (verbatim below).** `measure_blown_core`

@@ -337,3 +337,138 @@ def test_min_core_area_counts_native_pixels_on_a_proxy():
     assert hl._min_core_area(1000, 2.0, None) == hl._MIN_CORE_PX / 4
     # Garbage in is the unscaled, whole-canvas floor.
     assert hl._min_core_area(540_000, float("nan"), float("nan")) == 54
+
+
+# --- the core's rim on a decimated proxy (Builder 2026-11-05, after v0.505.22) --
+#
+# Every per-pixel test reads a pixel's largest neighbour difference, so a core's
+# rim is scored on the grid's own terms: one proxy pixel is ``step`` native ones,
+# while the core shrinks to ``1/step²`` of its area. Measured through the real
+# stretch, a small recoverable core faded (0.184 / 0.150 / 0.130 / silent at
+# steps 1–4) and a core clipped at capture grew a false button (silent / 0.12 /
+# 0.164 / 0.188). The fix measures the proxy's core on a *native window*.
+
+
+def _rim_case(rc, amp=0.3, clip=None, noise=0.0005):
+    """``suggest(step, window=True)`` for an exponential core of scale ``rc``
+    native px; ``clip`` saturates the linear data (a core lost at capture)."""
+    from seestack.edit.registry import EditContext, as_rgb, get_op
+    from seestack.render.thumbnail import measure_stretch_stats
+
+    h, w = 600, 900
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    r = np.hypot(yy - h / 2, xx - w / 2)
+    rng = np.random.default_rng(0)
+    img = (0.05 + 0.02 * np.exp(-r / 100.0) + amp * np.exp(-r / rc)
+           + rng.normal(0.0, noise, (h, w)))
+    if clip is not None:
+        img = np.minimum(img, clip)
+    img = np.repeat(img.astype(np.float32)[..., None], 3, axis=2)
+    spec = get_op("tone.stretch")
+    params = dict(spec.defaults())
+    calls: list[tuple[int, int, int, int]] = []
+
+    def suggest(step, window=True):
+        lin = np.ascontiguousarray(img[::step, ::step])   # build_proxy's decimation
+        ctx = EditContext(proxy_scale=float(step), is_proxy=step > 1)
+        stats = measure_stretch_stats(as_rgb(lin))
+
+        def native_window(y0, x0, wh, ww):
+            calls.append((y0, x0, wh, ww))
+            win = np.ascontiguousarray(img[y0:y0 + wh, x0:x0 + ww])
+            wctx = EditContext(frozen_fits={"stretch_stats": stats})
+            return win, lambda p: spec.apply(win, {**params, "highlights": p}, wctx)
+
+        return hl.suggest_highlight_protect(
+            lin, lambda p: spec.apply(lin, {**params, "highlights": p}, ctx),
+            proxy_scale=float(step), native_window=native_window if window else None)
+
+    suggest.calls = calls
+    return suggest
+
+
+def test_a_core_clipped_at_capture_gets_no_button_at_any_proxy_step():
+    """No promise of a rescue the data can't give, however coarse the proxy."""
+    suggest = _rim_case(rc=12, amp=1.0, clip=0.3)
+    assert suggest(1) is None
+    # The fixture shows the bug: measured on the step-3 proxy alone, the clipped
+    # plateau's rim reads as "structure" and a button appears.
+    assert suggest(3, window=False) is not None
+    for step in (2, 3, 4):
+        assert suggest(step) is None, f"false button at proxy step {step}"
+
+
+def test_a_small_core_keeps_its_native_answer_at_every_proxy_step():
+    """The same small core gets the native button at steps 2–4, where the proxy
+    alone weakened it and then went silent."""
+    suggest = _rim_case(rc=4)
+    native = suggest(1)
+    assert native is not None
+    assert suggest(4, window=False) is None     # the fixture shows the bug
+    for step in (2, 3, 4):
+        found = suggest(step)
+        assert found is not None, f"no suggestion at proxy step {step}"
+        assert found.strength == native.strength, (step, found, native)
+        assert found.flat_fraction == pytest.approx(native.flat_fraction, abs=0.01)
+
+
+def test_a_bigger_core_is_steadier_on_the_native_window_too():
+    suggest = _rim_case(rc=12)
+    native = suggest(1)
+    for step in (2, 3, 4):
+        assert suggest(step).strength == native.strength, step
+
+
+def test_the_window_holds_the_core_and_is_asked_only_on_a_decimated_proxy():
+    suggest = _rim_case(rc=6)
+    suggest(1)
+    assert suggest.calls == []                   # step 1 is already native
+    suggest(3)
+    (y0, x0, wh, ww), = suggest.calls
+    assert y0 % 3 == 0 and x0 % 3 == 0           # proxy pixels are source pixels
+    assert y0 < 300 < y0 + wh and x0 < 450 < x0 + ww
+    assert max(wh, ww) <= hl._NATIVE_WINDOW_MAX_PX
+
+
+def test_no_window_leaves_the_proxy_answer():
+    """A caller that can't render the window (``None``, or it raises an I/O
+    error) gets exactly the proxy's answer, as before the window existed."""
+    suggest = _rim_case(rc=12)
+    proxy_only = suggest(3, window=False)
+    from seestack.edit.registry import EditContext, get_op
+
+    spec = get_op("tone.stretch")
+    params = dict(spec.defaults())
+    h, w = 600, 900
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    r = np.hypot(yy - h / 2, xx - w / 2)
+    rng = np.random.default_rng(0)
+    img = (0.05 + 0.02 * np.exp(-r / 100.0) + 0.3 * np.exp(-r / 12)
+           + rng.normal(0.0, 0.0005, (h, w)))
+    lin = np.repeat(img.astype(np.float32)[..., None], 3, axis=2)[::3, ::3].copy()
+    ctx = EditContext(proxy_scale=3.0, is_proxy=True)
+
+    def restretch(p):
+        return spec.apply(lin, {**params, "highlights": p}, ctx)
+
+    def refuses(*_a):
+        return None
+
+    def breaks(*_a):
+        raise OSError("gone")
+
+    for nw in (refuses, breaks):
+        assert hl.suggest_highlight_protect(lin, restretch, proxy_scale=3.0,
+                                            native_window=nw) == proxy_only
+
+
+def test_a_big_core_measures_on_the_proxy():
+    """Past the window cap the core is big, its rim a small share, and the
+    proxy's answer holds — the window is not read."""
+    core = np.zeros((400, 400), dtype=bool)
+    core[10:390, 10:390] = True
+    assert hl._native_window_bounds(core, 4.0) is None
+    small = np.zeros((400, 400), dtype=bool)
+    small[100:110, 200:215] = True
+    assert hl._native_window_bounds(small, 4.0) == ((100 - 7) * 4, (200 - 7) * 4,
+                                                    (10 + 14) * 4, (15 + 14) * 4)

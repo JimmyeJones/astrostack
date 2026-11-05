@@ -50,7 +50,7 @@ from seestack.edit.proxy import (
     load_frame_coverage,
 )
 from seestack.edit.recipe import Recipe, preview_crop_of_recipe, recipe_from_dict
-from seestack.edit.registry import EditContext, get_op, snap_to_param
+from seestack.edit.registry import EditContext, as_rgb, get_op, snap_to_param
 from seestack.stack.output import pack_unit
 from seestack.edit import auto_prefs as auto_prefs_mod
 from seestack.edit import presets as presets_mod
@@ -2015,8 +2015,10 @@ def solve_highlight_protect(project_dir: Path, run: Any, rec: Recipe,
     builds. Returns a ``BlownCore`` or ``None`` (no recoverable blown core).
 
     Measured on the run's cached **proxy**, exactly as the button is, so the
-    recorded number is the number the owner would be offered — a full-resolution
-    measurement would be a different, unfalsifiable one.
+    recorded number is the number the owner would be offered. On a decimated
+    proxy the core it found is then *measured* on a native window of the master
+    (:func:`_highlight_native_window`), rendered the way the full-size check
+    renders one — so the answer stops drifting with the proxy's step.
     """
     from seestack.edit.highlights import suggest_highlight_protect
 
@@ -2041,14 +2043,82 @@ def solve_highlight_protect(project_dir: Path, run: Any, rec: Recipe,
     ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
                       coverage=_proxy_coverage(run.fits_path, scale),
                       frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
-                      already_display=_run_display_space(run))
+                      already_display=_run_display_space(run),
+                      capture_fields=scale > 1.0)
     linear = apply_recipe(rgb, sub, ctx, for_preview=True, auto_stretch=False)
 
     def restretch(protect: float) -> np.ndarray:
         return spec.apply(linear, {**stretch_params, "highlights": protect}, ctx)
 
+    native_window = None
+    grain_ratio = None
+    if scale > 1.0:
+        native_window = _highlight_native_window(run, sub, ctx, linear, spec,
+                                                 stretch_params)
+        grain_ratio = _auto_measure_grain_ratio(project_dir, run, scale)
     return suggest_highlight_protect(linear, restretch, proxy_scale=scale,
-                                     frame_px=_run_frame_px(project_dir, run))
+                                     frame_px=_run_frame_px(project_dir, run),
+                                     native_window=native_window,
+                                     grain_ratio=grain_ratio)
+
+
+def _highlight_native_window(run: Any, sub: Recipe, whole: EditContext,
+                             linear: np.ndarray, spec: Any, stretch_params: dict):
+    """The "Hold back highlights" solver's ``native_window``, or ``None`` when
+    ``sub`` (the ops ahead of the Stretch) can't be rendered on a window faithfully.
+
+    The window is rendered exactly as the full-size check renders one
+    (:func:`_render_loupe_png`): read off the master with ``hdu.section``, the
+    proxy render's fits and sky fields frozen onto it, geometry off. Then the
+    Stretch is applied with the **whole picture's** statistics, so the window is
+    the export's pixels there. Declines — leaving the proxy's answer — where the
+    loupe would: a geometry op ahead of the Stretch (the proxy pixel would no
+    longer be ``step`` source pixels from the origin), and an op whose window
+    render is not the picture's.
+    """
+    from seestack.edit.ops.geometry import reshapes_frame
+    from seestack.edit.proxy import read_window_rgb, source_shape
+    from seestack.render.thumbnail import measure_stretch_stats
+
+    for op in sub.ops:
+        if op.enabled and op.id.startswith("geometry.") \
+                and reshapes_frame(op.id, op.params):
+            return None
+    if _loupe_unvouched_labels(sub):
+        return None
+    shape = source_shape(run.fits_path)
+    if shape is None:
+        return None
+    full_h, full_w = shape
+    stats = measure_stretch_stats(as_rgb(linear))
+    display = _run_display_space(run)
+    window_rec = _without_geometry(sub)
+
+    def native_window(y0: int, x0: int, h: int, w: int):
+        h = min(h, full_h - y0)
+        w = min(w, full_w - x0)
+        if h < 8 or w < 8:
+            return None
+        try:
+            window = read_window_rgb(run.fits_path, y0, x0, h, w)
+            wctx = EditContext(proxy_scale=1.0, is_proxy=False, wcs=None,
+                               already_display=display,
+                               source_origin=(float(y0), float(x0)),
+                               frozen_fits=whole.fitted,
+                               frozen_deltas=whole.field_deltas)
+            lin_w = apply_recipe(window, window_rec, wctx, auto_stretch=False)
+        except Exception:  # noqa: BLE001 — best-effort; the proxy answer stands
+            return None
+        sctx = EditContext(proxy_scale=1.0, is_proxy=False, wcs=None,
+                           already_display=display,
+                           frozen_fits={"stretch_stats": stats})
+
+        def restretch_w(protect: float) -> np.ndarray:
+            return spec.apply(lin_w, {**stretch_params, "highlights": protect}, sctx)
+
+        return lin_w, restretch_w
+
+    return native_window
 
 
 def _run_frame_px(project_dir: Path, run: Any) -> float | None:
