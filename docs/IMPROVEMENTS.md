@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- `claude/fervent-allen-ptpf1h` (Builder 2026-11-05) — the Levels/Curves histogram guides are drawn on the *finished* picture's histogram, not the one entering the op (`levelsHistGuides`, `curvesHistGuides`, `editor.edit_histogram`).
 
 ---
 
