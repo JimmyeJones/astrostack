@@ -1,5 +1,18 @@
 # Process notes & QA sweep records
 
+## 2026-11-05 (Builder, branch `claude/fervent-allen-1b4gnh`) — nothing ungated to build; dogfood `--mosaic --editor` CLEAN.
+
+- **Suite:** 8574 passed / 7 skipped on `0a124315` (xdist `-n 4`, BLAS capped, 21m03s). No open PRs at start.
+- **Dogfood `--mosaic --editor`, run in the background to completion:** both editor drives (field and 2×2) re-render
+  all 21 ops, Undo/Redo apply; "What Auto-process did" names the panel levelling and the 8 % trim (canvas trim 7.9 %)
+  and offers "Hold back highlights (0.05)"; 10 live chips, 2 marked at their limit, both taps answer with consistent
+  wording. Target page (next-best-move, readiness, panel map, framing) agree on the thin top-right panel. Nothing
+  overflowing, no console errors; heights on the standing baseline.
+- **Code read, nothing to file:** `stageConflicts` (insert/move geometry-last), `coverageLeveling` (stranded-op
+  detection), `recentreCrop`, `savedLookCrop`, `pollJob`, `previewDebounce`, `blownCore`, `levelsReset`,
+  `seestack/edit/ops/geometry.py`, `tone._levels` / `_white_balance` / `_neutralize_background`; the webapp's
+  bare `except Exception: pass` sites are all deliberate, commented fallbacks.
+
 ## 2026-11-04 (Builder, branch `claude/fervent-allen-8ytsh9`) — nothing ungated to build; dogfood `--mosaic --editor` run to completion CLEAN.
 
 - **Suite:** 8567 passed / 7 skipped on `edbf6e4c` (xdist `-n 4`, BLAS capped, 19m11s). No open PRs at start.
