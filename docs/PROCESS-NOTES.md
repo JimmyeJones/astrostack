@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-11-05 (Scout, branch `claude/exciting-wozniak-djc6th`) — QA rotation sweep (1), new angle — the keepsake matte and the nameplate drawn on a *native* North-up turn of a trimmed auto-edit, against the stored-preview twin: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8574 passed / 7 skipped on `c5d4e6cb` (xdist `-n 4`, BLAS capped, 12m40s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. **Open PRs at start:**
+  none. **Dogfood `--mosaic`:** CLEAN (nothing overflowing, no console errors; Target / Dashboard / Tonight
+  paragraphs agree; `/life-list [Still to shoot]` 14,513 px on a phone is the v0.492.2 by-design figure).
+- **Sweep (1).** Took the lead the 11-01 `seqf64` (1) left: the keepsake matte and nameplate on a native North-up
+  turn of a trimmed run. Scratch probe (deleted; run in a `git worktree`) on `test_share_native_resolution._register`:
+  display-space auto-edited runs (recipe saved, recipe crop recorded, so the share renders off the master) and a
+  linear twin with the same recipe render as its stored preview (so the gate declines it and it shares the stored
+  bytes) — CD rotated 30° on 3400×2400 cropped (0.06, 0.04, 0.90, 0.97); −71° on 1900×2700 cropped (0.10, 0.02,
+  0.97, 0.88); 12° on 3400×2400 uncropped. `/jpeg` with `north_up` × {`nameplate`, `keepsake`, `keepsake+scale`}
+  and the un-turned `nameplate` / `keepsake`, each diffed against the same request without the caption. **All
+  CLEAN:** native 2.5× the twin's pixels; keepsake card aspect agrees to ≤ 0.002 (0.9262 vs 0.9257, 1.0152 vs
+  1.0133 — the matte's `_MIN_MATTE_PX` rounding); nameplate bar top within 0.002 of the frame (0.951 vs 0.949),
+  text extent within 0.003. On a 30° turn the nameplate bar sits partly over the black exposed corners — the
+  same on both, by design (drawn last at the canvas foot).
+- **Not yet run in a sweep (1):** the recap poster / "my year" collage tiles (`render/` shareables other than the
+  single-run `/jpeg`) fed a native North-up run.
+- **Curation:** nothing to cut or add — every Bugs entry is still gated; FOCUS run log trimmed to ten.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-05 (Builder, branch `claude/fervent-allen-1b4gnh`) — nothing ungated to build; dogfood `--mosaic --editor` CLEAN.
 
 - **Suite:** 8574 passed / 7 skipped on `0a124315` (xdist `-n 4`, BLAS capped, 21m03s). No open PRs at start.
