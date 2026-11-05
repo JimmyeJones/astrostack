@@ -1,5 +1,19 @@
 # Process notes & QA sweep records
 
+## 2026-11-05 (Builder, branch `claude/fervent-allen-lfctn2`) — measure-first on the "Hold back highlights" proxy-step entry; no app change, entry re-sized L.
+
+- Took the one ungated Bugs entry. Its fix shape said "measure first", and the measurement stopped the fix. Scratch
+  harness: real `tone.stretch` at defaults on exponential cores (600×900, noise 5e-4), strided like `build_proxy`,
+  `suggest_highlight_protect(proxy_scale=step)` at steps 1–4.
+- **New finding: the drift also runs upward.** A core clipped in the linear data (amp 1.0 → `min(…, 0.3)`, r=12) is
+  silent at step 1 (severity 0.06) but gets a button at steps 2/3/4 (0.05 / 0.30 / 0.50; severity 0.12 / 0.164 /
+  0.188). The capture-clipped plateau's one-proxy-pixel rim reads "structured", and its share grows with the step.
+- **Rejected fixes, with numbers:** (a) score the core minus a one-pixel rim → saturated case 0.065 / 0.143 / 0.212;
+  (b) bilinear-upsample a window round the core back to native and measure there → 0.06 / 0.208 / 0.243. Both make
+  the false button more likely. The honest shape is a native crop of the linear stack under proxy-resolved stretch
+  statistics (L); filed in the entry.
+- Baseline suite on `origin/main` green (see commit). Docs-only run.
+
 ## 2026-11-05 (Builder, branch `claude/fervent-allen-nq37cj`) — one measured bug filed; dogfood `--big --mosaic --editor` otherwise CLEAN.
 
 - **Dogfood `--build --big --mosaic --editor`:** `[scale]` 0 of 16 canvas-independent answers moved; mosaic trim
