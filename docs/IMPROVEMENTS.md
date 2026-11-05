@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- `claude/fervent-allen-qlw3h6` — the "Hold back highlights" nudge silent on a bigger mosaic canvas (`highlights.measure_blown_core` area floor).
 
 ---
 
