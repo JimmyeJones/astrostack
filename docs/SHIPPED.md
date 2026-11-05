@@ -1,5 +1,54 @@
 # Shipped — the record
 
+## v0.505.22 — 2026-11-05 (Builder, branch `claude/fervent-allen-qlw3h6`) — the "Hold back highlights" size floor is one frame's, in native pixels
+
+- **Bug (PRIORITY 1, the editor), the Builder 2026-11-05 measured entry (verbatim below).** `measure_blown_core`
+  refused a core smaller than `max(_MIN_CORE_PX, _MIN_CORE_AREA_FRAC × n_covered)` **proxy** pixels, so the floor
+  grew with a mosaic's canvas and the core shrank with the proxy step. On his ~3494×2470 mosaics at step 3 that
+  floor was ≈ 690 native px against a single S30 field's ≈ 207, so cores in between got no nudge and the
+  auto-edit's passive record said "nothing to suggest".
+- **Fix:** `highlights._min_core_area(n_covered, proxy_scale, frame_px)` takes the share of
+  `min(canvas, one frame)` and counts `_MIN_CORE_PX` in native pixels (`/ s²` on the proxy). `frame_px` is one sub's
+  footprint in canvas pixels, `native_frame_shape × drizzle²`, read by `editor._run_frame_px` (best-effort: `None` =
+  the old whole-canvas share). It goes through `suggest_highlight_protect` → `measure_blown_core`, so both the
+  button and the pipeline's passive record use it. With no scale and no frame (and on a single field at step 1)
+  the floor is the old one byte for byte; a step-2 single S30 field keeps its old floor too.
+- **Measured on the dogfood scale pair after the fix:** the full-size twin's 24-proxy-px core now clears its floor
+  (13, was 46), **but the nudge is still silent there.** A second cause sits behind the first: the severity
+  (`_recoverable_flat_fraction`) reads 0.042 against 0.176 on the 2×2, because a small core on a step-2 proxy is
+  mostly edge pixels and an edge pixel never reads flat. That cause is filed in Bugs as its own measured entry.
+- **Upgrade-safe (§9):** no config, schema, layout, default or API change. `suggest_highlight_protect` and
+  `measure_blown_core` gain an optional trailing `frame_px=None`.
+- **Tests:** `test_highlight_suggestion.py` +4: the same ~110-native-px core gets the same verdict on one frame at
+  step 1 and on a 2×2-frame canvas strided ×2, and a ~20 px star gets none on either (the mosaic half **failed
+  before the fix**, checked against the old module in a scratch copy); the floor is the old one without a scale or
+  a frame; native-pixel counting and the one-frame share. `tests/webapp/test_editor.py` +3: the endpoint passes
+  one frame's footprint, ×4 on a 2× drizzle, and `_run_frame_px` is `None` for an unreadable target.
+- Original entry:
+
+  - **🟡 MEASURED (Builder 2026-11-05, read off a `--big --mosaic --editor` dogfood pass) — the "Hold back
+    highlights" nudge goes silent on a bigger mosaic canvas for the *same* blown core: `measure_blown_core`'s
+    area floor scales with the whole canvas and is counted in proxy pixels.** *(Pillar: editor, PRIORITY 1;
+    severity low–medium — the nudge and the passive record an auto-edit stamps are advisory, but they go quiet on
+    exactly his large mosaics; confidence **measured**; ungated; size **M**.)* The scale-pair samples (same sky,
+    same plate scale, same star catalogue) disagree: `Sample_M42_mosaic_2_2` (907×615 proxy, step 1) finds a
+    **91 px** core against a floor of 53 and offers *"Hold back highlights (0.05)"*. `…_full_size` (847×575
+    proxy, step 2) finds the same core as **24 proxy px (≈ 96 native)** against a floor of **46 proxy px**
+    (≈ 184 native) and returns `None`. Repro: `solve_highlight_protect(pdir, run, build_auto_recipe_for_run(...))`
+    on both runs of a `--big --mosaic` data root, with a spy printing `_largest_bright_component`'s area and
+    `max(_MIN_CORE_PX, int(_MIN_CORE_AREA_FRAC * n_covered))`. **Two causes:** (a) `_MIN_CORE_AREA_FRAC ×
+    n_covered` is a share of the *whole canvas*, so a canvas that catches 3.5× the sky raises the floor for the
+    same object — the whole-target-vs-per-panel trap (AGENTS.md sweep (2)); v0.502.x's per-native-pixel gradient
+    fix flagged this exact line as "not measured as biting" — now it is. (b) The core area and both floors are
+    in proxy pixels, so a step-`s` proxy sees the core at 1/s² while `_MIN_CORE_PX` stays fixed. **Fix shape:**
+    pass `proxy_scale` (already threaded in) and one *frame's* native pixel count (from the run's frames — the
+    run row carries no frame dims), and compare in native pixels: `core·s² ≥ max(_MIN_CORE_PX, FRAC ×
+    min(n_covered·s², frame_px))`. A single S30 field (one frame ≈ the canvas) must stay byte-for-byte; a
+    scale-1 test image is unchanged. **Do not just lower the constants** — the floor is what keeps a saturated
+    star from being called a core (a capture-saturated star is also caught by the linear-structure test, but
+    that is the second guard, not the first). Regression test: the same synthetic core on a one-frame canvas
+    and on a 2×2-frame canvas strided ×2 gets the same verdict (fails today).
+
 ## v0.505.21 — 2026-11-05 (Builder, branch `claude/fervent-allen-rammv4`) — a trim lands in one crop, not in every crop
 
 - **Bug (PRIORITY 1, the editor's controls), found by a code read of `mosaicTrim`; no backlog entry.** The

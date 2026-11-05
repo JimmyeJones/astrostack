@@ -268,3 +268,72 @@ def luminance_of(img):
 
     return luminance(img)
 
+
+
+# --- the size floor on a mosaic canvas (Builder 2026-11-05, v0.505.22) ----------
+#
+# The floor keeps a saturated *star* from being called a core. It was a share of
+# the whole covered canvas, counted in proxy pixels, so on a bigger mosaic (more
+# sky, and a coarser proxy step) the same blown core fell under it and the
+# "Hold back highlights" nudge went silent: 91 px vs a floor of 53 on the step-1
+# 2×2 dogfood sample, 24 proxy px (≈ 96 native) vs 46 on its step-2 full-size twin.
+
+
+def _plateau_scene(h, w, cy, cx, radius):
+    """A display with one flat-white disk of ``radius`` native px at (cy, cx)
+    and a linear image with a real gradient under it (a recoverable core)."""
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    r = np.hypot(yy - cy, xx - cx)
+    rng = np.random.default_rng(0)
+    lin = (0.05 + 0.5 * np.exp(-(r / (2.0 * radius)) ** 2)
+           + rng.normal(0.0, 0.002, (h, w)))
+    disp = np.where(r <= radius, 1.0, 0.2).astype(np.float32)
+    return (np.repeat(disp[..., None], 3, axis=2),
+            np.repeat(lin.astype(np.float32)[..., None], 3, axis=2))
+
+
+def _verdict(h, w, radius, step, frame_px):
+    disp, lin = _plateau_scene(h, w, 300, 450, radius)
+    disp = np.ascontiguousarray(disp[::step, ::step])
+    lin = np.ascontiguousarray(lin[::step, ::step])
+    return hl.measure_blown_core(disp, lin, float(step), frame_px) is not None
+
+
+@pytest.mark.parametrize("radius,expected", [(6.0, True), (2.5, False)])
+def test_the_same_core_gets_the_same_verdict_on_a_bigger_mosaic_canvas(
+        radius, expected):
+    """One S30-like frame at step 1 vs a 2×2-frame canvas strided ×2: the same
+    ~110-native-px core qualifies on both, and a ~20-px star on neither. Before
+    the fix the mosaic's floor was 54 proxy px (a share of the whole canvas)
+    and the core read 28 there, so the big canvas said nothing."""
+    frame_px = 600 * 900
+    assert _verdict(600, 900, radius, 1, frame_px) is expected
+    assert _verdict(1200, 1800, radius, 2, frame_px) is expected
+
+
+def test_min_core_area_is_the_old_floor_without_a_scale_or_a_frame():
+    """A single field (or any caller that does not know the frame) keeps the
+    floor it always had, byte for byte."""
+    for n in (64, 1000, 320_000, 540_000, 2_073_600):
+        old = max(hl._MIN_CORE_PX, int(hl._MIN_CORE_AREA_FRAC * n))
+        assert hl._min_core_area(n) == old
+        assert hl._min_core_area(n, 1.0, None) == old
+        # A single field whose canvas is one frame: the frame changes nothing.
+        assert hl._min_core_area(n, 1.0, float(n)) == old
+
+
+def test_min_core_area_counts_native_pixels_on_a_proxy():
+    """A step-2 single S30 field (one 1080×1920 frame ≈ the canvas) keeps its
+    old proxy floor; the floor no longer grows past one frame's share."""
+    frame = 1080.0 * 1920.0
+    proxy_n = int(frame / 4)
+    assert hl._min_core_area(proxy_n, 2.0, frame) == \
+        max(hl._MIN_CORE_PX, int(hl._MIN_CORE_AREA_FRAC * proxy_n))
+    # A 2×2 mosaic (≈ 3.5 frames of sky) on a step-3 proxy: one frame's share.
+    mosaic_n = int(3.5 * frame / 9)
+    assert hl._min_core_area(mosaic_n, 3.0, frame) == \
+        int(hl._MIN_CORE_AREA_FRAC * frame / 9)
+    # The absolute floor is native pixels: 32 native = 8 proxy px at step 2.
+    assert hl._min_core_area(1000, 2.0, None) == hl._MIN_CORE_PX / 4
+    # Garbage in is the unscaled, whole-canvas floor.
+    assert hl._min_core_area(540_000, float("nan"), float("nan")) == 54
