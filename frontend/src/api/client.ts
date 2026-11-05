@@ -4830,6 +4830,14 @@ export const api = {
     const s = recipe ? `?recipe=${encodeRecipe(recipe)}` : "";
     return `/api/targets/${safe}/stack-runs/${runId}/editor/coverage-map${s}`;
   },
+  // The histogram of the picture *entering* the op `uid` (every op before it
+  // applied) — the axis a Levels or Curves op's own numbers live on.
+  opInputHistogram: (safe: string, runId: number, recipe: Recipe, uid: string,
+    signal?: AbortSignal) =>
+    req<Histogram>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/op-input-histogram` +
+      `?recipe=${encodeRecipe(recipe)}&uid=${encodeURIComponent(uid)}`,
+      { signal }),
   getHistogram: (safe: string, runId: number, recipe: Recipe, signal?: AbortSignal) =>
     req<Histogram>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/histogram?recipe=${encodeRecipe(recipe)}`,

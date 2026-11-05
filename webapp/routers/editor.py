@@ -1867,6 +1867,39 @@ async def levels_suggestion(safe: str, run_id: int, request: Request,
     return await run_in_threadpool(work)
 
 
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/op-input-histogram")
+async def op_input_histogram(safe: str, run_id: int, request: Request,
+                             recipe: str | None = None,
+                             uid: str | None = None) -> dict:
+    """The histogram of the image *entering* the op with ``uid`` (every op before
+    it applied) — the tonal axis that op's own numbers live on.
+
+    The Levels black/white points and the Curves control points are positions on
+    the histogram of the picture going *into* the op, but the editor's main
+    histogram is the finished picture's. Drawn there, a black point of 0.15 behind
+    a Levels op that has already mapped 0.15 to pure black marks a spot in the
+    data that is not black at all, and the guide disagrees with the suggestion
+    beside it (which is measured here). So while one of those ops is selected the
+    editor draws its guides on this histogram instead. Measured exactly as the
+    Levels suggestion measures (same sub-recipe, same fallback stretch), so the
+    suggested-point markers and the graph agree. Read-only. ``{bins, edges, r, g,
+    b}``, the same shape as the main histogram's counts.
+    """
+    project_dir, run = _run_info(request, safe, run_id)
+    rec = _decode_recipe_query(request, safe, run_id, recipe)
+    sub = _recipe_before_uid(rec, uid, drop_ids=("tone.levels", "tone.curves"))
+
+    def work() -> dict:
+        rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+        ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                          coverage=_proxy_coverage(run.fits_path, scale),
+                          frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
+                          already_display=_run_display_space(run))
+        return compute_histogram(apply_recipe(rgb, sub, ctx, for_preview=True))
+
+    return await run_in_threadpool(work)
+
+
 class StretchSuggestionOut(BaseModel):
     """Data-driven Strength + Black point for the asinh ``tone.stretch`` op,
     solved from the run's own linear data (sky floor → black; sky median lifted

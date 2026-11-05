@@ -530,6 +530,45 @@ def test_levels_suggestion_unknown_uid_falls_back(client, solved_library):
     assert body["white"] > body["black"]
 
 
+def test_op_input_histogram_is_the_image_entering_the_op(client, solved_library):
+    # The Levels/Curves guides are positions on the histogram of the picture
+    # *entering* the op. The main histogram is the finished picture's: behind a
+    # Levels op with black=0.3 it has every pixel the op crushed piled at 0 and the
+    # rest spread over the full range, so a "B" line at 0.3 drawn on it marks data
+    # that is not black at all. This endpoint measures what the op receives.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="op_input_hist")
+    stretch = {"id": "tone.stretch", "uid": "s1", "params": {"stretch": 0.6, "black": 0.35}}
+    levels = {"id": "tone.levels", "uid": "lv1", "params": {"black": 0.3, "white": 0.9}}
+    full = {"ops": [stretch, levels]}
+    q = _enc(full)
+    base = f"/api/targets/{safe}/stack-runs/{rid}/editor"
+    r = client.get(f"{base}/op-input-histogram?recipe={q}&uid=lv1")
+    assert r.status_code == 200
+    entering = r.json()
+    finished = client.get(f"{base}/histogram?recipe={q}").json()
+    for key in ("bins", "edges", "r", "g", "b"):
+        assert key in entering
+    assert entering["bins"] == finished["bins"]
+
+    # It is exactly the stretch-only picture's histogram — what Levels receives.
+    want = client.get(f"{base}/histogram?recipe={_enc({'ops': [stretch]})}").json()
+    assert entering["g"] == want["g"]
+
+    # …and not the finished picture's: below the 0.3 black point the entering
+    # histogram has real data, which Levels has moved to the bottom bin.
+    edge = int(0.3 * entering["bins"])
+    assert sum(entering["g"][1:edge]) > 0
+    assert entering["g"] != finished["g"]
+    assert finished["g"][0] > entering["g"][0]
+
+    # A Curves op is measured the same way (everything before it applied).
+    curves = {"id": "tone.curves", "uid": "c1", "params": {}}
+    q2 = _enc({"ops": [stretch, curves, levels]})
+    r2 = client.get(f"{base}/op-input-histogram?recipe={q2}&uid=c1")
+    assert r2.status_code == 200 and r2.json()["g"] == want["g"]
+
+
 def test_stretch_suggestion_from_image(client, solved_library):
     # The Stretch op receives the run's *linear* proxy; the suggestion measures it
     # (no stretch in the sub-recipe) and returns an in-range asinh strength/black

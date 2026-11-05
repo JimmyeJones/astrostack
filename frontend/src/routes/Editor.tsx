@@ -30,7 +30,7 @@ import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
 import { QueryError } from "../components/QueryError";
 import { Histogram } from "../components/editor/Histogram";
-import { tonalHistGuides } from "../components/editor/tonalGuides";
+import { guidesNeedOpInput, tonalHistView } from "../components/editor/tonalGuides";
 import { OpList } from "../components/editor/OpList";
 import { AutoFeedback } from "../components/editor/AutoFeedback";
 import { saveRecipeMessage } from "../components/editor/saveMessage";
@@ -481,6 +481,20 @@ export function EditorView() {
     // refetches against the real recipe (most visible on the walk-away
     // Process-target deep-link, which opens on a saved auto-edit recipe).
     enabled: !!opsSchema.data && !saved.isLoading && seeded,
+  });
+  // The histogram of the picture *entering* the selected Levels/Curves op — the
+  // axis its black/white points and curve points are positions on. The main
+  // histogram above is the finished picture's, where those guides land in the
+  // wrong place (see `tonalHistView`). Only while one of those ops is selected;
+  // the previous answer is kept only for the *same* op, so a switch between two
+  // never draws one op's guides over the other's input.
+  const tonalSelUid = ops.find((o) => o.uid === selected && guidesNeedOpInput(o))?.uid;
+  const opInputHist = useQuery({
+    queryKey: ["op-input-hist", safe, rid, dKey, tonalSelUid],
+    queryFn: ({ signal }) => api.opInputHistogram(safe, rid, dRecipe, tonalSelUid!, signal),
+    enabled: !!opsSchema.data && !saved.isLoading && seeded && !!tonalSelUid,
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey[4] === tonalSelUid ? prev : undefined,
   });
   // Data-driven black/white points for the selected Levels op, measured from the
   // display-space image *entering* that op (all prior ops applied), so a beginner
@@ -1245,6 +1259,12 @@ export function EditorView() {
   };
 
   const selectedOp = ops.find((o) => o.uid === selected) ?? null;
+  // Which histogram the preview panel draws, and the guides over it: while a
+  // Levels/Curves op is selected, the picture *entering* it (its guides' axis).
+  const histView = tonalHistView(selectedOp,
+    levels.data?.black != null && levels.data?.white != null
+      ? { black: levels.data.black, white: levels.data.white } : null,
+    hist.data, opInputHist.data);
   // Auto-contrast on the Curves op derives its curve at *render* time from the
   // image entering the op while the stored points stay a flat identity, so the
   // widget would otherwise draw a straight line that contradicts the preview.
@@ -2188,19 +2208,17 @@ export function EditorView() {
               isMosaic: hist.data?.is_mosaic === true,
               cropDrag: !!cropDragOp && !cropDragBlocked,
             })} />
-            <Histogram data={hist.data}
-              guides={tonalHistGuides(selectedOp,
-                levels.data?.black != null && levels.data?.white != null
-                  ? { black: levels.data.black, white: levels.data.white } : null,
-                hist.data)} />
-            {selectedOp?.id === "tone.levels" ? (
+            <Histogram data={histView.data} guides={histView.guides} />
+            {histView.onOpInput && selectedOp?.id === "tone.levels" ? (
               <Text size="xs" c="dimmed" mt={4}>
-                <b>B</b>/<b>W</b> mark your black &amp; white points on the histogram
+                This graph shows your picture as it goes <i>into</i> Levels.{" "}
+                <b>B</b>/<b>W</b> mark your black &amp; white points on it
                 {levels.data?.black != null ? "; the dashed blue lines are the suggested points" : ""}.
               </Text>
-            ) : selectedOp?.id === "tone.curves" ? (
+            ) : histView.onOpInput && selectedOp?.id === "tone.curves" ? (
               <Text size="xs" c="dimmed" mt={4}>
-                The dashed purple lines mark where your curve's points sit on the tonal range.
+                This graph shows your picture as it goes <i>into</i> Curves. The dashed
+                purple lines mark where your curve's points sit on it.
               </Text>
             ) : null}
             {previewScaleCaption(hist.data) ? (
