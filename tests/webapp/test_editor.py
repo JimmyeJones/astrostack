@@ -3812,9 +3812,9 @@ def test_highlight_suggestion_measures_per_native_pixel(client, solved_library,
     captured = {}
     real_suggest = hl_mod.suggest_highlight_protect
 
-    def _spy(linear, restretch, proxy_scale=1.0):
+    def _spy(linear, restretch, proxy_scale=1.0, **kw):
         captured["proxy_scale"] = proxy_scale
-        return real_suggest(linear, restretch, proxy_scale=proxy_scale)
+        return real_suggest(linear, restretch, proxy_scale=proxy_scale, **kw)
 
     monkeypatch.setattr(hl_mod, "suggest_highlight_protect", _spy)
     q = _enc({"ops": [{"id": "tone.stretch", "uid": "s1", "params": {}}]})
@@ -3823,6 +3823,47 @@ def test_highlight_suggestion_measures_per_native_pixel(client, solved_library,
         f"?recipe={q}&uid=s1")
     assert r.status_code == 200
     assert captured["proxy_scale"] == 3.0
+
+
+@pytest.mark.parametrize("options_json,expected", [
+    ("{}", 480.0 * 320.0),
+    ('{"drizzle": true, "drizzle_scale": 2.0}', 4 * 480.0 * 320.0),
+])
+def test_highlight_suggestion_passes_one_frames_footprint(
+        client, solved_library, monkeypatch, options_json, expected):
+    # The core-size floor is "per field of sky": the endpoint hands the solver
+    # one sub's footprint in canvas pixels (drizzle included), so a mosaic's
+    # floor stops growing with its canvas (Builder 2026-11-05, v0.505.22).
+    import seestack.edit.highlights as hl_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="hilite_frame",
+                    options_json=options_json)
+    captured = {}
+    real_suggest = hl_mod.suggest_highlight_protect
+
+    def _spy(linear, restretch, proxy_scale=1.0, frame_px=None):
+        captured["frame_px"] = frame_px
+        return real_suggest(linear, restretch, proxy_scale=proxy_scale,
+                            frame_px=frame_px)
+
+    monkeypatch.setattr(hl_mod, "suggest_highlight_protect", _spy)
+    q = _enc({"ops": [{"id": "tone.stretch", "uid": "s1", "params": {}}]})
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/highlight-suggestion"
+        f"?recipe={q}&uid=s1")
+    assert r.status_code == 200
+    assert captured["frame_px"] == pytest.approx(expected)
+
+
+def test_run_frame_px_is_none_without_a_measured_frame(tmp_path):
+    # An unreadable target keeps the whole-canvas floor rather than guessing.
+    from types import SimpleNamespace
+
+    import webapp.routers.editor as editor_mod
+
+    run = SimpleNamespace(options_json="{}")
+    assert editor_mod._run_frame_px(tmp_path / "nope", run) is None
 
 
 def test_highlight_suggestion_unknown_uid_falls_back(client, solved_library):

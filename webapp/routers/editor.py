@@ -2047,7 +2047,36 @@ def solve_highlight_protect(project_dir: Path, run: Any, rec: Recipe,
     def restretch(protect: float) -> np.ndarray:
         return spec.apply(linear, {**stretch_params, "highlights": protect}, ctx)
 
-    return suggest_highlight_protect(linear, restretch, proxy_scale=scale)
+    return suggest_highlight_protect(linear, restretch, proxy_scale=scale,
+                                     frame_px=_run_frame_px(project_dir, run))
+
+
+def _run_frame_px(project_dir: Path, run: Any) -> float | None:
+    """One sub's footprint on ``run``'s canvas, in canvas pixels, or ``None``.
+
+    The native frame's width × height (any measured frame — a target's subs are
+    all one shape) times the run's drizzle factor squared, since a drizzled
+    canvas pixel is a fraction of a camera pixel. It lets a size floor that is
+    really "per field of sky" stay per field on a mosaic, whose canvas holds
+    several (the "Hold back highlights" floor, v0.505.22). Best-effort: an
+    unreadable DB or a target with no measured frame returns ``None``, and the
+    caller keeps its whole-canvas behaviour.
+    """
+    from seestack.io.project import Project
+    from webapp.field_fulls import native_frame_shape
+
+    try:
+        proj = Project.open(Path(project_dir))
+    except Exception:  # noqa: BLE001 — a missing frame shape is not an error
+        return None
+    try:
+        shape = native_frame_shape(proj)
+    finally:
+        proj.close()
+    if shape is None:
+        return None
+    sup = canvas_supersampling(getattr(run, "options_json", None))
+    return float(shape[0]) * float(shape[1]) * sup * sup
 
 
 class CurveSuggestionOut(BaseModel):

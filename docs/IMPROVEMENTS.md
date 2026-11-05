@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- `claude/fervent-allen-qlw3h6` — the "Hold back highlights" nudge silent on a bigger mosaic canvas (`highlights.measure_blown_core` area floor).
+*No live claims.*
 
 ---
 
@@ -117,29 +117,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   "when it is cold". A per-sensor-temperature version of the diagnostic (`FrameRow.sensor_temp_c` bins) is
   with him; its result decides whether (1) needs one master per temperature range, like a matched dark. This
   line is replaced with the numbers when they arrive.
-
-- **🟡 MEASURED (Builder 2026-11-05, read off a `--big --mosaic --editor` dogfood pass) — the "Hold back
-  highlights" nudge goes silent on a bigger mosaic canvas for the *same* blown core: `measure_blown_core`'s
-  area floor scales with the whole canvas and is counted in proxy pixels.** *(Pillar: editor, PRIORITY 1;
-  severity low–medium — the nudge and the passive record an auto-edit stamps are advisory, but they go quiet on
-  exactly his large mosaics; confidence **measured**; ungated; size **M**.)* The scale-pair samples (same sky,
-  same plate scale, same star catalogue) disagree: `Sample_M42_mosaic_2_2` (907×615 proxy, step 1) finds a
-  **91 px** core against a floor of 53 and offers *"Hold back highlights (0.05)"*. `…_full_size` (847×575
-  proxy, step 2) finds the same core as **24 proxy px (≈ 96 native)** against a floor of **46 proxy px**
-  (≈ 184 native) and returns `None`. Repro: `solve_highlight_protect(pdir, run, build_auto_recipe_for_run(...))`
-  on both runs of a `--big --mosaic` data root, with a spy printing `_largest_bright_component`'s area and
-  `max(_MIN_CORE_PX, int(_MIN_CORE_AREA_FRAC * n_covered))`. **Two causes:** (a) `_MIN_CORE_AREA_FRAC ×
-  n_covered` is a share of the *whole canvas*, so a canvas that catches 3.5× the sky raises the floor for the
-  same object — the whole-target-vs-per-panel trap (AGENTS.md sweep (2)); v0.502.x's per-native-pixel gradient
-  fix flagged this exact line as "not measured as biting" — now it is. (b) The core area and both floors are
-  in proxy pixels, so a step-`s` proxy sees the core at 1/s² while `_MIN_CORE_PX` stays fixed. **Fix shape:**
-  pass `proxy_scale` (already threaded in) and one *frame's* native pixel count (from the run's frames — the
-  run row carries no frame dims), and compare in native pixels: `core·s² ≥ max(_MIN_CORE_PX, FRAC ×
-  min(n_covered·s², frame_px))`. A single S30 field (one frame ≈ the canvas) must stay byte-for-byte; a
-  scale-1 test image is unchanged. **Do not just lower the constants** — the floor is what keeps a saturated
-  star from being called a core (a capture-saturated star is also caught by the linear-structure test, but
-  that is the second guard, not the first). Regression test: the same synthetic core on a one-frame canvas
-  and on a 2×2-frame canvas strided ×2 gets the same verdict (fails today).
 
 - **🟡 (Scout 2026-11-03, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/` or `.Trash-*/` folder
   a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
@@ -3176,6 +3153,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.22 **The "Hold back highlights" nudge no longer goes silent on a bigger mosaic canvas for the same blown core — its size floor was a share of the whole canvas, counted in proxy pixels; it is now one frame's share, counted in native pixels** (`highlights._min_core_area`, `measure_blown_core(frame_px=)`, `editor._run_frame_px`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.21 **"Trim border" / "Re-trim border" / "Re-centre" write their bounds into one crop, not every crop — a recipe with two crops (Auto's trim plus one added from the Add menu) was cut twice and lost the user's own framing** (`mosaicTrim.applyTrimCrop`, `cropDrag.existingCropUid`) — Builder code read. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.20 **The Levels B/W points and the Curves points are drawn on the histogram of the picture *entering* the op — they were drawn on the finished picture's, where Levels has already sent its black point to 0, so "B" sat over faint data that is not black and disagreed with the dashed suggestion** (`tonalHistView`, `api.opInputHistogram`, `editor.op_input_histogram`) — Builder code read. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.19 **An upload never writes a macOS `._<name>.fit` sidecar or `__MACOSX/` entry into `incoming/` — a Mac-made zip wrote one junk twin per sub there (counted as saved; flattened, re-read as an unreadable sub)** (`upload.is_mac_metadata_name`, `UploadFits.isMacMetadataName`).

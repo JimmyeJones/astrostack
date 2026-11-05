@@ -47,9 +47,11 @@ _CEILING = 0.98
 #: worth a suggestion. Scale-invariant on purpose (the measurement runs on the
 #: editor proxy, whose size varies): 0.01 % is ~65 px on a 1000×650 proxy, which
 #: is far more than a saturated *star* (a few pixels) and far less than a
-#: washed-out galaxy/nebula core.
+#: washed-out galaxy/nebula core. On a mosaic the share is of **one frame's**
+#: footprint, not of the whole canvas — see :func:`_min_core_area`.
 _MIN_CORE_AREA_FRAC = 1e-4
 #: ...with an absolute floor so a tiny test/thumbnail image can't qualify a star.
+#: Counted in **native** pixels (a star's size does not shrink with the proxy).
 _MIN_CORE_PX = 32
 
 #: Local gradient (in display units, 0..1) at or below which a pixel counts as
@@ -104,6 +106,38 @@ def _per_native_px(gradient: np.ndarray, proxy_scale: float) -> np.ndarray:
     if not np.isfinite(scale) or scale <= 1.0:
         return gradient
     return gradient / np.float32(scale)
+
+
+def _min_core_area(n_covered: int, proxy_scale: float = 1.0,
+                   frame_px: float | None = None) -> float:
+    """The smallest core, **in proxy pixels**, worth a suggestion.
+
+    The floor is there to keep a saturated *star* from being called a core, and
+    a star is a fixed size on the sky — so the floor must not grow with the
+    canvas, and must not stay fixed while the proxy's step shrinks the core.
+    Until v0.505.22 it did both: ``_MIN_CORE_AREA_FRAC`` was a share of the
+    *whole* covered canvas (a 2×2 mosaic's canvas catches ~3.5× a single field's
+    sky, so the same galaxy core had to be ~3.5× bigger), and ``_MIN_CORE_PX``
+    was counted in proxy pixels while a step-``s`` proxy shows the core at
+    ``1/s²`` of its native area. Measured on the dogfood scale pair: one blown
+    core read 91 px against a floor of 53 on the step-1 2×2 and got "Hold back
+    highlights (0.05)"; on its full-size step-2 twin it read 24 proxy px
+    (≈ 96 native) against 46 and got nothing.
+
+    So: the share is taken of ``min(canvas, one frame)`` — ``frame_px`` is one
+    sub's footprint in **canvas** pixels (drizzle included), ``None`` when the
+    caller doesn't know it, which keeps the canvas share — and the absolute
+    floor is ``_MIN_CORE_PX`` native pixels, i.e. ``_MIN_CORE_PX / s²`` proxy
+    ones. ``proxy_scale <= 1`` with no ``frame_px`` is exactly the old floor.
+    """
+    scale = float(proxy_scale)
+    if not np.isfinite(scale) or scale < 1.0:
+        scale = 1.0
+    area_px = float(n_covered)
+    if frame_px is not None and np.isfinite(frame_px) and frame_px > 0:
+        area_px = min(area_px, float(frame_px) / (scale * scale))
+    return max(_MIN_CORE_PX / (scale * scale),
+               float(int(_MIN_CORE_AREA_FRAC * area_px)))
 
 
 @dataclass(frozen=True)
@@ -176,13 +210,17 @@ def _strength_grid() -> list[float]:
 
 def measure_blown_core(display: np.ndarray, linear: np.ndarray,
                        proxy_scale: float = 1.0,
+                       frame_px: float | None = None,
                        ) -> tuple[np.ndarray, np.ndarray, int] | None:
     """``(core_mask, linear_has_structure, core_px)`` for the largest blown core.
 
     ``display`` is the image as the user sees it (post-stretch, 0..1 with NaN for
     uncovered pixels); ``linear`` is the image the stretch received, at the same
     shape. ``proxy_scale`` is the native pixels one input pixel spans (the
-    editor proxy's step), so gradients are judged per native pixel. ``None``
+    editor proxy's step), so gradients are judged per native pixel and the size
+    floor is counted in native pixels. ``frame_px`` is one sub's footprint in
+    canvas pixels, so a mosaic's floor is one frame's, not the whole canvas's
+    (:func:`_min_core_area`). ``None``
     means there is nothing to work with — no bright core at all, or one too
     small to be anything but a star.
     """
@@ -200,7 +238,7 @@ def measure_blown_core(display: np.ndarray, linear: np.ndarray,
     if found is None:
         return None
     core, area = found
-    if area < max(_MIN_CORE_PX, int(_MIN_CORE_AREA_FRAC * n_covered)):
+    if area < _min_core_area(n_covered, proxy_scale, frame_px):
         return None
 
     # Structure in linear: normalize to the linear image's own robust range so
@@ -231,6 +269,7 @@ def suggest_highlight_protect(
     linear: np.ndarray,
     restretch: Callable[[float], np.ndarray],
     proxy_scale: float = 1.0,
+    frame_px: float | None = None,
 ) -> BlownCore | None:
     """Solve the "Hold back highlights" strength for the caller's own stretch.
 
@@ -238,7 +277,10 @@ def suggest_highlight_protect(
     configured with ``highlights=p`` — so the value returned is solved against
     the very op that will draw it. ``proxy_scale`` is the editor proxy's step
     (``EditContext.proxy_scale``): pass it so a decimated proxy is judged on
-    the export's scale and the same core gets the same answer at any step. Returns ``None`` when there is no recoverable
+    the export's scale and the same core gets the same answer at any step.
+    ``frame_px`` is one sub's footprint in canvas pixels (``None`` = unknown):
+    pass it so a mosaic's core is held to a single field's size floor rather
+    than one that grows with the canvas. Returns ``None`` when there is no recoverable
     blown core: no bright core at all, one too small to be anything but a star,
     one barely clipped, one already saturated in the linear data, or one the
     knob can't meaningfully reopen even at full strength.
@@ -248,7 +290,7 @@ def suggest_highlight_protect(
     share is monotone non-increasing in the strength.
     """
     base = restretch(0.0)
-    measured = measure_blown_core(base, linear, proxy_scale)
+    measured = measure_blown_core(base, linear, proxy_scale, frame_px)
     if measured is None:
         return None
     core, linear_has_structure, area = measured
