@@ -1,5 +1,32 @@
 # Shipped — the record
 
+## v0.505.20 — 2026-11-05 (Builder, branch `claude/fervent-allen-ptpf1h`) — Levels/Curves guides on the histogram they belong to
+
+- **Bug (PRIORITY 1, the editor's controls), found by a code read of the histogram guides; no backlog entry.**
+  Selecting a Levels op draws its black/white points ("B"/"W") and the dashed suggested points on the editor's
+  histogram; selecting Curves draws its control points. Those numbers are positions on the histogram of the
+  picture *entering* the op — the suggestion is measured there (`levels_suggestion`), and `curvesHistGuides`'
+  own docstring said "the curve's input is the histogram's own x-axis". But the histogram is the *finished*
+  picture's (`edit_histogram` renders the whole recipe). Behind a Levels op with black 0.3 / white 0.9, every
+  pixel below 0.3 has already gone to 0 and the rest spans the whole axis, so the "B" line at 0.3 sat over faint
+  sky that is not black at all, and the dashed suggestion disagreed with the graph under it. Any non-identity
+  Levels or a Curves op followed by another tonal op made the guides wrong — exactly when a beginner is reading
+  them to decide where to put the point.
+- **Fix:** `GET …/editor/op-input-histogram?recipe&uid` returns the histogram of the image entering op `uid`,
+  measured exactly as the Levels suggestion is (same `_recipe_before_uid` sub-recipe, same fallback stretch), so
+  graph and suggestion agree. The editor fetches it only while a Levels/Curves op is selected
+  (`api.opInputHistogram`), and `tonalHistView` draws that op's guides on it — without the clip edges, which
+  describe the finished picture (the clipping caption still says so). Until it arrives the finished histogram is
+  shown with its clip edges only: no guide is drawn on an axis it does not belong to. The caption now says
+  *"This graph shows your picture as it goes into Levels."* A switch between two such ops never shows one op's
+  input under the other's guides (placeholder kept only for the same uid).
+- **Upgrade-safe (§9):** one new read-only GET; no config, schema, layout, default or response-shape change.
+- **Tests:** `test_editor.py` +1 (the endpoint equals the stretch-only picture's histogram, has data below the
+  black point that the finished histogram has moved to bin 0, and measures a Curves op the same way);
+  `tonalGuides.test.ts` +5 (`tonalHistView`, `guidesNeedOpInput`); `Editor.test.tsx` Levels test now asserts the
+  entering histogram is fetched for that op only once selected and the caption names it — **fails on the old
+  `Editor.tsx`** (checked).
+
 ## v0.505.19 — 2026-11-04 (Builder, branch `claude/fervent-allen-lrf9oe`) — an upload never writes a macOS sidecar into `incoming/`
 
 - **Bug (PRIORITY 2–3, "drop your frames in"; the §10 folder), found by a code read of the upload path after

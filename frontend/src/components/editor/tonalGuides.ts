@@ -58,3 +58,51 @@ export function tonalHistGuides(
     ...clippingHistGuides(hist),
   ];
 }
+
+/** Ops whose guides are positions on the histogram of the picture *entering* them. */
+const INPUT_AXIS_OPS = new Set(["tone.levels", "tone.curves"]);
+
+/** Whether `op` is a Levels/Curves op — the ones whose numbers live on the
+ * histogram of the picture going *into* them, not the finished picture's. */
+export function guidesNeedOpInput(op: OpInstance | null): boolean {
+  return !!op && INPUT_AXIS_OPS.has(op.id);
+}
+
+/** Which histogram the editor draws, and the guides over it.
+ *
+ * A Levels black point or a Curves control point is a position on the histogram
+ * of the picture *entering* that op; the main histogram is the *finished*
+ * picture's, where Levels has already sent everything below its black point to 0
+ * and spread the rest across the whole axis. Drawn there, "B" at 0.3 sat over
+ * faint data that is not black at all, and the dashed suggestion (which is
+ * measured on the entering picture) disagreed with the graph under it.
+ *
+ * So while a Levels or Curves op is selected and its entering histogram has
+ * arrived, that histogram is drawn with the op's guides — and without the clip
+ * edges, which describe the finished picture (the clipping caption still says
+ * so, from `hist`). Until it arrives the finished histogram is drawn with only
+ * its clip edges: no guide is ever drawn on an axis it does not belong to. Pure. */
+export function tonalHistView(
+  selectedOp: OpInstance | null,
+  levelsSuggestion: { black: number; white: number } | null | undefined,
+  hist: Histogram | undefined,
+  opInputHist: Histogram | undefined,
+): { data: Histogram | undefined; guides: HistGuide[]; onOpInput: boolean } {
+  if (guidesNeedOpInput(selectedOp) && opInputHist) {
+    return {
+      data: opInputHist,
+      guides: [
+        ...levelsHistGuides(selectedOp, levelsSuggestion),
+        ...curvesHistGuides(selectedOp),
+      ],
+      onOpInput: true,
+    };
+  }
+  return {
+    data: hist,
+    guides: guidesNeedOpInput(selectedOp)
+      ? clippingHistGuides(hist)
+      : tonalHistGuides(selectedOp, levelsSuggestion, hist),
+    onOpInput: false,
+  };
+}

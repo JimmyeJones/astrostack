@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { clippingHistGuides, curvesHistGuides, tonalHistGuides } from "./tonalGuides";
+import {
+  clippingHistGuides, curvesHistGuides, guidesNeedOpInput, tonalHistGuides, tonalHistView,
+} from "./tonalGuides";
 import type { Histogram, OpInstance } from "../../api/client";
 
 const curves = (points: number[][]): OpInstance => ({
@@ -94,5 +96,51 @@ describe("tonalHistGuides", () => {
     const g = tonalHistGuides(null, null, hist(0.0, 0.1));
     expect(g).toHaveLength(1);
     expect(g[0]).toMatchObject({ value: 1, label: "clip" });
+  });
+});
+
+describe("tonalHistView", () => {
+  const finished = hist(0.0, 0.1);   // the finished picture — highlights clipping
+  const entering = hist(0.0, 0.0);   // the picture going into the op
+
+  it("draws a Levels op's B/W on the histogram of the picture entering it", () => {
+    // The finished histogram is after Levels has mapped its black point to 0, so
+    // a B line drawn there marks the wrong data. The entering one is its axis.
+    const v = tonalHistView(levels(0.1, 0.8), { black: 0.12, white: 0.85 }, finished, entering);
+    expect(v.onOpInput).toBe(true);
+    expect(v.data).toBe(entering);
+    expect(v.guides.map((x) => x.label)).toEqual(["B", "W", undefined, undefined]);
+    // The clip edge describes the finished picture, not this one.
+    expect(v.guides.some((x) => x.label === "clip")).toBe(false);
+  });
+
+  it("draws a Curves op's points on the histogram of the picture entering it", () => {
+    const v = tonalHistView(curves([[0, 0], [0.3, 0.4], [1, 1]]), null, finished, entering);
+    expect(v.data).toBe(entering);
+    expect(v.guides.map((x) => x.value)).toEqual([0.3]);
+  });
+
+  it("draws no op guide on the finished histogram while the entering one loads", () => {
+    const v = tonalHistView(levels(0.1, 0.8), { black: 0.12, white: 0.85 }, finished, undefined);
+    expect(v.onOpInput).toBe(false);
+    expect(v.data).toBe(finished);
+    expect(v.guides.map((x) => x.label)).toEqual(["clip"]);
+  });
+
+  it("keeps the finished histogram and its clip edges for any other op", () => {
+    const stretch: OpInstance = { uid: "s1", id: "tone.stretch", enabled: true, params: {} };
+    const v = tonalHistView(stretch, null, finished, entering);
+    expect(v.data).toBe(finished);
+    expect(v.onOpInput).toBe(false);
+    expect(v.guides.map((x) => x.label)).toEqual(["clip"]);
+    expect(tonalHistView(null, null, finished, undefined).data).toBe(finished);
+  });
+
+  it("names exactly the ops whose guides need the entering picture", () => {
+    expect(guidesNeedOpInput(levels(0, 1))).toBe(true);
+    expect(guidesNeedOpInput(curves([]))).toBe(true);
+    expect(guidesNeedOpInput({ uid: "s", id: "tone.stretch", enabled: true, params: {} }))
+      .toBe(false);
+    expect(guidesNeedOpInput(null)).toBe(false);
   });
 });

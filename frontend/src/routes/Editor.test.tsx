@@ -2719,19 +2719,27 @@ describe("EditorView", () => {
     vi.spyOn(client.api, "getHistogram").mockResolvedValue(
       { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
     vi.spyOn(client.api, "levelsSuggestion").mockResolvedValue({ black: 0.12, white: 0.85 });
+    // The picture *entering* Levels — the axis its B/W points live on.
+    const opInput = vi.spyOn(client.api, "opInputHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [9, 9, 9, 9], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
     })));
 
     renderEditor();
 
-    // No Levels op selected yet → no guide caption under the histogram.
+    // No Levels op selected yet → no guide caption under the histogram, and the
+    // entering picture is not measured.
     await screen.findByText("Levels");
     expect(screen.queryByText(/mark your black/)).not.toBeInTheDocument();
+    expect(opInput).not.toHaveBeenCalled();
     // Selecting the Levels op surfaces the B/W guide caption (the guide lines are
-    // SVG; the caption is the user-visible proof the overlay is active).
+    // SVG; the caption is the user-visible proof the overlay is active), drawn on
+    // the histogram of the picture going into the op, measured for that op.
     fireEvent.click(screen.getByText("Levels"));
     expect(await screen.findByText(/mark your black/)).toBeInTheDocument();
+    expect(screen.getByText(/as it goes/)).toHaveTextContent("into Levels");
+    expect(opInput.mock.calls[opInput.mock.calls.length - 1]?.[3]).toBe("lv1");
   });
 
   it("shows the curve-point guide caption when the Curves op is selected", async () => {
@@ -2750,6 +2758,9 @@ describe("EditorView", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
     })));
+
+    vi.spyOn(client.api, "opInputHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [9, 9, 9, 9], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
 
     renderEditor();
 
