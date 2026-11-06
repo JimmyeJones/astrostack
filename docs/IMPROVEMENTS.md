@@ -2497,7 +2497,7 @@ any of them.)*
 ### UX & polish
 - Mobile layout polish on Combine. (S) *(Calibration's masters table done v0.505.11, Tonight's planner tables v0.505.12; Combine is the deprioritised
   channel-combine page — touch it only for an outright bug.)*
-- Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7; a restart-interrupted job v0.505.24; the Stack page's own job card for one, and for a cancelled stack, v0.505.25; the "Notify me when done" ping for one v0.505.26.)*
+- Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7; a restart-interrupted job v0.505.24; the Stack page's own job card for one, and for a cancelled stack, v0.505.25; the "Notify me when done" ping for one v0.505.26; an editor export one cut off v0.505.27.)*
 
 ### Performance (only with a measurement)
 
@@ -3153,6 +3153,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.27 **An editor export or render an out-of-memory restart cut off is named as a restart instead of "Failed to fetch" — `pollJob.pollJobUntilDone` rides out ~2.4 min of outage with `pollErrorBackoffMs` and `jobFailureMessage` replaces the stack-shaped restart note** (branch `claude/fervent-allen-6vw4kr`).
 - ✅ v0.505.26 **"Notify me when done" pings for a job a restart cut off — an overnight stack the out-of-memory restart killed sent no notification, because `interrupted` was treated as an artefact; a queued job it caught says it never ran** (`jobNotify.justFinishedJobs` `NOTIFY_ON_FINISH`, `jobNotificationText`) — Builder code read. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.25 **The Stack page's job card says a stack a restart cut off didn't finish, and a cancelled one that it was stopped — it used to freeze on the last progress line ("stacking 340/5477") with no word that the run was over** (`Stack.tsx` `jobFailed`, `JobError` `not_started` fallback) — Builder follow-up to v0.505.24. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.24 **A job a restart cut off is explained as a restart — the "was running" note no longer translates as "no plate-solved frames to stack yet", a queued job a redeploy caught says it never ran, and a stack killed mid-run (the big-mosaic out-of-memory case) shows on the Target page and Dashboard as one that didn't finish** (`JobManager._recover_interrupted` `error_kind` `restarted`/`not_started`, `classify_error_message`, `stackfailure._FAILED_STATES`, `friendlyJobError`) — Builder code read. Full entry in [`SHIPPED.md`](SHIPPED.md).

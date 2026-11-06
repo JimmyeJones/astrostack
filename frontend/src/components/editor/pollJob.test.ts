@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { Job } from "../../api/client";
-import { isJobPollAbort, JobPollAbort, POLL_MAX_CONSECUTIVE_ERRORS, pollJobUntilDone } from "./pollJob";
+import {
+  isJobPollAbort, jobFailureMessage, JobPollAbort, POLL_LOST_CONTACT_MESSAGE,
+  POLL_MAX_CONSECUTIVE_CLIENT_ERRORS, POLL_MAX_CONSECUTIVE_ERRORS, POLL_MAX_ERROR_BACKOFF_MS,
+  pollErrorBackoffMs, pollJobUntilDone, RENDER_NOT_STARTED_MESSAGE, RENDER_RESTARTED_MESSAGE,
+} from "./pollJob";
 
 function job(state: string, extra: Partial<Job> = {}): Job {
   return {
@@ -55,10 +59,80 @@ describe("pollJobUntilDone", () => {
     });
   });
 
-  it("gives up when the status endpoint keeps failing", async () => {
-    const getJob = vi.fn().mockRejectedValue(new Error("gone"));
-    await expect(pollJobUntilDone("j1", { getJob, sleep: noSleep })).rejects.toThrow("gone");
+  it("gives up when the status endpoint keeps failing, saying contact was lost", async () => {
+    // The browser's own "Failed to fetch" was the whole message before.
+    const getJob = vi.fn().mockRejectedValue(new Error("Failed to fetch"));
+    const err = await pollJobUntilDone("j1", { getJob, sleep: noSleep }).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe(POLL_LOST_CONTACT_MESSAGE);
     expect(getJob).toHaveBeenCalledTimes(POLL_MAX_CONSECUTIVE_ERRORS + 1);
+  });
+
+  it("rides out a container restart and then names the job a restart cut off", async () => {
+    // The bug: an out-of-memory kill mid-render took the app down for longer than
+    // five 500 ms polls, so the editor showed "Failed to fetch"; and even when the
+    // app came back in time, the restart note it read back advised rejecting
+    // plate-solve frames — advice for a stack, not for saving a picture.
+    const getJob = vi.fn().mockResolvedValueOnce(job("running"));
+    for (let i = 0; i < 20; i++) getJob.mockRejectedValueOnce(new Error("502: Bad Gateway"));
+    getJob.mockResolvedValueOnce(job("interrupted", {
+      error: "Container restarted while this job was running — likely an out-of-memory "
+        + "kill. If it's a big stack that keeps crashing, reject bad plate-solve frames.",
+      error_kind: "restarted",
+    }));
+    const slept: number[] = [];
+    const err = await pollJobUntilDone("j1", {
+      getJob, sleep: (ms) => { slept.push(ms); return Promise.resolve(); },
+      failureMessage: "PNG render failed",
+    }).catch((e) => e);
+    expect((err as Error).message).toBe(RENDER_RESTARTED_MESSAGE);
+    expect((err as Error).message).not.toMatch(/plate-solve/);
+    // Twenty failures at the 500 ms interval span well over a minute of outage —
+    // the old five-poll budget spanned 2.5 s.
+    expect(slept.reduce((a, b) => a + b, 0)).toBeGreaterThan(60_000);
+    expect(Math.max(...slept)).toBeLessThanOrEqual(POLL_MAX_ERROR_BACKOFF_MS);
+  });
+
+  it("covers a couple of minutes of outage before giving up", () => {
+    let total = 0;
+    for (let n = 1; n <= POLL_MAX_CONSECUTIVE_ERRORS; n++) total += pollErrorBackoffMs(500, n);
+    expect(total).toBeGreaterThan(120_000);
+    expect(total).toBeLessThan(240_000);
+  });
+
+  it("backs off while failing and polls at the normal rate otherwise", () => {
+    expect(pollErrorBackoffMs(500, 0)).toBe(500);
+    expect(pollErrorBackoffMs(500, 1)).toBe(1000);
+    expect(pollErrorBackoffMs(500, 2)).toBe(2000);
+    expect(pollErrorBackoffMs(500, 10)).toBe(POLL_MAX_ERROR_BACKOFF_MS);
+  });
+
+  it("a server that keeps answering 4xx is shown as is, on the short budget", async () => {
+    const getJob = vi.fn().mockRejectedValue(new Error("404: No such job"));
+    await expect(pollJobUntilDone("j1", { getJob, sleep: noSleep })).rejects.toThrow(
+      "404: No such job");
+    expect(getJob).toHaveBeenCalledTimes(POLL_MAX_CONSECUTIVE_CLIENT_ERRORS + 1);
+  });
+
+  it("names a queued job a restart caught as one that never ran", async () => {
+    const getJob = vi.fn().mockResolvedValue(job("interrupted", {
+      error: "The app restarted before this job started, so it never ran and nothing "
+        + "was changed. Run it again.",
+      error_kind: "not_started",
+    }));
+    await expect(pollJobUntilDone("j1", { getJob, sleep: noSleep })).rejects.toThrow(
+      RENDER_NOT_STARTED_MESSAGE);
+  });
+
+  it("recognises an older build's restart notes, which carry no kind", () => {
+    expect(jobFailureMessage(job("interrupted", {
+      error: "Container restarted while this job was running — likely an out-of-memory kill.",
+    }), "x")).toBe(RENDER_RESTARTED_MESSAGE);
+    expect(jobFailureMessage(job("interrupted", {
+      error: "The app restarted before this job started, so it never ran.",
+    }), "x")).toBe(RENDER_NOT_STARTED_MESSAGE);
+    expect(jobFailureMessage(job("error", { error: "out of memory" }), "x")).toBe("out of memory");
+    expect(jobFailureMessage(job("cancelled"), "Export failed")).toBe("Export failed");
   });
 
   it("surfaces a terminal job failure with the job's own error", async () => {
