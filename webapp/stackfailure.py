@@ -15,7 +15,11 @@ made moot.
 Three kinds of failure have to be read, because they are recorded in three places:
 
   * A **manual** stack (``kind="stack"`` / ``"process_target"``) fails the job
-    itself: ``state="error"`` with the message on the record.
+    itself: ``state="error"`` with the message on the record. A restart that
+    cuts one off — on this install usually the box running out of memory on a
+    big mosaic, which kills the process before it can record anything — leaves
+    ``state="interrupted"`` with the restart's own note instead, and that is a
+    stack that made no picture just the same.
   * The **walk-away** auto-stack runs *inside* the scan job and catches per
     target on purpose, so one target can't sink the batch
     (``webapp/pipeline.py``). Its failures land in the scan job's own result
@@ -40,6 +44,10 @@ from webapp.jobs import classify_error_message
 
 #: Job kinds that stack a target directly, so their own failure is the target's.
 STACK_JOB_KINDS = frozenset({"stack", "process_target"})
+
+#: The states of a stack job that ended without a picture and say why. A
+#: cancelled one is left out: the owner stopped it, so it is not news to him.
+_FAILED_STATES = frozenset({"error", "interrupted"})
 
 #: The key the scan job's result uses for per-target auto-stack failures.
 SCAN_STACK_ERRORS_KEY = "stack_errors"
@@ -97,13 +105,14 @@ def latest_stack_failures(jobs: Iterable[Any]) -> dict[str, StackFailure]:
 
     for job in jobs:
         kind = getattr(job, "kind", "")
-        if kind in STACK_JOB_KINDS and getattr(job, "state", "") == "error":
+        if kind in STACK_JOB_KINDS and getattr(job, "state", "") in _FAILED_STATES:
             safe = getattr(job, "target", None)
             message = getattr(job, "error", None)
             if safe and message:
                 offer(StackFailure(
                     safe=safe, message=str(message),
-                    kind=getattr(job, "error_kind", None),
+                    kind=getattr(job, "error_kind", None)
+                    or classify_error_message(str(message)),
                     when_utc=_stamp(job) or None, unattended=False,
                     job_id=getattr(job, "id", None),
                 ))

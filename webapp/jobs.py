@@ -59,6 +59,10 @@ def classify_job_error(exc: BaseException) -> str | None:
     ``no_fits_in_folder`` (a Build-master job pointed at a folder with no FITS),
     ``disk_full`` (the disk — or the dataset's quota — ran out mid-write), and
     ``no_permission`` (the app's user may not read or write a file it needs).
+
+    Two more kinds are never raised by a job body — :meth:`JobManager.
+    _recover_interrupted` stamps them on the jobs a restart cut off:
+    ``restarted`` (it was running) and ``not_started`` (it was still queued).
     """
     # Type-based first — reword-proof. The stacker refuses an over-budget canvas
     # by raising MemoryError (see stacker.py's memory guard).
@@ -84,6 +88,12 @@ _DISK_FULL_ERRNOS = frozenset(
 # problem in the dataset/app setup, and freeing space would not fix it.
 _NO_PERMISSION_ERRNOS = frozenset((errno.EACCES, errno.EPERM, errno.EROFS))
 
+#: The opening words of the two notes a restart leaves on the jobs it cut off
+#: (``JobManager._INTERRUPT_MSG`` / ``_NOT_STARTED_MSG``), lower-cased for
+#: :func:`classify_error_message`. Pinned against the notes by a test.
+_INTERRUPT_MSG_LEAD = "container restarted while this job was running"
+_NOT_STARTED_MSG_LEAD = "the app restarted before this job started"
+
 
 def classify_error_message(message: str) -> str | None:
     """The same classification from a raw message alone, with no exception.
@@ -95,6 +105,14 @@ def classify_error_message(message: str) -> str | None:
     :func:`classify_job_error` adds only what the exception type can tell it.
     """
     msg = message.lower()
+    # The restart notes first: the "was running" one advises rejecting bad
+    # "plate-solve frames", so the matcher below would otherwise translate an
+    # out-of-memory kill as "there are no plate-solved frames to stack yet".
+    # A job recovered by an older build carries the text with no kind.
+    if msg.startswith(_INTERRUPT_MSG_LEAD):
+        return "restarted"
+    if msg.startswith(_NOT_STARTED_MSG_LEAD):
+        return "not_started"
     if "working memory" in msg:
         return "memory_budget"
     if ("plate-solve" in msg or "plate solved" in msg or "plate-solved" in msg):
@@ -245,24 +263,34 @@ class JobManager:
         "the Logs page for the last lines before the restart."
     )
 
+    _NOT_STARTED_MSG = (
+        "The app restarted before this job started, so it never ran and nothing "
+        "was changed. Run it again."
+    )
+
     def _recover_interrupted(self) -> None:
         """Any job left running/queued when the process died is interrupted.
 
         We record an explanatory error so the user isn't left with a silent
         ``interrupted`` + ``error: null`` (a SIGKILL/OOM gives the worker no
         chance to write its own error). A running job almost certainly died to a
-        crash; a merely-queued one just never started.
+        crash; a merely-queued one just never started — and says so, because an
+        orange "interrupted" with nothing under it (what a redeploy left on every
+        queued job until v0.505.24) gives no hint that nothing happened and the
+        job only needs running again. Each also gets a stable ``error_kind``
+        (``restarted`` / ``not_started``), so the frontend translates it by kind
+        rather than by matching the note's text.
         """
         with self._connect() as conn:
             conn.execute(
-                "UPDATE jobs SET state='interrupted', finished_utc=?, error=? "
-                "WHERE state='running'",
+                "UPDATE jobs SET state='interrupted', finished_utc=?, error=?, "
+                "error_kind='restarted' WHERE state='running'",
                 (_utc(), self._INTERRUPT_MSG),
             )
             conn.execute(
-                "UPDATE jobs SET state='interrupted', finished_utc=? "
-                "WHERE state='queued'",
-                (_utc(),),
+                "UPDATE jobs SET state='interrupted', finished_utc=?, error=?, "
+                "error_kind='not_started' WHERE state='queued'",
+                (_utc(), self._NOT_STARTED_MSG),
             )
 
     def _persist(self, job: Job) -> None:

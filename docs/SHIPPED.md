@@ -1,5 +1,46 @@
 # Shipped — the record
 
+## v0.505.24 — 2026-11-06 (Builder, branch `claude/fervent-allen-sfrrli`) — a job a restart cut off is explained as a restart
+
+**Found by a code read of the open "better error messages on long-running jobs" item (UX & polish), after six
+dogfood/fuzz runs in a row came back CLEAN with nothing ungated in Bugs.** Three defects, one cause: a restart
+is the one way a job ends without its own code recording anything, and the app's explanation of it was
+mis-read or missing.
+
+- **The wrong translation (the bug).** `JobManager._recover_interrupted` leaves a long note on a job that was
+  running when the process died — on this install usually an out-of-memory kill on a big mosaic. The note ends
+  by advising *"reject bad plate-solve frames"*, and with no `error_kind` the Jobs page's text matcher
+  (`friendlyJobError`) took `plate-solve` for the *nothing-solved* refusal: the row read **"There are no
+  accepted, plate-solved frames to stack yet. Run Quality check & plate-solve first"** — a wrong cause and a
+  wrong cure for the owner's best-known failure mode. `classify_error_message` (backend) had the same order.
+- **The silent half.** A job still *queued* at the restart (every queued job, after a `deploy.sh` redeploy) was
+  marked `interrupted` with `error` left `NULL`: an orange badge with nothing under it.
+- **The missing alert.** `latest_stack_failures` read only `state == "error"`, so a stack killed mid-run — which
+  never gets to write an error — never raised the Target page's / Dashboard's "your last stack didn't run" note.
+
+**Fix.** `_recover_interrupted` now stamps a stable kind on both — `restarted` (running) and `not_started`
+(queued, with a new note: *"The app restarted before this job started, so it never ran and nothing was changed.
+Run it again."*). `classify_error_message` and `friendlyJobError` recognise both notes by their opening words
+**before** any other match, so a job recovered by an older build (text, no kind) translates right too; the
+leads are pinned against the notes by a test. `JOB_ERROR_KIND` gains plain sentences for both — the restart one
+names the usual cause (memory on a very big stack, or an update), says to run it again, and links **Open Logs →**.
+`stackfailure._FAILED_STATES = {"error", "interrupted"}` lets a cut-off `stack` / `process_target` reach the
+alert (a *cancelled* one stays out — he stopped it himself), classified from its text when it has no kind; the
+alert says *"didn't finish … was cut off part-way"* for `restarted` rather than *"stopped before it ran"*.
+**Not reached, recorded:** a walk-away auto-stack runs *inside* the scan job, so a kill there leaves an
+interrupted scan with no per-target record — there is no target to name, and nothing was changed for it.
+
+**Upgrade-safe (§9):** two new values of the existing nullable `error_kind` column, written only by the
+recovery `UPDATE`; an old DB's already-recovered rows keep their text and are caught by the text fallback. No
+config, schema, layout, default or response-shape change.
+
+**Tests (+6, every one fails before the fix):** `tests/webapp/test_jobs.py` +2 (a real restart over the same DB
+stamps `restarted` on the running job and `not_started` + the note on the queued one; both notes classify by
+their own kind and a genuine plate-solve refusal still classifies as one), `tests/webapp/test_stack_failures.py`
++1 (a cut-off stack is reported, by kind and by text alone; cancelled and non-stack interrupted jobs are not),
+`Jobs.test.tsx` +2 (both notes by kind and by raw text; never the plate-solve sentence), and
+`StackFailedAlert.test.tsx` +1 (the *didn't finish* wording and the Logs link).
+
 ## v0.505.23 — 2026-11-05 (Builder, branch `claude/fervent-allen-6fqsbn`) — the "Hold back highlights" core is measured on the master's own grid
 
 - **Bug (PRIORITY 1, the editor), the Builder 2026-11-05 measured entry (verbatim below).** On a decimated proxy
