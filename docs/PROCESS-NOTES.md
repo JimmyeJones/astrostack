@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-11-06 (Builder, branch `claude/fervent-allen-qbodbr`) — nothing ungated; dogfood `--dithered --restack --incoming-lag --editor` CLEAN.
+
+Every open Bugs entry is still gated on the owner or observer (FOCUS, unchanged); issue inbox the same four
+(#878, #880, #903, #1015, none updated); no open PRs; baseline suite 8590 passed / 7 skipped (xdist `-n 4`,
+14m16s). Today's passes had run `--mosaic --editor --big` and `--deep --calibration --closing`, so this one ran
+the four flags they had not. **`--dithered`:** canvas 1212×784 from 78 subs, coverage 0..40, matching the
+recorded shape; Auto's trim 30.7 % against the recorded 30.3 % apron (no move); the panel map is silent by design
+on this shape; the editor drive on that run re-rendered all 21 ops, Undo/Redo applied, and "What Auto-process
+did" offers *Hold back highlights (0.1)*. **`--restack`:** two runs (3 → 6 subs), reel available and dated by
+capture, noise-delta pixel-exact (ratio 1.658). **`--incoming-lag`:** the Dashboard note counts 8 waiting subs
+(1 unreadable) and says plainly the folder is never written to. Taste chips on both drives answered and reset.
+Nothing overflowing, no console errors; the tallest page, `[phone] /life-list [Still to shoot]` 14,513 px, is by
+design (see the entry below). A code read of `edit/ops/detail.py` (`_denoise`, `_chroma_denoise`,
+`_box_blur3`), `edit/ops/stars.py` (`_reduce`) and `edit/ops/geometry.py` found nothing to file.
+
 ## 2026-11-06 (Builder, branch `claude/fervent-allen-x7cxnp`) — nothing ungated; dogfood `--deep --calibration --closing` CLEAN.
 
 Every open Bugs entry is still gated on the owner or observer (FOCUS, unchanged); no open PRs; baseline suite
