@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-11-06 (Builder, branch `claude/fervent-allen-x7cxnp`) — nothing ungated; dogfood `--deep --calibration --closing` CLEAN.
+
+Every open Bugs entry is still gated on the owner or observer (FOCUS, unchanged); no open PRs; baseline suite
+8590 passed / 7 skipped. Today's five passes had all run `--mosaic --editor --big`, so this one ran the three
+flags they had not. **`--calibration`:** the app offered both seeded folders (Darks 10s → dark, Flats → flat),
+built them, reported 31 hot/dead pixels (0.020 %) on the dark, auto-bound both, and run 1 records
+`dark_master_id` 1 / `flat_master_id` 2; "How's my stack?" says "calibrated (dark+flat)" and its
+add-darks note withdrew, as it should. **`--deep`:** 301 of 1,200 rows on first paint (1,456 ms, 7,524 nodes),
+600 after scrolling the foot, no failed requests. **`--closing`:** both closing targets listed, the shallower
+first; the week plan names the same one's best night. Nothing overflowing, no console errors. The tallest page,
+`[phone] /life-list [Still to shoot]` 14,513 px, is by design (`SHIPPED.md`, v0.492.x sweep record: the
+asked-for list is never shortened) and was not taken as a layout slice. A code read of the editor's
+pointer-driven controls (`splitSliderProps` users, `UnsavedLookGuard`) and the ops' proxy scaling found
+nothing to file.
+
 ## 2026-11-05 (Builder, branch `claude/fervent-allen-6qs7s9`) — nothing ungated; dogfood `--mosaic --editor --big` CLEAN; v0.505.23 confirmed end to end.
 
 - **Suite:** 8590 passed / 7 skipped on `27614d51` (xdist `-n 4`, BLAS capped, 18m30s). Every Bugs entry is gated
