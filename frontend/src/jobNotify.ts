@@ -17,9 +17,12 @@ import type { Job } from "./api/client";
 // A job the user is still waiting on.
 const IN_PROGRESS = new Set(["running", "queued"]);
 // Terminal states worth pinging about. A user-initiated `cancelled` isn't a
-// surprise (they asked for it), and `interrupted` is an app-restart artefact —
-// so we only notify on a genuine finish or failure.
-const NOTIFY_ON_FINISH = new Set(["done", "error"]);
+// surprise (they asked for it), so it never fires. `interrupted` does: it is the
+// job a restart cut off — on this install usually the NAS running out of memory
+// on a big mosaic stack — or a queued one a restart caught before its turn. The
+// walk-away owner who turned notifications on is waiting on exactly that job,
+// and before this the ping never came: the header badge just went quiet.
+const NOTIFY_ON_FINISH = new Set(["done", "error", "interrupted"]);
 
 const STORAGE_KEY = "astrostack.notifyOnJobFinish";
 
@@ -28,7 +31,7 @@ const STORAGE_KEY = "astrostack.notifyOnJobFinish";
  * between two polls. Pure.
  *
  * A job only counts if it was **seen unfinished** in ``prev`` and is now
- * ``done``/``error`` in ``curr`` — so a fresh page load (no prior state) never
+ * ``done``/``error``/``interrupted`` in ``curr`` — so a fresh page load (no prior state) never
  * bursts a notification for jobs that were already finished when the page
  * opened, and a job that was cancelled or is still running never fires.
  */
@@ -52,6 +55,23 @@ export function jobNotificationText(
 ): { title: string; body: string } {
   const what = kindLabel || "A job";
   const target = job.target ? ` — ${job.target}` : "";
+  if (job.state === "interrupted") {
+    // ``not_started`` is the queued job a restart caught; an older build's
+    // restart wrote no kind, and then the job is described as cut off, which
+    // is the case worth hearing about either way.
+    if (job.error_kind === "not_started") {
+      return {
+        title: "AstroStack: a job never started",
+        body: `${what}${target} never ran — the app restarted before its turn. `
+          + "Open AstroStack to run it again.",
+      };
+    }
+    return {
+      title: "AstroStack: a job didn't finish",
+      body: `${what}${target} didn't finish — the app restarted while it was running. `
+        + "Open AstroStack to see what to do.",
+    };
+  }
   if (job.state === "error") {
     return {
       title: "AstroStack: a job failed",
