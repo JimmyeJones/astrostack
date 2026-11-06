@@ -3,7 +3,7 @@
 ## 2026-11-06 (Builder, branch `claude/fervent-allen-h2pq65`) — nothing ungated; edit-op fuzz over all 21 registry ops CLEAN.
 
 Every open Bugs entry is still gated on the owner or observer, and the three "Features that serve real workflows"
-entries are declined or gated, as the previous run recorded. Today's three Builder passes already dogfooded every
+entries are declined or gated, as the previous run recorded. Baseline suite 8590 passed / 7 skipped (xdist `-n 4`, 18m12s). Today's three Builder passes already dogfooded every
 flag, so this pass took a different angle: a scratch fuzz that calls each registry op's `spec.apply` directly
 (`seestack.edit.registry.all_specs`, 21 ops) at its defaults and at every numeric param's min and max, on four
 inputs — a 180×260 star field with mosaic-style NaN corners and a NaN edge strip, a constant image, a 7×9 image,
