@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-11-06 (Builder, branch `claude/fervent-allen-gcpw89`) — v0.505.26 (job-finish notification for an interrupted job); dogfood `--empty` and `--no-site` CLEAN.
+
+**Dogfood record.** The two flags no run today had used. `--empty`: exit 0, nothing overflowing, no console
+errors; `/tonight` correctly renders its no-site alert (the `[note]` is coverage this pass does not have, not a
+finding). `--no-site`: exit 0, nothing overflowing, no console errors. The Target page's four sentences read as one
+paragraph (mosaic advice, "a good start", a folded no-darks note, the 3×3 framing verdict) and point the same way.
+The Dashboard's only note, "Plate-solving isn't set up yet … ASTAP wasn't found", is this container having no
+ASTAP; the sample ships pre-solved. Tallest page `/life-list [Still to shoot]` 14,513 px on a phone, by design
+(see `SHIPPED.md`).
+
+**How the fix was found.** v0.505.24/25 made `interrupted` a real ending. Grepping the frontend for every
+`state === "error"` turned up one consumer that still ignored it: `jobNotify.justFinishedJobs`, behind the
+opt-in "Notify me when done" switch. Its comment called `interrupted` "an app-restart artefact", so the
+walk-away owner got no ping for the overnight stack the out-of-memory restart killed. Next run: the same grep
+finds nothing else (`pollJob.ts` already treats `interrupted` as terminal).
+
+---
+
 ## 2026-11-06 (Scout, branch `claude/exciting-wozniak-ut5fe4`) — QA rotation sweep (2), new angle — the "Hold back highlights" grain yardstick on an uneven mosaic: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8590 passed / 7 skipped on `5bf6b332` (xdist `-n 4`, BLAS capped, 17m37s). **Inbox:** the same four (#878, #880, #903,

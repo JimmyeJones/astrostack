@@ -1947,7 +1947,7 @@ export function JobsView() {
                 onChange={(e) => { void notify.toggle(e.currentTarget.checked); }}
                 label="Notify me when done"
               />
-              <HintIcon hint="Get a desktop notification when a job finishes, so you can switch tabs while it runs." />
+              <HintIcon hint="Get a desktop notification when a job finishes, or stops without finishing, so you can switch tabs while it runs." />
             </Group>
           ) : null}
           {finished > 0 ? (

@@ -39,7 +39,7 @@ function AppVersion() {
 // via `isJobNotifyEnabled()`, so the Jobs-page toggle (which writes that key)
 // controls it with no shared React state — flip it on and the next poll starts
 // firing; flip it off and firing stops. `justFinishedJobs` only fires on an
-// in-progress→done/error transition, and the baseline is tracked every poll even
+// in-progress→done/error/interrupted transition, and the baseline is tracked every poll even
 // while disabled, so enabling mid-session never bursts for already-finished jobs.
 export function GlobalJobNotifier() {
   const { data } = useQuery({

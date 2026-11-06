@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## v0.505.26 — 2026-11-06 (Builder, branch `claude/fervent-allen-gcpw89`) — "Notify me when done" pings for a job a restart cut off
+
+**The last consumer of a job's terminal state that v0.505.24/25 left, found by grepping the frontend for every
+`state === "error"`.** The Jobs page's opt-in "Notify me when done" switch fires desktop notifications from the
+always-mounted `GlobalJobNotifier` (`App.tsx`), through `jobNotify.justFinishedJobs`. That only counted a job that
+went from running/queued to `done` or `error`, with a comment calling `interrupted` "an app-restart artefact". Since
+v0.505.24 that state is a real ending with its own explanation: on the owner's install it is usually the NAS
+running out of memory on a big mosaic stack. The page stays loaded across the restart, its poll resumes, and the
+job it last saw `running` comes back `interrupted`. The walk-away user who turned notifications on so they could
+leave the tab was never pinged; the header badge just went quiet.
+
+**What changed (frontend-only):** `NOTIFY_ON_FINISH` includes `interrupted`. `jobNotificationText` gives it its
+own words: *"AstroStack: a job didn't finish — Stacking — M 42 didn't finish — the app restarted while it was
+running. Open AstroStack to see what to do."* A queued job the restart caught (`error_kind` `not_started`) gets
+*"a job never started … never ran — the app restarted before its turn. Open AstroStack to run it again."* An older
+build's kind-less `interrupted` job reads as cut off. A `cancelled` job still never fires, and a job first seen
+already interrupted (a fresh page load) still never bursts. The switch's hint now says "when a job finishes, or
+stops without finishing".
+
+**Tests:** +4 vitest in `jobNotify.test.ts`, all four **failing before** with `jobNotify.ts` reverted to `main`
+and passing after. No backend, config, schema, API or default change; the notification stays opt-in.
+
 ## v0.505.25 — 2026-11-06 (Builder, branch `claude/fervent-allen-5kbux1`) — the Stack page's job card for a stack that was cut off or cancelled
 
 **The follow-up to v0.505.24, found by reading what else consumes a job's terminal state.** v0.505.24 gave a job a

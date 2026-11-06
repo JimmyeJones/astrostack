@@ -42,6 +42,19 @@ describe("justFinishedJobs", () => {
     )).toEqual([]);
   });
 
+  it("fires for a job a restart cut off, running or still queued", () => {
+    // The walk-away case: an overnight stack the NAS's out-of-memory restart
+    // killed, and the queued job behind it that never got its turn.
+    const prev = [mkJob({ id: "a", state: "running" }), mkJob({ id: "b", state: "queued" })];
+    const curr = [
+      mkJob({ id: "a", state: "interrupted", error_kind: "restarted" }),
+      mkJob({ id: "b", state: "interrupted", error_kind: "not_started" }),
+    ];
+    expect(justFinishedJobs(prev, curr).map((j) => j.id)).toEqual(["a", "b"]);
+    // ...but never for one first seen already interrupted (a fresh page load).
+    expect(justFinishedJobs([], curr)).toEqual([]);
+  });
+
   it("does not fire for a user-cancelled job", () => {
     expect(justFinishedJobs(
       [mkJob({ id: "a", state: "running" })],
@@ -62,6 +75,28 @@ describe("jobNotificationText", () => {
     expect(t.title).toMatch(/failed/i);
     expect(t.body).toContain("Processing target failed");
     expect(t.body).not.toContain(" — "); // no target segment when target is null
+  });
+});
+
+describe("jobNotificationText for a job a restart cut off", () => {
+  it("says a running job didn't finish, not that it finished", () => {
+    const t = jobNotificationText(
+      mkJob({ state: "interrupted", error_kind: "restarted", target: "M 42" }), "Stacking");
+    expect(t.title).toMatch(/didn't finish/i);
+    expect(t.body).toContain("Stacking — M 42 didn't finish");
+    expect(t.body).not.toMatch(/ finished\./);
+  });
+
+  it("says a queued job never ran", () => {
+    const t = jobNotificationText(
+      mkJob({ state: "interrupted", error_kind: "not_started", target: null }), "Stacking");
+    expect(t.title).toMatch(/never started/i);
+    expect(t.body).toContain("Stacking never ran");
+  });
+
+  it("reads an older build's kind-less interrupted job as cut off", () => {
+    const t = jobNotificationText(mkJob({ state: "interrupted" }), "Stacking");
+    expect(t.title).toMatch(/didn't finish/i);
   });
 });
 
