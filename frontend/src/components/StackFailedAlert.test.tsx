@@ -59,6 +59,19 @@ describe("StackFailedAlert", () => {
     expect(screen.getByText(/last stack stopped before it ran/)).toBeTruthy();
   });
 
+  it("says a stack a restart cut off didn't finish, not that it never ran", () => {
+    renderIn(<StackFailedAlert failure={{
+      ...FAILURE, unattended: false, kind: "restarted",
+      message: "Container restarted while this job was running — likely an "
+        + "out-of-memory kill. If it keeps crashing, reject bad plate-solve frames.",
+    }} />);
+    expect(screen.getByText(/Your last stack didn't finish/)).toBeTruthy();
+    expect(screen.getByText(/was cut off part-way/)).toBeTruthy();
+    expect(screen.queryByText(/stopped before it ran/)).toBeNull();
+    expect(screen.getByRole("link", { name: /Open Logs/ }).getAttribute("href"))
+      .toBe("/logs");
+  });
+
   it("shows an unrecognised message verbatim rather than hiding it", () => {
     renderIn(<StackFailedAlert failure={{
       ...FAILURE, kind: null, message: "gremlins in the mount",

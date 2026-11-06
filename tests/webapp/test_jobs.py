@@ -412,3 +412,56 @@ def test_rest_endpoints_include_error_kind(client):
     listed = client.get("/api/jobs").json()
     row = next(r for r in listed if r["id"] == job.id)
     assert row["error_kind"] == "memory_budget"
+
+
+def test_restart_explains_both_the_running_and_the_queued_job(tmp_path):
+    """A restart cut both off, and each says what that means for it.
+
+    The running one gets the long note (usually an out-of-memory kill) and the
+    queued one — which used to get an orange "interrupted" and nothing at all,
+    after every redeploy — says it never ran and nothing changed. Each carries a
+    stable kind, so neither is translated by matching the note's words.
+    """
+    db = tmp_path / "jobs.sqlite"
+    jm = JobManager(db)
+    jm.start()
+    release = threading.Event()
+
+    def slow(job: Job):
+        release.wait(10.0)
+
+    running = jm.submit("stack", slow)
+    try:
+        assert _wait(lambda: jm.get(running.id).state == "running")
+        queued = jm.submit("stack", slow)
+        jm2 = JobManager(db)
+        r, q = jm2.get(running.id), jm2.get(queued.id)
+        assert r.state == q.state == "interrupted"
+        assert r.error == JobManager._INTERRUPT_MSG
+        assert r.error_kind == "restarted"
+        assert q.error == JobManager._NOT_STARTED_MSG
+        assert q.error_kind == "not_started"
+        # And over the REST shape too (JobOut must not strip it).
+        assert jm2.get(queued.id).to_dict()["error_kind"] == "not_started"
+    finally:
+        release.set()
+        jm.stop()
+
+
+def test_the_restart_notes_are_never_read_as_a_plate_solve_problem():
+    """The running note advises rejecting bad "plate-solve frames", which the
+    plain-text matcher used to take for "no plate-solved frames to stack yet" —
+    so a job recovered by an older build (text, no kind), and the walk-away
+    paths that keep only text, got the wrong translation."""
+    from webapp.jobs import (
+        _INTERRUPT_MSG_LEAD,
+        _NOT_STARTED_MSG_LEAD,
+        classify_error_message,
+    )
+    assert JobManager._INTERRUPT_MSG.lower().startswith(_INTERRUPT_MSG_LEAD)
+    assert JobManager._NOT_STARTED_MSG.lower().startswith(_NOT_STARTED_MSG_LEAD)
+    assert classify_error_message(JobManager._INTERRUPT_MSG) == "restarted"
+    assert classify_error_message(JobManager._NOT_STARTED_MSG) == "not_started"
+    # A real plate-solve refusal is still a plate-solve refusal.
+    assert classify_error_message(
+        "no accepted, plate-solved frames to stack") == "no_solved_frames"

@@ -38,20 +38,26 @@ export function StackFailedAlert({
   const { message, next, action } = friendlyJobError(failure.message, failure.kind);
   const when = formatStampDate(failure.when_utc);
   const subject = showTargetName ? failure.name : "This target";
+  // A restart that cut a stack off part-way did run it — "stopped before it
+  // ran" would be untrue — and the title says it didn't *finish*.
+  const cutOff = failure.kind === "restarted";
   return (
     <Alert
       color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
       data-testid="stack-failed-note"
       title={showTargetName
         ? `${failure.name} didn't stack${when ? ` (${when})` : ""}`
-        : `Your last stack didn't run${when ? ` (${when})` : ""}`}
+        : `Your last stack didn't ${cutOff ? "finish" : "run"}${when ? ` (${when})` : ""}`}
     >
       <Text size="sm">
         {failure.unattended
           ? `${subject} tried to stack on its own and stopped, so there is no new `
             + "picture from it."
-          : `${subject}'s last stack stopped before it ran, so there is no new `
-            + "picture from it."}{" "}
+          : cutOff
+            ? `${subject}'s last stack was cut off part-way, so there is no new `
+              + "picture from it."
+            : `${subject}'s last stack stopped before it ran, so there is no new `
+              + "picture from it."}{" "}
         {message}
       </Text>
       {next ? <Text size="sm" mt={4}>{next}</Text> : null}

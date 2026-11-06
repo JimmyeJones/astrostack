@@ -346,3 +346,35 @@ def test_endpoint_surfaces_a_reprocess_all_refusal_end_to_end(
         assert f["unattended"] is True
         assert "9.4 GB" in f["message"]
         assert f["when_utc"]
+
+
+# ---------------------------------------------- a stack a restart cut off --
+
+def test_a_stack_a_restart_cut_off_is_reported_as_one_that_made_no_picture():
+    """An out-of-memory kill gives the worker no chance to record an error: the
+    job is left ``running`` and the next start marks it ``interrupted`` with the
+    restart's note. That stack made no picture just as surely as a refusal did,
+    so the Target page and the Dashboard say so instead of going quiet."""
+    db_restart = (
+        "Container restarted while this job was running — likely an out-of-memory "
+        "kill (very large mosaic stacks can exhaust RAM) or a manual redeploy. "
+        "The job was not completed; re-queue it. If it's a big stack that keeps "
+        "crashing, reject bad plate-solve frames or lower the frame count, and see "
+        "the Logs page for the last lines before the restart."
+    )
+    found = latest_stack_failures([
+        _job("stack", state="interrupted", target="M_31", error=db_restart,
+             error_kind="restarted"),
+        # A job recovered by a build older than the kinds: text only.
+        _job("process_target", state="interrupted", target="NGC_7000",
+             error=db_restart),
+        # One the owner cancelled himself is not news to him.
+        _job("stack", state="cancelled", target="M_42", error="cancelled"),
+        # An interrupted non-stack job says nothing about a target's pictures.
+        _job("qc_solve", state="interrupted", target="M_45", error=db_restart),
+    ])
+    assert set(found) == {"M_31", "NGC_7000"}
+    assert found["M_31"].kind == "restarted"
+    # Classified from the note, never as "no plate-solved frames".
+    assert found["NGC_7000"].kind == "restarted"
+    assert found["M_31"].unattended is False

@@ -144,6 +144,24 @@ const JOB_ERROR_KIND: Record<string, JobErrorHelp> = {
       + "able to read your incoming folder and to read and write your library "
       + "folder. Check the dataset's permissions, then run it again.",
   },
+  // A restart cut the job off part-way (webapp/jobs.py::_recover_interrupted).
+  // On this install that is usually the box running out of memory on a very big
+  // stack — the kill leaves the worker no chance to say so itself — or a redeploy.
+  restarted: {
+    message:
+      "The app restarted while this was running, so it didn't finish. That is "
+      + "usually the NAS running out of memory on a very big stack, or an update.",
+    next:
+      "Run it again. If a big stack keeps stopping here, lower the drizzle scale or "
+      + "set Canvas mode to “reference”, and check Logs for the last lines before "
+      + "the restart.",
+    action: { label: "Open Logs →", href: "/logs" },
+  },
+  // A restart came while the job was still waiting its turn: nothing ran.
+  not_started: {
+    message: "The app restarted before this job got its turn, so it never ran and nothing was changed.",
+    next: "Run it again.",
+  },
 };
 
 // Translate a failed job into a plain sentence + next step. Prefer the backend's
@@ -156,6 +174,15 @@ export function friendlyJobError(
 ): JobErrorHelp {
   if (kind && JOB_ERROR_KIND[kind]) return JOB_ERROR_KIND[kind];
   const s = raw.toLowerCase();
+  // The restart notes first (mirrors webapp/jobs.py::classify_error_message):
+  // the "was running" one advises rejecting bad "plate-solve frames", which the
+  // plate-solve match below would read as "no plate-solved frames to stack".
+  if (s.startsWith("container restarted while this job was running")) {
+    return JOB_ERROR_KIND.restarted;
+  }
+  if (s.startsWith("the app restarted before this job started")) {
+    return JOB_ERROR_KIND.not_started;
+  }
   if (s.includes("memoryerror") || s.includes("working memory")) {
     return JOB_ERROR_KIND.memory_budget;
   }

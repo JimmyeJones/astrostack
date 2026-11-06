@@ -1404,7 +1404,36 @@ describe("jobKindLabel", () => {
   });
 });
 
+// The note webapp/jobs.py::_recover_interrupted leaves on a job a restart cut off.
+const RESTART_NOTE =
+  "Container restarted while this job was running — likely an out-of-memory "
+  + "kill (very large mosaic stacks can exhaust RAM) or a manual redeploy. "
+  + "The job was not completed; re-queue it. If it's a big stack that keeps "
+  + "crashing, reject bad plate-solve frames or lower the frame count, and see "
+  + "the Logs page for the last lines before the restart.";
+
 describe("friendlyJobError", () => {
+  it("reads a restart as a restart, not as 'nothing plate-solved'", () => {
+    // The note advises rejecting bad "plate-solve frames"; matched by text (an
+    // older backend sends no kind) it used to come back as no_solved_frames.
+    for (const kind of [undefined, "restarted"]) {
+      const r = friendlyJobError(RESTART_NOTE, kind);
+      expect(r.message).toMatch(/restarted while this was running/);
+      expect(r.message).not.toMatch(/plate-solved/);
+      expect(r.action?.href).toBe("/logs");
+    }
+  });
+
+  it("says a queued job a restart caught never ran", () => {
+    const note = "The app restarted before this job started, so it never ran and "
+      + "nothing was changed. Run it again.";
+    for (const kind of [undefined, "not_started"]) {
+      const r = friendlyJobError(note, kind);
+      expect(r.message).toMatch(/never ran and nothing was changed/);
+      expect(r.next).toBe("Run it again.");
+    }
+  });
+
   it("translates the memory-budget refusal", () => {
     const r = friendlyJobError("MemoryError: stack output canvas needs ~7 GB of working memory");
     expect(r.message).toMatch(/more memory than the budget allows/);
