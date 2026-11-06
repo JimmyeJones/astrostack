@@ -22,6 +22,21 @@
   to mistake, so it cannot mint a false button.
 - **Rotation: (2) done → next sweep is (3).**
 
+## 2026-11-06 (Builder, branch `claude/fervent-allen-h2pq65`) — nothing ungated; edit-op fuzz over all 21 registry ops CLEAN.
+
+Every open Bugs entry is still gated on the owner or observer, and the three "Features that serve real workflows"
+entries are declined or gated, as the previous run recorded. Baseline suite 8590 passed / 7 skipped (xdist `-n 4`, 18m12s). Today's three Builder passes already dogfooded every
+flag, so this pass took a different angle: a scratch fuzz that calls each registry op's `spec.apply` directly
+(`seestack.edit.registry.all_specs`, 21 ops) at its defaults and at every numeric param's min and max, on four
+inputs — a 180×260 star field with mosaic-style NaN corners and a NaN edge strip, a constant image, a 7×9 image,
+and one with a whole channel NaN. Checked: no exception, shape kept (geometry ops excepted), no `inf`, and no NaN
+created inside covered pixels. **Result: no finding on a realistic shape.** The only raises are (a) the all-NaN
+channel (`background.subtract`, `background.final_gradient`) — not a shape a stack produces — and (b)
+`background.final_gradient` at `dilate_px` = 64 on the 180×260 toy, where the dilated star mask covers every
+pixel; re-run on a 1500×1000 proxy with 1,500 stars and NaN corners it applies cleanly (92 % finite = the
+coverage). Both are caught by `pipeline.apply_recipe`'s per-op guard and surface as an op error, not a blank render.
+Nothing to file.
+
 ## 2026-11-06 (Builder, branch `claude/fervent-allen-bcm43q`) — nothing ungated; dogfood `--combine` CLEAN.
 
 Every open Bugs entry is still gated on the owner or observer (FOCUS, unchanged); the three "Features that serve
