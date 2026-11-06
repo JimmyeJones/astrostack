@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-11-06 (Builder, branch `claude/fervent-allen-bcm43q`) — nothing ungated; dogfood `--combine` CLEAN.
+
+Every open Bugs entry is still gated on the owner or observer (FOCUS, unchanged); the three "Features that serve
+real workflows" entries are declined, wait on a big upload, or wait on an observer count, so there is no ungated
+beginner feature to take either. Baseline suite 8590 passed / 7 skipped (xdist `-n 4`, 17m53s). `--combine` was
+the stalest flag (last run 2026-10-19), so this pass ran it alone. The whole journey held: the stack without a
+solve fails as designed with `no_solved_frames`; the merge nudge pairs `M_31` with `M_31_night_2` at 0.0 arcmin;
+Combine keeps the cover picture pinned and the folded-in notes/tags; a rescan stays at one target (7 frames) and a
+new sub dropped into the combined-away folder lands in the deep target (8 frames); **§10: `incoming/` byte-for-byte
+unchanged, the one addition create-new.** Nothing overflowing, no console errors. **One line looked wrong and is a
+fixture artefact, not a bug:** the framing card says M 31 is "only about 5% of it in this picture" beside "about a
+3×2 mosaic (6 panels) covers all of it". The verdict measures the 480×320 synthetic canvas at its 5″/px WCS (a
+40′ field), while the panel count has no solved `pixscale_arcsec` on the frame rows (the combine step's synthetic
+solution writes only `wcs_json`) and so falls back to `FALLBACK_FIELD`, the S30's 2.1° field. A real ASTAP solve
+records the pixel scale and the frame's own dimensions (`framing.frame_field_from_solve`), so both numbers come
+from one field on the owner's data. Code read of `UnsavedLookGuard` (the run id is in the path, so a run switch is
+guarded), `skyCast`, `tonalGuides` and `windowFidelity`: nothing to file.
+
 ## 2026-11-06 (Builder, branch `claude/fervent-allen-qbodbr`) — nothing ungated; dogfood `--dithered --restack --incoming-lag --editor` CLEAN.
 
 Every open Bugs entry is still gated on the owner or observer (FOCUS, unchanged); issue inbox the same four
