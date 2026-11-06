@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## v0.505.27 — 2026-11-06 (Builder, branch `claude/fervent-allen-6vw4kr`) — an editor export a restart cut off is named as a restart
+
+**The editor's half of the restart work v0.505.24–26 did for stacks, found by reading every consumer of a job's
+terminal state.** Every editor render — full-size PNG, share picture, share to app, print — and the "My best pictures"
+wall poll their job through `frontend/src/components/editor/pollJob.ts::pollJobUntilDone`. A full-size render of a
+big mosaic is the editor's likeliest out-of-memory kill, and from the browser that looks like the status endpoint
+going away until the container is back. The poll rode out **five** failed fetches 500 ms apart — about 2.5 s,
+well short of a restart — and then threw the browser's own error, so the red toast said *"Failed to fetch"* (or
+*"502: Bad Gateway"* behind a proxy). When the app *was* back in time, the job read back `interrupted` with
+`JobManager._INTERRUPT_MSG`, a note written for a stack that advises rejecting bad plate-solve frames.
+
+**What changed (frontend-only):** failed status fetches now back off (`pollErrorBackoffMs`: the interval doubled
+per failure, capped at 5 s) and up to 30 in a row are ridden out — about 2.4 minutes of outage, after which the job
+reads back with its restart note. `jobFailureMessage` turns `error_kind` `restarted` (or an older build's kind-less
+note) into *"The app restarted while this was being made, so it didn't finish — usually the NAS running out of
+memory on a very large picture, or an update. Try again."*, and `not_started` into *"… never ran. Try again."*;
+any other job error is shown as before. A ride-out that runs dry says *"Lost touch with the app while this was
+being made — it may be restarting. Give it a minute, then try again."* A server that keeps *answering* 4xx (no such
+job, signed out) is not down, so it keeps the old five-try budget and its own message.
+
+**Tests:** +6 vitest in `pollJob.test.ts` (one existing test's expectation moved from the raw error to the
+lost-contact sentence), failing before with `pollJob.ts` reverted to `main` and passing after. No backend,
+config, schema, API or default change.
+
 ## v0.505.26 — 2026-11-06 (Builder, branch `claude/fervent-allen-gcpw89`) — "Notify me when done" pings for a job a restart cut off
 
 **The last consumer of a job's terminal state that v0.505.24/25 left, found by grepping the frontend for every
