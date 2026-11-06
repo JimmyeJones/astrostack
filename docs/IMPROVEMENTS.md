@@ -2497,7 +2497,7 @@ any of them.)*
 ### UX & polish
 - Mobile layout polish on Combine. (S) *(Calibration's masters table done v0.505.11, Tonight's planner tables v0.505.12; Combine is the deprioritised
   channel-combine page — touch it only for an outright bug.)*
-- Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7; a restart-interrupted job v0.505.24.)*
+- Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7; a restart-interrupted job v0.505.24; the Stack page's own job card for one, and for a cancelled stack, v0.505.25.)*
 
 ### Performance (only with a measurement)
 
@@ -3153,6 +3153,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.25 **The Stack page's job card says a stack a restart cut off didn't finish, and a cancelled one that it was stopped — it used to freeze on the last progress line ("stacking 340/5477") with no word that the run was over** (`Stack.tsx` `jobFailed`, `JobError` `not_started` fallback) — Builder follow-up to v0.505.24. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.24 **A job a restart cut off is explained as a restart — the "was running" note no longer translates as "no plate-solved frames to stack yet", a queued job a redeploy caught says it never ran, and a stack killed mid-run (the big-mosaic out-of-memory case) shows on the Target page and Dashboard as one that didn't finish** (`JobManager._recover_interrupted` `error_kind` `restarted`/`not_started`, `classify_error_message`, `stackfailure._FAILED_STATES`, `friendlyJobError`) — Builder code read. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.23 **The "Hold back highlights" severity no longer drifts with the editor proxy's step — the core the proxy finds is measured on a native window of the master, so a small core keeps its button on a bigger canvas and a core clipped at capture gets none** (`highlights.suggest_highlight_protect(native_window=…)`, `editor._highlight_native_window`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.22 **The "Hold back highlights" nudge no longer goes silent on a bigger mosaic canvas for the same blown core — its size floor was a share of the whole canvas, counted in proxy pixels; it is now one frame's share, counted in native pixels** (`highlights._min_core_area`, `measure_blown_core(frame_px=)`, `editor._run_frame_px`). Full entry in [`SHIPPED.md`](SHIPPED.md).

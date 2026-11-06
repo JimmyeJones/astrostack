@@ -1,5 +1,26 @@
 # Shipped — the record
 
+## v0.505.25 — 2026-11-06 (Builder, branch `claude/fervent-allen-5kbux1`) — the Stack page's job card for a stack that was cut off or cancelled
+
+**The follow-up to v0.505.24, found by reading what else consumes a job's terminal state.** v0.505.24 gave a job a
+restart cut off a stable `error_kind` and taught the Jobs page, the Target page and the Dashboard to say so. The
+Stack page — the one screen a beginner is usually watching when a big stack dies — tracks its own job through
+`useJobEvents` and only knew two endings, `done` and `error`. After an out-of-memory kill the container restarts,
+the `EventSource` reconnects, and the backend sends the job as `interrupted`; the card then froze on the last
+progress line (*"stacking 340/5477 · 6 %"*, bar no longer animating) with no alert, no explanation and no word
+that the run was over. A stack cancelled from the Jobs page or the auto-drizzle note froze the same way.
+
+**What changed (`frontend/src/routes/Stack.tsx`, frontend-only):** a new `jobFailed` (`error` *or*
+`interrupted`) drives the status line ("Stack didn't finish"), the red bar and the translated `JobError` alert,
+which now reads the restart's own sentence via `error_kind` `restarted` / `not_started`. An `interrupted` job with
+no note at all — what an older build's restart left on a *queued* job — falls back to `not_started` rather than
+rendering an empty red line. A `cancelled` stack's status line says *"Stopped — you cancelled it"* with a grey
+bar and no alert (it is not news to the person who stopped it — the same reasoning as `stackfailure._FAILED_STATES`).
+`useJobEvents` has no other caller, so no other surface had the gap.
+
+**Tests:** +3 vitest in `Stack.test.tsx` (restart-cut-off, older-build queued, cancelled), all three **failing
+before** with the fix reverted in place and passing after. No backend, config, schema, API or default change.
+
 ## v0.505.24 — 2026-11-06 (Builder, branch `claude/fervent-allen-sfrrli`) — a job a restart cut off is explained as a restart
 
 **Found by a code read of the open "better error messages on long-running jobs" item (UX & polish), after six

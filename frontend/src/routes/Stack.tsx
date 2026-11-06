@@ -715,6 +715,14 @@ export function StackView() {
   // decide there.
   const biasSizeWarn = biasSizeWarning(biasM, frameDims, darkM);
   const running = job && (job.state === "running" || job.state === "queued");
+  // A stack a restart cut off ends "interrupted", not "error" — on this install
+  // usually the NAS running out of memory on a big mosaic. The stream reconnects
+  // after the restart and delivers that state, and it is a stack that made no
+  // picture just the same, so it gets the same "didn't finish" card (its note
+  // is translated by `error_kind` "restarted" / "not_started"). Before this the
+  // card froze on the last progress line — "stacking 340/5477" — with no word
+  // that the run was over.
+  const jobFailed = job != null && (job.state === "error" || job.state === "interrupted");
   const pct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
 
   // Stacking needs at least one accepted, plate-solved frame to align against.
@@ -1679,27 +1687,35 @@ export function StackView() {
                 <Text size="sm" c="dimmed">
                   {job.state === "done"
                     ? "Done"
-                    : job.state === "error"
+                    : jobFailed
                       // The status line stays a status line; the failure itself
                       // gets the Alert below, in the app's own words. It used to
                       // print `Error: {job.error}` — the raw engine exception,
                       // `MemoryError:` prefix and all — on the one screen where
                       // a beginner most needs a sentence they can act on.
                       ? "Stack didn't finish"
-                      : `${job.phase || "working"} ${job.done}/${job.total}`}
+                      : job.state === "cancelled"
+                        ? "Stopped — you cancelled it"
+                        : `${job.phase || "working"} ${job.done}/${job.total}`}
                 </Text>
                 <Text size="sm" c="dimmed">{pct}%</Text>
               </Group>
               <Progress
                 value={job.state === "done" ? 100 : pct}
-                color={job.state === "error" ? "red" : job.state === "done" ? "teal" : "violet"}
+                color={jobFailed ? "red" : job.state === "done" ? "teal"
+                  : job.state === "cancelled" ? "gray" : "violet"}
                 animated={Boolean(running)}
               />
-              {job.state === "error" ? (
+              {jobFailed ? (
                 <Alert color="red" variant="light" mt="xs" p="xs"
                   icon={<IconAlertTriangle size={18} />}
                   data-testid="stack-job-error">
-                  <JobError raw={job.error ?? ""} kind={job.error_kind} showRaw />
+                  {/* An "interrupted" job with no note is one an older build's
+                      restart caught while it was still queued (it wrote none). */}
+                  <JobError raw={job.error ?? ""}
+                    kind={job.error_kind
+                      ?? (job.state === "interrupted" && !job.error ? "not_started" : null)}
+                    showRaw />
                 </Alert>
               ) : null}
               {job.state === "done" && excludedFrames.length > 0 ? (

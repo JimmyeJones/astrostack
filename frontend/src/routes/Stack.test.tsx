@@ -2724,7 +2724,7 @@ describe("StackView — a stack that fails says so in plain language", () => {
   }
 
   /** Start a stack on a rendered page and push one failed-job snapshot. */
-  async function failWith(error: string, kind?: string | null) {
+  async function failWith(error: string, kind?: string | null, state = "error") {
     mockStartableForm();
 
     renderStack();
@@ -2732,7 +2732,7 @@ describe("StackView — a stack that fails says so in plain language", () => {
     await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
     act(() => {
       MockEventSource.instances[0].emit("progress", {
-        id: "j1", kind: "stack", state: "error", phase: "", done: 0, total: 1,
+        id: "j1", kind: "stack", state, phase: "stacking", done: 340, total: 5477,
         detail: "", created_utc: null, started_utc: null, finished_utc: null,
         error, error_kind: kind ?? null, result: null,
       });
@@ -2761,6 +2761,42 @@ describe("StackView — a stack that fails says so in plain language", () => {
     const alert = await failWith("OSError: disk is full");
     const hits = alert.textContent?.match(/disk is full/g) ?? [];
     expect(hits.length).toBe(1);
+  });
+
+  // An out-of-memory kill restarts the container; the stream reconnects and
+  // delivers the job as "interrupted". The card used to freeze on the last
+  // progress line ("stacking 340/5477") with no word that the run was over.
+  it("says a stack a restart cut off didn't finish, in the restart's words", async () => {
+    const alert = await failWith(
+      "Container restarted while this job was running — likely an out-of-memory "
+      + "kill. If it keeps crashing, reject bad plate-solve frames.",
+      "restarted", "interrupted");
+    expect(screen.getByText("Stack didn't finish")).toBeInTheDocument();
+    expect(screen.queryByText("stacking 340/5477")).not.toBeInTheDocument();
+    expect(alert.textContent).toMatch(/app restarted while this was running/);
+    expect(alert.textContent).not.toMatch(/no accepted, plate-solved frames/i);
+  });
+
+  it("explains a job an older build's restart caught while queued", async () => {
+    const alert = await failWith("", null, "interrupted");
+    expect(alert.textContent).toMatch(/before this job got its turn/);
+  });
+
+  it("says a cancelled stack was stopped rather than freezing on its progress", async () => {
+    mockStartableForm();
+    renderStack();
+    fireEvent.click(await screen.findByRole("button", { name: "Start stacking" }));
+    await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
+    act(() => {
+      MockEventSource.instances[0].emit("progress", {
+        id: "j1", kind: "stack", state: "cancelled", phase: "stacking", done: 340,
+        total: 5477, detail: "", created_utc: null, started_utc: null,
+        finished_utc: null, error: null, error_kind: null, result: null,
+      });
+    });
+    await screen.findByText("Stopped — you cancelled it");
+    expect(screen.queryByText("stacking 340/5477")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("stack-job-error")).not.toBeInTheDocument();
   });
 
   it("shows nothing extra while a stack is merely running", async () => {
