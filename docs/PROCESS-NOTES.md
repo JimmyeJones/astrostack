@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-11-06 (Scout, branch `claude/exciting-wozniak-ut5fe4`) — QA rotation sweep (2), new angle — the "Hold back highlights" grain yardstick on an uneven mosaic: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8590 passed / 7 skipped on `5bf6b332` (xdist `-n 4`, BLAS capped, 17m37s). **Inbox:** the same four (#878, #880, #903,
+  #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start. **Dogfood
+  `--mosaic`:** CLEAN (EXIT 0, nothing overflowing, no console errors; the known non-finding only — the Dashboard's
+  ASTAP note in a dogfood without ASTAP). The Target page's five notes agree with each other (4 min of ~7 h, the
+  top-right panel 30 s behind a typical 1 min, ~75 % of M42 in frame, a 3×3 would cover it).
+- **Sweep (2).** Per-panel code since the last (2) (`8uy5tg`, 11-02): v0.505.22 (`_min_core_area`'s floor is one
+  frame's, via `editor._run_frame_px` — per field by construction) and v0.505.23 (the native window round the
+  core). The one whole-canvas number left in that path is `highlights._linear_reference`'s σ
+  (`estimate_noise_sigma` of the *whole* picture), which sets the linear-structure tolerance (`0.25 σ`) inside the
+  core's own panel. Asked: when the core sits in a deep panel and most of the canvas is thinner (noisier), does
+  the inflated σ call the core's real structure "grain" and drop the button? Measured on a 600×1800 canvas, core
+  in the left third (noise 0.0005), the right three-quarters thinner, through the real `tone.stretch` defaults
+  with `frame_px` set: big core (r=12) strength **0.65 / 0.65 / 0.65 / 0.60 / 0.50** at noise gaps 1× / 2× / 4× /
+  8× / 16× (severity 0.645 → 0.427); small core (r=5) **0.10** at 1× / 2× / 4× (severity 0.189 / 0.185 / 0.172).
+  A 4× noise gap is a 16× depth gap between panels — far past any real mosaic's (the dogfood 2×2's worst panel is
+  2× behind) — so the whole-canvas σ does not move the answer at the owner's shape. **Not filed.** The reverse
+  (core in the thin panel) can only *raise* the tolerance's relative grain, and a capture-clipped core has no grain
+  to mistake, so it cannot mint a false button.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-11-06 (Builder, branch `claude/fervent-allen-bcm43q`) — nothing ungated; dogfood `--combine` CLEAN.
 
 Every open Bugs entry is still gated on the owner or observer (FOCUS, unchanged); the three "Features that serve
