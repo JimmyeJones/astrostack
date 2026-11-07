@@ -1739,6 +1739,26 @@ function JobResultActions({ job }: { job: Job }) {
         {n > 0 ? `Download ${n} full-size pictures` : "Download pictures"}
       </Button>
     );
+  } else if (job.kind === "stack" && job.target && typeof r.run_id === "number") {
+    // The Stack form's own job. Its card on the Stack page links the result —
+    // but only while that page is open, and a big stack runs for hours, so the
+    // person who comes back to this list found the finished row with no way to
+    // the picture. Same destination as a finished "Process target".
+    action = (
+      <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
+        component={Link} to={`/targets/${job.target}/edit/${r.run_id}`}>
+        View result
+      </Button>
+    );
+  } else if (job.kind === "video_stack" && typeof r.n_stacked === "number"
+             && r.n_stacked > 0) {
+    // A Moon/Sun video stack: its picture lives on the Moon & Sun page.
+    action = (
+      <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
+        component={Link} to="/moon-sun">
+        View result
+      </Button>
+    );
   } else if (job.kind === "editor_export" && r.safe) {
     action = (
       <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
