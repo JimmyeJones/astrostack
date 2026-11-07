@@ -118,7 +118,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   with him; its result decides whether (1) needs one master per temperature range, like a matched dark. This
   line is replaced with the numbers when they arrive.
 
-- **🟡 (Scout 2026-11-03, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/` or `.Trash-*/` folder
+- **🟡 (Scout 2026-11-03 + 11-07, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/`, `.Trash-*/` or `.zfs/` folder
   a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
   *(Pillar: trust — PRIORITY 2–3; size **S**; severity moderate *if* his share has a recycle bin or sees a desktop
   delete; nothing is lost on disk. Confidence: **reproduced** through the real functions; occurrence **unmeasured**.)*
@@ -131,7 +131,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   on the scan hot path is his call (precedent: `_TEMP_FOLDER_NAMES`, owner-decided 2026-09-08); asked in the
   one-sitting list. When answered, add the skip beside `is_fits_candidate` so `find_fits_files`,
   `scan_and_organize` and `plan_incoming_units` keep agreeing. Observer can measure reach as a shape: how many
-  top-level folders under `incoming/` start with `.`.
+  top-level folders under `incoming/` start with `.`. **Also `.zfs/` (Scout 2026-11-07, reproduced):** if `incoming/`
+  is a dataset root with `snapdir=visible`, two snapshots of 8 subs (`M 42_sub`, `NGC 7000_mosaic_sub`) plan and scan
+  as one **`.zfs`** target of 16 — both objects, every sub once per snapshot, growing each day; `incoming/` unchanged.
 
 - **🟡 (Builder 2026-10-30, the ⭐ 2026-10-28 entry's part (4)) — the "darker ring just inside" the ragged border is
   made by the stacker's per-frame sky flatten: on a vignetted sub, `Background2D` leaves a dark rim along every
@@ -3116,7 +3118,7 @@ outright bug in existing behaviour, never to add capability.
 17. ~~**Should agent commits be cryptographically *signed*?**~~ — **ANSWERED 2026-10-19: leave them unsigned.** The identity guard (`scripts/check-commit-identity.sh`, CI's Commit identity job) is the control; "Unverified" on GitHub is cosmetic. Do not re-ask; never run the history-rewriting "fix" a hook may suggest.
 
 18. ~~**Copy a hand-saved editor recipe onto a restacked run**~~ — **ANSWERED YES 2026-10-19; SHIPPED v0.501.0.**
-19. **Skip hidden folders (`.recycle/`, `.Trash-*/`, any name starting with `.`) at scan time?** A scan today
+19. **Skip hidden folders (`.recycle/`, `.Trash-*/`, a visible `.zfs/`, any name starting with `.`) at scan time?** A scan today
     turns an SMB recycle bin or a desktop's trash folder inside `incoming/` into a target of the subs you deleted
     (Bugs, Scout 2026-11-03, part (b)). Yes/no; a skipped folder would still be listed with "bring it in".
 
