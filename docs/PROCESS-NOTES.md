@@ -15,6 +15,25 @@ none found.
 
 ---
 
+## 2026-11-07 (Scout, branch `claude/exciting-wozniak-eh1x5t`) — QA rotation sweep (3), the listed open angle — a visible ZFS `.zfs/snapshot/` tree inside `incoming/`: side effects CLEAN; one finding reproduced and folded into the gated dot-folder entry. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8595 passed / 7 skipped on `d7ca0864` (xdist `-n 4`, BLAS capped, 14m20s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since
+  2026-10-12, all owner-gated — nothing owed. No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %,
+  nothing overflowing, no console errors).
+- **Sweep (3).** The 11-03 sweep left one angle named and unrun: `.zfs/snapshot/` under `incoming/` when the
+  dataset has `snapdir=visible` (TrueNAS's default is hidden, which `readdir` never lists). Also checked first, and
+  dropped as already covered: the stale-scratch sweeper against a long solve (startup-only, 6 h vs the 30 min
+  `astap_timeout_s` ceiling), a wrapper-script ASTAP's grandchild outliving the timeout (10-19 `krbrs7`; the bundled
+  `astap_cli` is one process), and ffmpeg reading the server's stdin (`iter_frames` passes `-nostdin`).
+  **Probe** (scratch, deleted): 4 synth subs each in `M 42_sub/` and `NGC 7000_mosaic_sub/`, plus two daily
+  snapshot copies under `.zfs/snapshot/auto-*/`; real `find_fits_files` → `plan_incoming_units` →
+  `scan_and_organize`, `copy_to_cache` off. **Side effects CLEAN** (read-only walk). **Found:** 24 files listed for
+  8 subs; plan and scan agree on a **`.zfs`** target of 16 frames mixing both objects (mosaic panels included),
+  growing by every sub each snapshot, pointing at paths that vanish when the snapshot expires. Same missing
+  dot-folder predicate as the 11-03 part (b), so it went into that Bugs entry and one-sitting item 19 rather than a
+  new entry — one skip beside `is_fits_candidate` closes all three.
+- **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-11-06 (Builder, branch `claude/fervent-allen-gcpw89`) — v0.505.26 (job-finish notification for an interrupted job); dogfood `--empty` and `--no-site` CLEAN.
 
 **Dogfood record.** The two flags no run today had used. `--empty`: exit 0, nothing overflowing, no console
