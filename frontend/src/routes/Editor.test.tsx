@@ -470,6 +470,25 @@ describe("EditorView", () => {
     await waitFor(() => expect(screen.getByText("Rendering — 50%")).toBeInTheDocument());
   });
 
+  // The app runs one job at a time, so a PNG clicked while a big stack runs sits
+  // queued behind it — for hours on a library of thousands of subs. A queued job
+  // has no phase, and the line under the button used to read "Rendering": a
+  // render that looked stalled, not one that had not started.
+  it("says a full-res PNG queued behind another job is waiting, not rendering", async () => {
+    mockEditorQueries();
+    vi.spyOn(client.api, "exportPng").mockResolvedValue({ job_id: "png1" });
+    const queuedJob = { id: "png1", kind: "editor_png", target: "M_42", state: "queued",
+      phase: "", done: 0, total: 0, detail: "", created_utc: null, started_utc: null,
+      finished_utc: null, error: null, result: null };
+    vi.spyOn(client.api, "getJob").mockResolvedValue(queuedJob);
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Download full-res PNG"));
+    expect(await screen.findByText(/Waiting for another job to finish first/)).toBeInTheDocument();
+    expect(screen.queryByText("Rendering")).not.toBeInTheDocument();
+  });
+
   // The fallback path: nothing mocks `listStackRuns` here, so the editor cannot
   // build its own sentence and shows the job result's terse blurb — which is
   // what an older backend, a failed list read, or a run that isn't in the list

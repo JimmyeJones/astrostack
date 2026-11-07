@@ -58,7 +58,10 @@ export function MyDeepSkyWallCard() {
         getJob: api.getJob,
         isAbandoned: () => !mounted.current,
         failureMessage: "Preparing your pictures failed",
-        onProgress: (j) => setFullProgress(pngProgressLabel(j)),
+        // This one is a button's own label, so a queued archive gets the short
+        // form of the editor's "waiting for another job" line.
+        onProgress: (j) => setFullProgress(
+          j.state === "queued" ? "Waiting its turn…" : pngProgressLabel(j)),
       });
       return { jobId: job_id, n: Number(job.result?.n_pictures) || 0 };
     },

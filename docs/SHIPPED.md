@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## v0.505.28 — 2026-11-07 (Builder, branch `claude/fervent-allen-bf5zb9`) — an editor export waiting behind a stack says it is waiting, not "Rendering"
+
+**Found by reading what an export's progress line says before it runs.** The app runs one job at a time
+(`webapp/jobs.py::JobManager`, deliberately — two at once on a RAM-capped NAS is an out-of-memory kill), so a
+full-size PNG, share picture, print file or "My best pictures" archive clicked while a stack is running waits for
+that stack — on a target of thousands of subs, for hours. A queued job has an empty `phase`, and
+`frontend/src/components/editor/pngProgress.ts::pngProgressLabel` fell back to *"Rendering"*: the line under the
+button claimed a render was under way when none had started, which reads as a render that has stalled.
+
+**What changed (frontend-only):** `pngProgressLabel` returns `QUEUED_PROGRESS_LABEL` — *"Waiting for another job to
+finish first (see Jobs) — it starts right after."* — while the polled job is `queued`, and goes back to the phase
+the moment it runs. The editor's PNG, share and print lines all use it. The wall card's "Full-size versions" shows
+its progress as the button's own label, so it gets the short form, *"Waiting its turn…"*.
+
+**Tests:** +4 vitest (`pngProgress.test.ts` ×2, `Editor.test.tsx` "says a full-res PNG queued behind another job is
+waiting, not rendering", `MyDeepSkyWallCard.test.tsx` "…queued behind another job says it is waiting its turn");
+the three queued-state tests failed with both source files reverted to `main` and pass after. Dogfood
+`--mosaic --editor` CLEAN the same run. No backend, config, schema, API or default change.
+
 ## v0.505.27 — 2026-11-06 (Builder, branch `claude/fervent-allen-6vw4kr`) — an editor export a restart cut off is named as a restart
 
 **The editor's half of the restart work v0.505.24–26 did for stacks, found by reading every consumer of a job's
