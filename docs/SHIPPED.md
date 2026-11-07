@@ -1,5 +1,18 @@
 # Shipped — the record
 
+## v0.505.31 — 2026-11-07 (Builder, branch `claude/fervent-allen-hzdrov`) — a finished stack opens its picture from the Jobs page
+
+**Found by reading which finished jobs the Jobs page lets you reach.** `Jobs.tsx::JobResultActions` gives a finished
+`process_target` a *View result* button, but the Stack form's own `stack` job — the most common job a person starts
+by hand — had none, and neither had a Moon/Sun `video_stack`. The Stack page's card links the result only while that
+page is open, and a big stack runs for hours, so someone who walked away and came back to the Jobs page found a
+finished row with no way to the picture.
+
+**What changed:** a finished `stack` row with a `run_id` now offers *View result* → `/targets/<safe>/edit/<run_id>`
+(the same destination as a finished Process target), and a finished `video_stack` that stacked at least one frame
+links to the Moon & Sun page. A failed or cancelled stack offers nothing. `Jobs.test.tsx` (+1) fails against `main`'s
+`Jobs.tsx` and passes after. Frontend only — no backend, config, schema, API or default change.
+
 ## v0.505.30 — 2026-11-07 (Builder, branch `claude/fervent-allen-94cy8a`) — a finished Share or Print file can be collected from the Jobs page
 
 **Found by reading which finished jobs the Jobs page lets you collect.** `Jobs.tsx::JobResultActions` gives a

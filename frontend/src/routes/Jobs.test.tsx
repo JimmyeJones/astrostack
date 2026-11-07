@@ -324,6 +324,35 @@ describe("JobsView process_target result actions", () => {
     expect(screen.getAllByRole("link", { name: /Download print file/ })).toHaveLength(1);
   });
 
+  it("links a finished stack, and a finished Moon/Sun video stack, to its picture", async () => {
+    // The Stack page's own card links the result only while that page is open;
+    // a big stack runs for hours, and whoever came back to this list had no way
+    // to the finished picture.
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "st-1", kind: "stack", target: "M_42", state: "done",
+        result: { run_id: 9, n_frames_used: 120, cancelled: false, errors: [] },
+      }),
+      mkJob({
+        id: "st-2", kind: "stack", target: "M_31", state: "error",
+        error: "boom", result: null,
+      }),
+      mkJob({
+        id: "st-3", kind: "stack", target: "M_33", state: "cancelled",
+        result: { cancelled: true, run_id: null },
+      }),
+      mkJob({
+        id: "vs-1", kind: "video_stack", target: "cap-1", state: "done",
+        result: { capture_id: "cap-1", n_graded: 400, n_kept: 100, n_stacked: 100 },
+      }),
+    ]);
+    renderJobsRouted();
+    await screen.findByText("M_31");
+    const links = screen.getAllByRole("link", { name: "View result" });
+    expect(links.map((a) => a.getAttribute("href")))
+      .toEqual(["/targets/M_42/edit/9", "/moon-sun"]);
+  });
+
   it("falls back to History when the backend didn't report a run id", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({
