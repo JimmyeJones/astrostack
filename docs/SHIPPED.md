@@ -1,5 +1,22 @@
 # Shipped — the record
 
+## v0.505.32 — 2026-11-07 (Builder, branch `claude/fervent-allen-a93ah2`) — the two "finish with Auto" jobs read back what they did
+
+**Found by reading which finished jobs the Jobs page says nothing about.** Settings → Maintenance's
+`RefinishPicturesCard` starts *Finish my unedited pictures* (`finish_unedited_pictures`) or *Give back pictures a
+restack flattened* (`refinish_pictures`) and then **navigates to the Jobs page** — but `Jobs.tsx::JobResultActions`
+had no branch for either kind, so the finished row showed only its step count. How many pictures Auto finished, which
+it deliberately left alone, and which it could not finish (`_auto_finish_displayed_pictures`' `failed` list, e.g. a
+picture that gained an edit between the offer and the run) were all invisible, and there was no way on to the pictures.
+
+**What changed:** new pure `Jobs.finishPicturesSummary(kind, result)` — *"Finished 3 pictures with Auto."* (or
+*"Re-finished …"*, *"There was nothing left to finish."*, *"(cancelled early)"*, *"— N could not be finished"*), a
+*"Left alone: …"* line in the same words the Settings offer used, and the failures grouped by cause through the same
+`friendlyJobError` grouping `reprocessSummary` uses (now a shared `groupBatchFailures`), with the engine's `skipped:`
+note said in words. A row that finished at least one picture offers *See them in the Gallery*. `Jobs.test.tsx` (+6);
+the two render tests fail against `main`'s `Jobs.tsx` and pass after. Frontend only — no backend, config, schema, API
+or default change.
+
 ## v0.505.31 — 2026-11-07 (Builder, branch `claude/fervent-allen-hzdrov`) — a finished stack opens its picture from the Jobs page
 
 **Found by reading which finished jobs the Jobs page lets you reach.** `Jobs.tsx::JobResultActions` gives a finished

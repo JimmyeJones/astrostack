@@ -228,6 +228,24 @@ export interface BatchFailureGroup {
 // target lands in exactly one group and none is silently dropped from the list.
 const FAILED_WITHOUT_SAYING_WHY = "It failed without saying why.";
 
+/** Failed targets grouped by the plain-language sentence each one's error
+ *  translates to — one group per cause, in first-seen order (pure). */
+function groupBatchFailures(
+  entries: { name: string; error: string; kind: string | null }[],
+): BatchFailureGroup[] {
+  const byCause = new Map<string, BatchFailureGroup>();
+  for (const f of entries) {
+    const help = f.error
+      ? friendlyJobError(f.error, f.kind)
+      : { message: FAILED_WITHOUT_SAYING_WHY };
+    const group = byCause.get(help.message)
+      ?? { message: help.message, next: help.next, targets: [] };
+    group.targets.push(f.name);
+    byCause.set(help.message, group);
+  }
+  return [...byCause.values()];
+}
+
 /** Plain-language outcome of a finished reprocess-all batch (pure, tested). */
 export function reprocessSummary(r: Record<string, unknown>): {
   line: string; failed: string[]; failedGroups: BatchFailureGroup[];
@@ -263,17 +281,7 @@ export function reprocessSummary(r: Record<string, unknown>): {
   // the same way are one thing to do, not eleven mysteries, so they are grouped
   // by the very sentence a single failed job already gets from
   // :func:`friendlyJobError` — same words on both surfaces, no second vocabulary.
-  const byCause = new Map<string, BatchFailureGroup>();
-  for (const f of failedEntries) {
-    const help = f.error
-      ? friendlyJobError(f.error, f.kind)
-      : { message: FAILED_WITHOUT_SAYING_WHY };
-    const group = byCause.get(help.message)
-      ?? { message: help.message, next: help.next, targets: [] };
-    group.targets.push(f.name);
-    byCause.set(help.message, group);
-  }
-  const failedGroups = [...byCause.values()];
+  const failedGroups = groupBatchFailures(failedEntries);
   let line = `Restacked ${stacked}/${total} target${total === 1 ? "" : "s"}`;
   if (r.cancelled) line += " (cancelled early)";
   // The batch stood aside mid-way so a waiting import could have the single
@@ -329,6 +337,74 @@ export function reprocessSummary(r: Record<string, unknown>): {
   if (skipped > 0) line += ` — ${skipped} already up to date`;
   if (failed.length) line += ` — ${failed.length} failed`;
   return { line: `${line}.`, failed, failedGroups };
+}
+
+// What each "left alone" reason of the two finish-with-Auto jobs is called —
+// the same words Settings → Maintenance used when it offered the button, so the
+// result reads back what the offer promised. A reason not named here (the
+// repair's `never_finished`: flat pictures the app never finished, which the
+// other button is for) is not counted, as the offer did not count it either.
+const FINISH_LEFT_ALONE: [string, (n: number) => string][] = [
+  ["has_edit", (n) => `${n} with an edit you saved`],
+  ["by_hand", (n) => `${n} you finished yourself`],
+  ["cover_pinned", (n) => `${n} you pinned as the cover`],
+  ["auto_edit_off", (n) => `${n} with auto-editing turned off`],
+];
+
+// The job's own "it did nothing" reason (`_auto_edit_process_run` returned
+// None): the stacked file is gone, or the picture now carries a recipe the app
+// did not bake — so Auto refused to write over it.
+const FINISH_SKIPPED =
+  "Left as it was — its stacked file is missing, or it now has an edit the app didn't make.";
+
+/** Plain-language outcome of a finished "Finish my unedited pictures" or "Give
+ * back pictures a restack flattened" job (pure, tested).
+ *
+ * Settings → Maintenance starts either one and then *sends the user here* —
+ * so this row is the only place they learn how many pictures were finished,
+ * which ones were deliberately left alone, and which ones failed. Before this,
+ * a finished row said nothing but its step count. */
+export function finishPicturesSummary(kind: string, r: Record<string, unknown>): {
+  line: string; leftAlone: string | null; failedGroups: BatchFailureGroup[]; finished: number;
+} {
+  const names = Array.isArray(r.refinished) ? r.refinished
+    : Array.isArray(r.finished) ? r.finished : [];
+  const finished = names.length;
+  const failedEntries = (Array.isArray(r.failed) ? r.failed : [])
+    .map((f) => (f && typeof f === "object" ? f as Record<string, unknown> : null))
+    .filter((f): f is Record<string, unknown> => f !== null && Boolean(f.target ?? f.name))
+    .map((f) => {
+      const error = String(f.error ?? "");
+      return {
+        name: String(f.name ?? f.target),
+        // Said in words, not as the engine's "skipped: …" note.
+        error: error.startsWith("skipped:") ? FINISH_SKIPPED : error,
+        kind: null,
+      };
+    });
+  const failedGroups = groupBatchFailures(failedEntries);
+  const pics = (n: number) => `${n} picture${n === 1 ? "" : "s"}`;
+  const verb = kind === "refinish_pictures" ? "Re-finished" : "Finished";
+  let line = finished === 0 && failedEntries.length === 0 && !r.cancelled
+    ? "There was nothing left to finish"
+    : `${verb} ${pics(finished)} with Auto`;
+  if (r.cancelled) line += " (cancelled early)";
+  if (failedEntries.length) line += ` — ${failedEntries.length} could not be finished`;
+  const leftObj = r.left_alone && typeof r.left_alone === "object"
+    ? r.left_alone as Record<string, unknown> : {};
+  const parts = FINISH_LEFT_ALONE
+    .map(([key, say]) => {
+      const v = leftObj[key];
+      const n = Array.isArray(v) ? v.length : 0;
+      return n > 0 ? say(n) : null;
+    })
+    .filter((p): p is string => p !== null);
+  return {
+    line: `${line}.`,
+    leftAlone: parts.length ? `Left alone: ${parts.join(", ")}.` : null,
+    failedGroups,
+    finished,
+  };
 }
 
 /** Plain-language outcome of a finished one-click "Process target" job (pure,
@@ -1404,6 +1480,33 @@ function JobResultActions({ job }: { job: Job }) {
             <Text size="xs" c="dimmed">{g.targets.join(", ")}</Text>
           </Stack>
         ))}
+      </Stack>
+    );
+  }
+  if (job.kind === "finish_unedited_pictures" || job.kind === "refinish_pictures") {
+    const { line, leftAlone, failedGroups, finished } = finishPicturesSummary(job.kind, r);
+    return (
+      <Stack gap={4} mt="xs">
+        <Text size="sm">{line}</Text>
+        {leftAlone ? <Text size="xs" c="dimmed">{leftAlone}</Text> : null}
+        {failedGroups.map((g) => (
+          <Stack key={g.message} gap={0}>
+            <Text size="xs" c="red">
+              {g.targets.length} {g.targets.length === 1 ? "picture" : "pictures"}
+              {" — "}{g.message}
+            </Text>
+            {g.next ? <Text size="xs" c="dimmed">{g.next}</Text> : null}
+            <Text size="xs" c="dimmed">{g.targets.join(", ")}</Text>
+          </Stack>
+        ))}
+        {finished > 0 ? (
+          <Group>
+            <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
+              component={Link} to="/gallery">
+              See them in the Gallery
+            </Button>
+          </Group>
+        ) : null}
       </Stack>
     );
   }
