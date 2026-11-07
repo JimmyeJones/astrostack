@@ -1,5 +1,18 @@
 # Process notes & QA sweep records
 
+## 2026-11-07 (Builder, branch `claude/fervent-allen-gczctg`) — no app change; nothing ungated; dogfood `--mosaic --dithered --restack --editor` CLEAN.
+
+Issue inbox and Bugs unchanged since the run before (every open entry gated on the owner or observer). Dogfood run
+with the flags today's passes had not used (`--dithered`, `--restack`) plus `--mosaic --editor`: exit 0, nothing
+overflowing, no console errors. Auto's trim 7.9 % on the tiled 2×2 and 30.7 % on the dithered canvas against its
+recorded 30.3 % apron (no move); the dithered canvas still records 1212×784 / 78 subs / coverage 0..40. All 21
+Add-menu ops re-render on both mosaic runs, Undo/Redo apply, "Noise reduction" re-opens the full-size check, the
+taste chips answer as designed (11 live, "Core looks flat" marked at-limit), "Hold back highlights" offered on both.
+Non-findings, all already recorded: the dithered canvas's "about 14 % … thin edge" beside a 31 % trim and its silent
+panel map (the v0.493.0 LEAD in Bugs / pinned by design); the 3×3 / 18 h mosaic-effort clause (Autonomy LEAD
+2026-09-14); the Dashboard's "Plate-solving isn't set up yet" (no ASTAP in the container); `/life-list [Still to
+shoot]` 14,513 px on a phone (by design).
+
 ## 2026-11-07 (Builder, branch `claude/fervent-allen-rqa3p8`) — no app change; nothing ungated.
 
 Baseline suite green (8595 passed / 7 skipped). Issue inbox unchanged (#878, #880, #903, #1015, owner-gated). Code read, nothing to file: `seestack/edit/histogram.measure_sky_cast` keeps NaN coverage gaps out of the sky population (the edit pipeline restores NaN after the stretch), so a gapped mosaic cannot read falsely neutral; `webapp/routers/editor._decode_recipe_query` + `recipe_from_dict` already coerce non-dict / malformed recipe bodies to a 400 or an empty recipe; the editor's Ctrl/Cmd+Z handler skips text fields only (sliders undo, as intended); `curveDrag` and `Jobs.JobResultActions` hold. No dogfood this run — the previous Builder ran `--mosaic --editor` CLEAN the same day on the same `main`.
