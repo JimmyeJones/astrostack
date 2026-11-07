@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-11-07 (Builder, branch `claude/fervent-allen-a3oq0w`) — no app change; dogfood `--mosaic --editor` CLEAN.
+
+**Dogfood record.** Suite 8595 passed / 7 skipped on `d7ca0864` (xdist `-n 4`, BLAS capped, 17m54s). `--mosaic
+--editor`: exit 0, nothing overflowing, no console errors. Auto's mosaic trim 7.9 % of the canvas; all 21 Add-menu
+ops re-render on the single field and on the mosaic, Undo/Redo apply; the taste chips answer as before (10 live,
+"Over-smoothed" and "Core looks flat" marked at-limit) and the mosaic's "Hold back highlights (0.05)" nudge shows.
+The mosaic Target page's notes read as one paragraph (4 min over ~3 fields of sky, the top-right panel 30 s behind,
+~75 % of M42 in frame, a 3×3 would cover it). Standing non-findings only: the Dashboard's "Plate-solving isn't set
+up yet" (no ASTAP in this container) and `[phone] /life-list [Still to shoot]` 14,513 px (by design). Also re-read
+the job-error translators (`webapp/jobs.py::classify_error_message`, `Jobs.tsx::friendlyJobError`) and the video
+job's own failure texts (`VideoDecoderStalled`, `VideoToolsMissing`) for an untranslated beginner-facing message:
+none found.
+
+---
+
 ## 2026-11-06 (Builder, branch `claude/fervent-allen-gcpw89`) — v0.505.26 (job-finish notification for an interrupted job); dogfood `--empty` and `--no-site` CLEAN.
 
 **Dogfood record.** The two flags no run today had used. `--empty`: exit 0, nothing overflowing, no console
