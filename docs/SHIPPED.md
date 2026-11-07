@@ -1,5 +1,19 @@
 # Shipped — the record
 
+## v0.505.29 — 2026-11-07 (Builder, branch `claude/fervent-allen-kwf1nt`) — the Jobs page names the Share and Print jobs in plain words
+
+**Found by reading which job kinds the Jobs page can name.** `frontend/src/routes/Jobs.tsx::KIND_LABEL` turns the
+backend's snake_case job kinds into words, and falls back to the raw id for a kind it does not know. The editor's
+**Share** and **Print** buttons each submit a job (`webapp/pipeline.py` `editor_share`, `editor_print`) that was
+never added to the map, so the Jobs page row and the "Notify me when done" desktop ping (which reuses the same name)
+read *"editor_print — M_42 finished."* — the only two of the 21 kinds left untranslated.
+
+**What changed:** `editor_share` → *"Making a picture to share"*, `editor_print` → *"Making a print file"*. New
+`tests/test_job_kind_labels.py` walks every `.submit(<kind>, …)` under `webapp/` (string literal or module-level
+`JOB_KIND*` constant, through `ast`) and fails if a kind has no `KIND_LABEL` key, so the next new job type cannot
+ship speaking jargon; it failed against `main`'s `Jobs.tsx` naming exactly these two and passes after.
+`Jobs.test.tsx` pins the two new labels. No backend, config, schema, API or default change.
+
 ## v0.505.28 — 2026-11-07 (Builder, branch `claude/fervent-allen-bf5zb9`) — an editor export waiting behind a stack says it is waiting, not "Rendering"
 
 **Found by reading what an export's progress line says before it runs.** The app runs one job at a time

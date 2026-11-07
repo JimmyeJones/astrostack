@@ -45,6 +45,7 @@ const COLOR: Record<string, string> = {
 // other screen already translates engine jargon (History's combineMethodLabel,
 // Target's rejectReasonLabel); this brings Jobs into line. Unknown kinds fall back
 // to the raw identifier so a future job type is still shown, just untranslated.
+// `tests/test_job_kind_labels.py` fails if a kind the backend submits has no entry.
 const KIND_LABEL: Record<string, string> = {
   pipeline: "Importing & processing new frames",
   qc_solve: "Quality check & plate-solve",
@@ -55,6 +56,8 @@ const KIND_LABEL: Record<string, string> = {
   editor_png: "Rendering full-resolution PNG",
   editor_export: "Exporting edited image",
   editor_batch: "Batch export",
+  editor_share: "Making a picture to share",
+  editor_print: "Making a print file",
   build_master: "Building calibration master",
   channel_combine: "Channel combine",
   video_stack: "Stacking Moon/Sun video",
