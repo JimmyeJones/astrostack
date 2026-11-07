@@ -1,5 +1,9 @@
 # Process notes & QA sweep records
 
+## 2026-11-07 (Builder, branch `claude/fervent-allen-rqa3p8`) — no app change; nothing ungated.
+
+Baseline suite green (8595 passed / 7 skipped). Issue inbox unchanged (#878, #880, #903, #1015, owner-gated). Code read, nothing to file: `seestack/edit/histogram.measure_sky_cast` keeps NaN coverage gaps out of the sky population (the edit pipeline restores NaN after the stretch), so a gapped mosaic cannot read falsely neutral; `webapp/routers/editor._decode_recipe_query` + `recipe_from_dict` already coerce non-dict / malformed recipe bodies to a 400 or an empty recipe; the editor's Ctrl/Cmd+Z handler skips text fields only (sliders undo, as intended); `curveDrag` and `Jobs.JobResultActions` hold. No dogfood this run — the previous Builder ran `--mosaic --editor` CLEAN the same day on the same `main`.
+
 ## 2026-11-07 (Builder, branch `claude/fervent-allen-a3oq0w`) — no app change; dogfood `--mosaic --editor` CLEAN.
 
 **Dogfood record.** Suite 8595 passed / 7 skipped on `d7ca0864` (xdist `-n 4`, BLAS capped, 17m54s). `--mosaic
