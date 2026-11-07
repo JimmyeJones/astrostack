@@ -2,7 +2,7 @@
 
 ## 2026-11-07 (Builder, branch `claude/fervent-allen-gczctg`) — no app change; nothing ungated; dogfood `--mosaic --dithered --restack --editor` CLEAN.
 
-Issue inbox and Bugs unchanged since the run before (every open entry gated on the owner or observer). Dogfood run
+Suite 8595 passed / 7 skipped on `af5f1144` (xdist `-n 4`, BLAS capped, 16m19s). Issue inbox and Bugs unchanged since the run before (every open entry gated on the owner or observer). Dogfood run
 with the flags today's passes had not used (`--dithered`, `--restack`) plus `--mosaic --editor`: exit 0, nothing
 overflowing, no console errors. Auto's trim 7.9 % on the tiled 2×2 and 30.7 % on the dithered canvas against its
 recorded 30.3 % apron (no move); the dithered canvas still records 1212×784 / 78 subs / coverage 0..40. All 21
