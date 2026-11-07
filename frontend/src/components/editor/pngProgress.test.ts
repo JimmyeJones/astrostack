@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pngProgressLabel } from "./pngProgress";
+import { QUEUED_PROGRESS_LABEL, pngProgressLabel } from "./pngProgress";
 
 describe("pngProgressLabel", () => {
   it("shows a percentage when total is known", () => {
@@ -23,5 +23,17 @@ describe("pngProgressLabel", () => {
 
   it("returns a starting label for a null job", () => {
     expect(pngProgressLabel(null)).toBe("Rendering…");
+  });
+
+  // One worker: a render clicked during a long stack waits its turn with no phase.
+  it("says a queued job is waiting for another one, not rendering", () => {
+    expect(pngProgressLabel({ state: "queued", phase: "", done: 0, total: 0, detail: "" }))
+      .toBe(QUEUED_PROGRESS_LABEL);
+    expect(QUEUED_PROGRESS_LABEL).toMatch(/^Waiting for another job/);
+  });
+
+  it("goes back to the phase once the job is running", () => {
+    expect(pngProgressLabel({ state: "running", phase: "", done: 0, total: 0, detail: "" }))
+      .toBe("Rendering");
   });
 });

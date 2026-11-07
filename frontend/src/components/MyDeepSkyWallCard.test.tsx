@@ -99,6 +99,22 @@ describe("MyDeepSkyWallCard", () => {
       expect(clicks).toEqual(["/api/gallery/pictures-archive/job-7"]));
   });
 
+  it("a full-size archive queued behind another job says it is waiting its turn", async () => {
+    // One worker: this archive clicked during a long stack has no phase yet. It is
+    // a button's own label, so it gets the short form of the editor's line.
+    vi.spyOn(client.api, "getLibrarySummary")
+      .mockResolvedValue(summary([hero("m_42"), hero("m_31")]));
+    vi.spyOn(client.api, "startPicturesArchive")
+      .mockResolvedValue({ job_id: "job-8", already_running: false });
+    vi.spyOn(client.api, "getJob").mockResolvedValue({
+      id: "job-8", kind: "pictures_archive", state: "queued", phase: "", done: 0, total: 0,
+    } as never);
+    renderCard();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Full-size versions/ }));
+    expect(await screen.findByText("Waiting its turn…")).toBeInTheDocument();
+  });
+
   it("says what went wrong instead of pretending the download started", async () => {
     vi.spyOn(client.api, "getLibrarySummary")
       .mockResolvedValue(summary([hero("m_42"), hero("m_31")]));
