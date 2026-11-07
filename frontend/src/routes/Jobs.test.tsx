@@ -15,6 +15,7 @@ import {
   heldSettlingLine, missingSubsNote,
   readErrorsNote,
   storageTroubleAlert,
+  finishPicturesSummary,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
   rescueUnsolvedNote,
   skippedFolders, videoFoldersNote, broughtFolderInNote,
@@ -2629,5 +2630,101 @@ describe("JobsView unreadable-subs alert", () => {
       "No new frames · 1 sub couldn't be read.",
     )).toBeInTheDocument();
     expect(screen.getByText("One of your subs couldn't be read")).toBeInTheDocument();
+  });
+});
+
+describe("finishPicturesSummary — the two finish-with-Auto jobs read back on the Jobs page", () => {
+  it("counts what Auto finished and names what it deliberately left alone", () => {
+    expect(finishPicturesSummary("finish_unedited_pictures", {
+      finished: ["M 42", "M 31", "NGC 7000"], failed: [], cancelled: false,
+      left_alone: { has_edit: ["M 81"], cover_pinned: ["M 1", "M 2"], auto_edit_off: [] },
+    })).toEqual({
+      line: "Finished 3 pictures with Auto.",
+      leftAlone: "Left alone: 1 with an edit you saved, 2 you pinned as the cover.",
+      failedGroups: [],
+      finished: 3,
+    });
+  });
+
+  it("reads the repair's own `refinished` key and its by-hand reason", () => {
+    const s = finishPicturesSummary("refinish_pictures", {
+      refinished: ["M 42"], failed: [], cancelled: false,
+      // never_finished is the other button's job; the offer did not count it.
+      left_alone: { by_hand: ["M 31"], never_finished: ["A", "B", "C"] },
+    });
+    expect(s.line).toBe("Re-finished 1 picture with Auto.");
+    expect(s.leftAlone).toBe("Left alone: 1 you finished yourself.");
+    expect(s.finished).toBe(1);
+  });
+
+  it("says why a picture was not finished, in words, grouped by cause", () => {
+    const s = finishPicturesSummary("finish_unedited_pictures", {
+      finished: ["M 42"],
+      failed: [
+        { target: "M 31", error: "skipped: no stacked file, or a recipe we did not bake" },
+        { target: "M 33", error: "skipped: no stacked file, or a recipe we did not bake" },
+        { target: "M 81" },
+      ],
+      cancelled: true, left_alone: {},
+    });
+    expect(s.line).toBe("Finished 1 picture with Auto (cancelled early) — 3 could not be finished.");
+    expect(s.leftAlone).toBeNull();
+    expect(s.failedGroups).toEqual([
+      {
+        message: "Left as it was — its stacked file is missing, or it now has an edit the app didn't make.",
+        next: undefined,
+        targets: ["M 31", "M 33"],
+      },
+      { message: "It failed without saying why.", targets: ["M 81"] },
+    ]);
+  });
+
+  it("says plainly when there was nothing to do, and tolerates garbage", () => {
+    expect(finishPicturesSummary("finish_unedited_pictures", { finished: [], failed: [] }).line)
+      .toBe("There was nothing left to finish.");
+    expect(finishPicturesSummary("finish_unedited_pictures", {})).toEqual({
+      line: "There was nothing left to finish.", leftAlone: null, failedGroups: [], finished: 0,
+    });
+    expect(finishPicturesSummary("refinish_pictures", {
+      refinished: "x", failed: [null, 3, {}], left_alone: "nope",
+    }).line).toBe("There was nothing left to finish.");
+  });
+
+  it("renders on a finished row with a way to the pictures", () => {
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <JobRow onCancel={() => {}} job={mkJob({
+            kind: "finish_unedited_pictures", target: null, state: "done",
+            phase: "finish", done: 2, total: 2,
+            result: {
+              finished: ["M 42", "M 31"], cancelled: false,
+              failed: [{ target: "M 81", error: "skipped: no stacked file, or a recipe we did not bake" }],
+              left_alone: { has_edit: ["M 1"] },
+            },
+          })} />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    expect(screen.getByText("Finished 2 pictures with Auto — 1 could not be finished.")).toBeTruthy();
+    expect(screen.getByText("Left alone: 1 with an edit you saved.")).toBeTruthy();
+    expect(screen.getByText("M 81")).toBeTruthy();
+    const link = screen.getByRole("link", { name: /See them in the Gallery/ });
+    expect(link.getAttribute("href")).toBe("/gallery");
+  });
+
+  it("offers no Gallery link when nothing was finished", () => {
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <JobRow onCancel={() => {}} job={mkJob({
+            kind: "refinish_pictures", target: null, state: "done",
+            result: { refinished: [], failed: [], cancelled: false, left_alone: {} },
+          })} />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    expect(screen.getByText("There was nothing left to finish.")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Gallery/ })).toBeNull();
   });
 });

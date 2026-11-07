@@ -2499,7 +2499,7 @@ any of them.)*
 ### UX & polish
 - Mobile layout polish on Combine. (S) *(Calibration's masters table done v0.505.11, Tonight's planner tables v0.505.12; Combine is the deprioritised
   channel-combine page — touch it only for an outright bug.)*
-- Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7; a restart-interrupted job v0.505.24; the Stack page's own job card for one, and for a cancelled stack, v0.505.25; the "Notify me when done" ping for one v0.505.26; an editor export one cut off v0.505.27; an export queued behind a stack v0.505.28; the Share/Print job names v0.505.29; a finished Share/Print collectable from the Jobs page v0.505.30; a finished stack / Moon-Sun video stack links its picture v0.505.31.)*
+- Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7; a restart-interrupted job v0.505.24; the Stack page's own job card for one, and for a cancelled stack, v0.505.25; the "Notify me when done" ping for one v0.505.26; an editor export one cut off v0.505.27; an export queued behind a stack v0.505.28; the Share/Print job names v0.505.29; a finished Share/Print collectable from the Jobs page v0.505.30; a finished stack / Moon-Sun video stack links its picture v0.505.31; the two finish-with-Auto jobs read back what they did v0.505.32.)*
 
 ### Performance (only with a measurement)
 
@@ -3155,6 +3155,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.32 **The two Settings → Maintenance "finish with Auto" jobs say on the Jobs page what they finished, left alone and could not finish, and link the Gallery — `Jobs.finishPicturesSummary`.**
 - ✅ v0.505.31 **A finished stack (and a Moon/Sun video stack) opens its picture from the Jobs page — `Jobs.JobResultActions` had no *View result* for the Stack form's own `stack` job.** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.29 **The Jobs page and the "Notify me when done" ping name the editor's Share and Print jobs in plain words instead of `editor_share` / `editor_print`; a drift test now fails on any submitted job kind with no label** (`Jobs.KIND_LABEL`, `tests/test_job_kind_labels.py`) — Builder code read. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.28 **An editor export (full-size PNG, share, print) or the wall's full-size archive queued behind a running stack says it is waiting for another job instead of "Rendering" — a queued job has no phase, and the line under the button fell back to a render that looked stalled** (`pngProgress.pngProgressLabel` `QUEUED_PROGRESS_LABEL`, `MyDeepSkyWallCard`). Full entry in [`SHIPPED.md`](SHIPPED.md).
