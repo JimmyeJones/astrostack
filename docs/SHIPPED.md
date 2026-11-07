@@ -1,5 +1,20 @@
 # Shipped — the record
 
+## v0.505.30 — 2026-11-07 (Builder, branch `claude/fervent-allen-94cy8a`) — a finished Share or Print file can be collected from the Jobs page
+
+**Found by reading which finished jobs the Jobs page lets you collect.** `Jobs.tsx::JobResultActions` gives a
+finished `editor_png` a *Download PNG* button and a finished `pictures_archive` its download, but the editor's
+**Share** and **Print** jobs (`webapp/pipeline.py` `submit_editor_share` / `submit_editor_print`) had none. The
+editor fetches their JPEG only while it is still open (`pollJobUntilDone`'s `isAbandoned` stops the poll when you
+leave), and on a big mosaic such a job can wait behind a running stack for hours (v0.505.28) — so someone who walked
+away came back to a finished row and a JPEG on disk with no way to it short of rendering again.
+
+**What changed:** a finished Share row now offers *"Download picture to share"* and a finished Print row
+*"Download print file (A4 at 300 DPI)"* (size and DPI from the job's own result), linking to the existing
+`GET …/editor/share/{job_id}` / `…/editor/print/{job_id}` endpoints. A failed or unfinished job offers nothing.
+`Jobs.test.tsx` (+1) fails against `main`'s `Jobs.tsx` and passes after. Frontend only — no backend, config,
+schema, API or default change.
+
 ## v0.505.29 — 2026-11-07 (Builder, branch `claude/fervent-allen-kwf1nt`) — the Jobs page names the Share and Print jobs in plain words
 
 **Found by reading which job kinds the Jobs page can name.** `frontend/src/routes/Jobs.tsx::KIND_LABEL` turns the

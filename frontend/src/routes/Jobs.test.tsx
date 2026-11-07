@@ -295,6 +295,35 @@ describe("JobsView process_target result actions", () => {
     expect(screen.getByText("Preparing your full-size pictures")).toBeInTheDocument();
   });
 
+  it("keeps a finished share picture and print file collectable from the Jobs page", async () => {
+    // The editor downloads them only while it is still open; someone who left
+    // mid-render (or whose render queued behind a stack) had no way back to
+    // the finished JPEG.
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "sh-1", kind: "editor_share", target: "M_42", state: "done",
+        result: { safe: "M_42", run_id: 7, jpeg_path: "/data/x_share.jpg",
+                  filename: "x_share.jpg", blurb: "M 42", op_errors: [] },
+      }),
+      mkJob({
+        id: "pr-1", kind: "editor_print", target: "M_42", state: "done",
+        result: { safe: "M_42", run_id: 7, jpeg_path: "/data/x_print.jpg",
+                  filename: "x_print.jpg", size_name: "A4", dpi: 300, op_errors: [] },
+      }),
+      mkJob({
+        id: "pr-2", kind: "editor_print", target: "M_42", state: "error",
+        error: "boom", result: null,
+      }),
+    ]);
+    renderJobsRouted();
+    const share = await screen.findByRole("link", { name: "Download picture to share" });
+    expect(share).toHaveAttribute("href", "/api/targets/M_42/stack-runs/7/editor/share/sh-1");
+    const print = screen.getByRole("link", { name: "Download print file (A4 at 300 DPI)" });
+    expect(print).toHaveAttribute("href", "/api/targets/M_42/stack-runs/7/editor/print/pr-1");
+    // A failed print offers nothing to download.
+    expect(screen.getAllByRole("link", { name: /Download print file/ })).toHaveLength(1);
+  });
+
   it("falls back to History when the backend didn't report a run id", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({

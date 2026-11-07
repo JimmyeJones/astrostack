@@ -1707,6 +1707,27 @@ function JobResultActions({ job }: { job: Job }) {
         Download PNG
       </Button>
     );
+  } else if ((job.kind === "editor_share" || job.kind === "editor_print")
+             && r.jpeg_path && r.safe && r.run_id != null) {
+    // The editor downloads these the moment they land — but only while the
+    // editor is still open. Leave it mid-render (on a big mosaic the job can sit
+    // queued behind a stack for hours) and the finished JPEG was on disk with no
+    // way back to it short of rendering again. Same reasoning as the archive row.
+    const safe = String(r.safe);
+    const runId = Number(r.run_id);
+    const isPrint = job.kind === "editor_print";
+    const size = typeof r.size_name === "string" ? r.size_name : null;
+    const dpi = typeof r.dpi === "number" ? r.dpi : null;
+    action = (
+      <Button size="xs" variant="light" leftSection={<IconDownload size={14} />}
+        component="a"
+        href={isPrint ? api.editPrintUrl(safe, runId, job.id)
+          : api.editShareUrl(safe, runId, job.id)}>
+        {!isPrint ? "Download picture to share"
+          : size && dpi ? `Download print file (${size} at ${dpi} DPI)`
+            : "Download print file"}
+      </Button>
+    );
   } else if (job.kind === "pictures_archive" && r.path) {
     // The archive outlives the page that started it, so someone who navigated
     // away (or closed the tab mid-build) can still collect it from here rather

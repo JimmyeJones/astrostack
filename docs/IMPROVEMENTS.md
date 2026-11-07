@@ -2497,7 +2497,7 @@ any of them.)*
 ### UX & polish
 - Mobile layout polish on Combine. (S) *(Calibration's masters table done v0.505.11, Tonight's planner tables v0.505.12; Combine is the deprioritised
   channel-combine page — touch it only for an outright bug.)*
-- Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7; a restart-interrupted job v0.505.24; the Stack page's own job card for one, and for a cancelled stack, v0.505.25; the "Notify me when done" ping for one v0.505.26; an editor export one cut off v0.505.27; an export queued behind a stack v0.505.28; the Share/Print job names v0.505.29.)*
+- Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7; a restart-interrupted job v0.505.24; the Stack page's own job card for one, and for a cancelled stack, v0.505.25; the "Notify me when done" ping for one v0.505.26; an editor export one cut off v0.505.27; an export queued behind a stack v0.505.28; the Share/Print job names v0.505.29; a finished Share/Print collectable from the Jobs page v0.505.30.)*
 
 ### Performance (only with a measurement)
 
