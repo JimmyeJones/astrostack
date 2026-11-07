@@ -1395,6 +1395,10 @@ describe("jobKindLabel", () => {
     expect(jobKindLabel("editor_png")).toBe("Rendering full-resolution PNG");
     expect(jobKindLabel("editor_export")).toBe("Exporting edited image");
     expect(jobKindLabel("editor_batch")).toBe("Batch export");
+    // The editor's Share and Print buttons each run a job; both showed their raw
+    // snake_case id on the Jobs page and in the "Notify me when done" ping.
+    expect(jobKindLabel("editor_share")).toBe("Making a picture to share");
+    expect(jobKindLabel("editor_print")).toBe("Making a print file");
     expect(jobKindLabel("build_master")).toBe("Building calibration master");
     expect(jobKindLabel("channel_combine")).toBe("Channel combine");
     expect(jobKindLabel("pictures_archive")).toBe("Preparing your full-size pictures");
