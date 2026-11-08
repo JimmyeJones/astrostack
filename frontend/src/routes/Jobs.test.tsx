@@ -15,7 +15,7 @@ import {
   heldSettlingLine, missingSubsNote,
   readErrorsNote,
   storageTroubleAlert,
-  finishPicturesSummary,
+  finishPicturesSummary, previewTrimSummary,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
   rescueUnsolvedNote,
   skippedFolders, videoFoldersNote, broughtFolderInNote,
@@ -2744,5 +2744,68 @@ describe("finishPicturesSummary — the two finish-with-Auto jobs read back on t
     );
     expect(screen.getByText("There was nothing left to finish.")).toBeTruthy();
     expect(screen.queryByRole("link", { name: /Gallery/ })).toBeNull();
+  });
+});
+
+describe("previewTrimSummary — the boot-time border-trim job reads back on the Jobs page", () => {
+  it("counts the targets it trimmed and names them", () => {
+    expect(previewTrimSummary({ trimmed_targets: ["M 42", "M 31"], failed: [], cancelled: false }))
+      .toEqual({
+        line: "Trimmed the ragged border off the older pictures of 2 targets, so their cards, "
+          + "share and wallpaper images match their Full-res PNG.",
+        trimmed: ["M 42", "M 31"], failed: [], retry: null,
+      });
+  });
+
+  it("says a failed or cancelled target is tried again at the next start", () => {
+    const s = previewTrimSummary({ trimmed_targets: ["M 42"], failed: ["M 81"], cancelled: true });
+    expect(s.line).toBe("Trimmed the ragged border off the older pictures of 1 target, so their "
+      + "cards, share and wallpaper images match their Full-res PNG (cancelled early) — "
+      + "1 target could not be read.");
+    expect(s.failed).toEqual(["M 81"]);
+    expect(s.retry).toMatch(/tried again the next time the app starts/);
+  });
+
+  it("says plainly when nothing needed trimming, and tolerates garbage", () => {
+    expect(previewTrimSummary({}).line)
+      .toBe("Nothing needed trimming — your older pictures already match their Full-res PNG.");
+    expect(previewTrimSummary({ trimmed_targets: "x", failed: [null, 3, ""] }))
+      .toMatchObject({ trimmed: [], failed: [], retry: null });
+  });
+
+  it("renders on a finished row with a way to the pictures", () => {
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <JobRow onCancel={() => {}} job={mkJob({
+            kind: "unedited_preview_trim", target: null, state: "done",
+            phase: "trim", done: 3, total: 3,
+            result: { trimmed_targets: ["M 42", "M 31"], failed: ["M 81"], cancelled: false },
+          })} />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    expect(screen.getByText(/Trimmed the ragged border off the older pictures of 2 targets/))
+      .toBeTruthy();
+    expect(screen.getByText("M 42, M 31")).toBeTruthy();
+    expect(screen.getByText("Could not be read: M 81")).toBeTruthy();
+    expect(screen.getByText(/tried again the next time the app starts/)).toBeTruthy();
+    const link = screen.getByRole("link", { name: /See them in the Gallery/ });
+    expect(link.getAttribute("href")).toBe("/gallery");
+  });
+
+  it("offers no Gallery link when nothing was trimmed", () => {
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <JobRow onCancel={() => {}} job={mkJob({
+            kind: "unedited_preview_trim", target: null, state: "done",
+            result: { trimmed_targets: [], failed: [], cancelled: false },
+          })} />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    expect(screen.getByText(/Nothing needed trimming/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /See them in the Gallery/ })).toBeNull();
   });
 });
