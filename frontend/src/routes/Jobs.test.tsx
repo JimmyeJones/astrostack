@@ -15,7 +15,7 @@ import {
   heldSettlingLine, missingSubsNote,
   readErrorsNote,
   storageTroubleAlert,
-  finishPicturesSummary, previewTrimSummary,
+  batchExportSummary, finishPicturesSummary, previewTrimSummary,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
   rescueUnsolvedNote,
   skippedFolders, videoFoldersNote, broughtFolderInNote,
@@ -2744,6 +2744,83 @@ describe("finishPicturesSummary — the two finish-with-Auto jobs read back on t
     );
     expect(screen.getByText("There was nothing left to finish.")).toBeTruthy();
     expect(screen.queryByRole("link", { name: /Gallery/ })).toBeNull();
+  });
+});
+
+describe("batchExportSummary — a batch export says what it made and what failed", () => {
+  const full = "[Errno 28] No space left on device: '/data/targets/M_31/x.fits'";
+
+  it("counts what was made", () => {
+    expect(batchExportSummary({ exported: [{}, {}], errors: {} })).toEqual({
+      line: "Made 2 new edited pictures.", failedGroups: [], exported: 2,
+    });
+    expect(batchExportSummary({ exported: [{}], errors: {} }).line)
+      .toBe("Made 1 new edited picture.");
+  });
+
+  it("groups failures by cause in a single job's words and names each picture", () => {
+    const s = batchExportSummary({
+      exported: [{}],
+      errors: {
+        "M_31:4": full,
+        "M_33:7": full,
+        "NGC_7000:2": "",
+      },
+    });
+    expect(s.line).toBe("Made 1 new edited picture — 3 could not be made.");
+    expect(s.failedGroups).toHaveLength(2);
+    expect(s.failedGroups[0].message).toMatch(/ran out of space/);
+    expect(s.failedGroups[0].targets).toEqual(["M_31 (stack 4)", "M_33 (stack 7)"]);
+    expect(s.failedGroups[1]).toEqual({
+      message: "It failed without saying why.", targets: ["NGC_7000 (stack 2)"],
+    });
+  });
+
+  it("says plainly when every picture failed, or there was nothing to do", () => {
+    expect(batchExportSummary({ exported: [], errors: { "M_31:4": "x", "M_33:7": "y" } }).line)
+      .toBe("Made 0 new edited pictures — none of the 2 could be made.");
+    expect(batchExportSummary({ exported: [], errors: { "M_31:4": "x" } }).line)
+      .toBe("Made 0 new edited pictures — 1 could not be made.");
+    expect(batchExportSummary({})).toEqual({
+      line: "There was nothing to export.", failedGroups: [], exported: 0,
+    });
+    expect(batchExportSummary({ exported: "x", errors: ["nope"] }).line)
+      .toBe("There was nothing to export.");
+  });
+
+  it("renders the failures on a done row and offers no Gallery link for zero pictures", () => {
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <JobRow onCancel={() => {}} job={mkJob({
+            kind: "editor_batch", target: null, state: "done", done: 2, total: 2,
+            result: { exported: [], errors: { "M_31:4": full, "M_33:7": full } },
+          })} />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    expect(screen.getByText("Made 0 new edited pictures — none of the 2 could be made."))
+      .toBeTruthy();
+    expect(screen.getByText("M_31 (stack 4), M_33 (stack 7)")).toBeTruthy();
+    expect(screen.getByText(/2 pictures — The disk your library is on ran out of space/))
+      .toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Gallery/ })).toBeNull();
+  });
+
+  it("keeps the Gallery link when pictures were made", () => {
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <JobRow onCancel={() => {}} job={mkJob({
+            kind: "editor_batch", target: null, state: "done",
+            result: { exported: [{}, {}, {}], errors: {} },
+          })} />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    expect(screen.getByText("Made 3 new edited pictures.")).toBeTruthy();
+    const link = screen.getByRole("link", { name: /View 3 in Gallery/ });
+    expect(link.getAttribute("href")).toBe("/gallery");
   });
 });
 

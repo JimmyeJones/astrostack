@@ -407,6 +407,42 @@ export function finishPicturesSummary(kind: string, r: Record<string, unknown>):
   };
 }
 
+/** Plain-language outcome of a finished batch export, `editor_batch` (pure,
+ * tested).
+ *
+ * Two buttons start it — the Gallery's "Apply preset to selected" and the
+ * dashboard's "export every edit I saved" — and the Gallery one *sends the user
+ * here*. The job isolates each picture's failure and still finishes "done", so
+ * a batch whose every picture failed (a source FITS gone missing, the disk
+ * full) used to read as a success with a "View 0 in Gallery" button and not a
+ * word about why nothing came out. This says how many were made, groups the
+ * failures by cause in the words a single job gets, and names the pictures. */
+export function batchExportSummary(r: Record<string, unknown>): {
+  line: string; failedGroups: BatchFailureGroup[]; exported: number;
+} {
+  const exported = Array.isArray(r.exported) ? r.exported.length : 0;
+  const errObj = r.errors && typeof r.errors === "object" && !Array.isArray(r.errors)
+    ? r.errors as Record<string, unknown> : {};
+  const failedEntries = Object.entries(errObj).map(([key, err]) => {
+    // Keyed "<target>:<run id>" by `submit_editor_batch`; a key without a run id
+    // (or an older shape) is shown as it came.
+    const cut = key.lastIndexOf(":");
+    const name = cut > 0 && key.slice(cut + 1)
+      ? `${key.slice(0, cut)} (stack ${key.slice(cut + 1)})` : key;
+    return { name, error: typeof err === "string" ? err : "", kind: null };
+  });
+  const failedGroups = groupBatchFailures(failedEntries);
+  let line = exported === 0 && failedEntries.length === 0
+    ? "There was nothing to export"
+    : `Made ${exported} new edited picture${exported === 1 ? "" : "s"}`;
+  if (failedEntries.length) {
+    line += exported === 0 && failedEntries.length > 1
+      ? ` — none of the ${failedEntries.length} could be made`
+      : ` — ${failedEntries.length} could not be made`;
+  }
+  return { line: `${line}.`, failedGroups, exported };
+}
+
 /** Plain-language outcome of the boot-time "Trimming the ragged border off your
  * older pictures" job, `unedited_preview_trim` (pure, tested).
  *
@@ -1544,6 +1580,34 @@ function JobResultActions({ job }: { job: Job }) {
       </Stack>
     );
   }
+  if (job.kind === "editor_batch") {
+    const { line, failedGroups, exported } = batchExportSummary(r);
+    return (
+      <Stack gap={4} mt="xs">
+        <Text size="sm" c={exported === 0 && failedGroups.length ? "red" : undefined}>
+          {line}
+        </Text>
+        {failedGroups.map((g) => (
+          <Stack key={g.message} gap={0}>
+            <Text size="xs" c="red">
+              {g.targets.length} {g.targets.length === 1 ? "picture" : "pictures"}
+              {" — "}{g.message}
+            </Text>
+            {g.next ? <Text size="xs" c="dimmed">{g.next}</Text> : null}
+            <Text size="xs" c="dimmed">{g.targets.join(", ")}</Text>
+          </Stack>
+        ))}
+        {exported > 0 ? (
+          <Group>
+            <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
+              component={Link} to="/gallery">
+              View {exported} in Gallery
+            </Button>
+          </Group>
+        ) : null}
+      </Stack>
+    );
+  }
   if (job.kind === "unedited_preview_trim") {
     const { line, trimmed, failed, retry } = previewTrimSummary(r);
     return (
@@ -1934,14 +1998,6 @@ function JobResultActions({ job }: { job: Job }) {
       <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
         component={Link} to={`/targets/${r.safe}/history`}>
         View result
-      </Button>
-    );
-  } else if (job.kind === "editor_batch") {
-    const n = Array.isArray(r.exported) ? r.exported.length : 0;
-    action = (
-      <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
-        component={Link} to="/gallery">
-        View {n} in Gallery
       </Button>
     );
   }

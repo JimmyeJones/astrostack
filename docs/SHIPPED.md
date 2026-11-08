@@ -1,5 +1,26 @@
 # Shipped — the record
 
+## v0.505.36 — 2026-11-08 (Builder, branch `claude/fervent-allen-yzfotq`) — a batch export says on the Jobs page what it made and what failed
+
+**Found by reading `Jobs.tsx::JobResultActions` against `pipeline.submit_editor_batch`.** The Gallery's *Apply preset
+to selected* (and the dashboard's "export every edit I saved") runs one `editor_batch` job, and the Gallery sends the
+user straight to the Jobs page. The job isolates each picture's failure into `result.errors` and still finishes
+`done` — but the row read only `exported.length`, so a batch whose every picture failed (a source FITS gone, the disk
+full) showed as a success with a **"View 0 in Gallery"** button and not a word about why nothing came out; a partial
+failure was just as silent.
+
+**What changed:** new pure `Jobs.batchExportSummary(result)` — *"Made 2 new edited pictures — 1 could not be made."*,
+*"Made 0 new edited pictures — none of the 3 could be made."* (in red), or *"There was nothing to export."* — and the
+failures grouped by cause through the same `groupBatchFailures`/`friendlyJobError` words a single job gets (the disk-full
+one keeps its Storage hint), naming each picture as `M_31 (stack 4)` from the `"<target>:<run id>"` key. The Gallery
+button now appears only when something was made. Backend unchanged.
+
+**Tests (+5 vitest, `Jobs.test.tsx`):** counts, grouping and naming, all-failed / nothing-to-do / garbage shapes, the
+rendered done row with no Gallery link at zero, and the link kept when pictures were made. The rendered all-failed test
+fails before (checked in a scratch worktree on the old `Jobs.tsx`: no summary line, a "View 0 in Gallery" link).
+
+**Upgrade-safe (§9):** frontend only; no config, schema, layout, default or API change.
+
 ## v0.505.35 — 2026-11-08 (Builder, branch `claude/fervent-allen-6wn2di`) — clicking the job-finished ping opens the Jobs page
 
 **Found by reading `jobNotify.ts` after the v0.505.29–.34 Jobs-page series.** The opt-in desktop notification

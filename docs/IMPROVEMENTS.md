@@ -2519,7 +2519,7 @@ any of them.)*
 ### UX & polish
 - Mobile layout polish on Combine. (S) *(Calibration's masters table done v0.505.11, Tonight's planner tables v0.505.12; Combine is the deprioritised
   channel-combine page — touch it only for an outright bug.)*
-- Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7; a restart-interrupted job v0.505.24; the Stack page's own job card for one, and for a cancelled stack, v0.505.25; the "Notify me when done" ping for one v0.505.26; an editor export one cut off v0.505.27; an export queued behind a stack v0.505.28; the Share/Print job names v0.505.29; a finished Share/Print collectable from the Jobs page v0.505.30; a finished stack / Moon-Sun video stack links its picture v0.505.31; the two finish-with-Auto jobs read back what they did v0.505.32.)*
+- Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7; a restart-interrupted job v0.505.24; the Stack page's own job card for one, and for a cancelled stack, v0.505.25; the "Notify me when done" ping for one v0.505.26; an editor export one cut off v0.505.27; an export queued behind a stack v0.505.28; the Share/Print job names v0.505.29; a finished Share/Print collectable from the Jobs page v0.505.30; a finished stack / Moon-Sun video stack links its picture v0.505.31; the two finish-with-Auto jobs read back what they did v0.505.32; a batch export says what failed v0.505.36.)*
 
 ### Performance (only with a measurement)
 
@@ -3175,6 +3175,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.36 **A batch export (`editor_batch`) says on the Jobs page what it made and which pictures failed, and why — `Jobs.batchExportSummary`; no more "View 0 in Gallery".** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.35 **Clicking the opt-in "your job finished" desktop ping brings AstroStack forward on the Jobs page — `jobNotify.showJobNotification` had no `onclick`.** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.34 **The boot-time border-trim job (`unedited_preview_trim`) says on the Jobs page what it trimmed — `Jobs.previewTrimSummary`.** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.33 **A finished Moon/Sun "Check this capture first" job links back from the Jobs page — `Jobs.JobResultActions` had *View result* for `video_stack` but nothing for `video_grade`.** Full entry in [`SHIPPED.md`](SHIPPED.md).
