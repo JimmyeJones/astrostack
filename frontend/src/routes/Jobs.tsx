@@ -407,6 +407,40 @@ export function finishPicturesSummary(kind: string, r: Record<string, unknown>):
   };
 }
 
+/** Plain-language outcome of the boot-time "Trimming the ragged border off your
+ * older pictures" job, `unedited_preview_trim` (pure, tested).
+ *
+ * The app queues it by itself at start-up (`submit_unedited_preview_trim_backfill`)
+ * — nobody pressed a button — so a finished row that says only its step count
+ * leaves the owner wondering what just changed under his Gallery cards. This
+ * says how many targets had a picture trimmed, which could not be read, and that
+ * both an unread target and a cancelled run's leftovers are offered again at the
+ * next start (the backfill stamps a target only once it was fully offered). */
+export function previewTrimSummary(r: Record<string, unknown>): {
+  line: string;
+  trimmed: string[];
+  failed: string[];
+  retry: string | null;
+} {
+  const names = (v: unknown) => (Array.isArray(v) ? v : [])
+    .filter((s): s is string => typeof s === "string" && s.length > 0);
+  const trimmed = names(r.trimmed_targets);
+  const failed = names(r.failed);
+  const n = trimmed.length;
+  let line = n === 0
+    ? "Nothing needed trimming — your older pictures already match their Full-res PNG"
+    : `Trimmed the ragged border off the older pictures of ${n} target${n === 1 ? "" : "s"}, `
+      + "so their cards, share and wallpaper images match their Full-res PNG";
+  if (r.cancelled) line += " (cancelled early)";
+  if (failed.length) {
+    line += ` — ${failed.length} target${failed.length === 1 ? "" : "s"} could not be read`;
+  }
+  const retry = failed.length || r.cancelled
+    ? "Anything not reached is tried again the next time the app starts. Your stacks and edits were not touched."
+    : null;
+  return { line: `${line}.`, trimmed, failed, retry };
+}
+
 /** Plain-language outcome of a finished one-click "Process target" job (pure,
  * tested). Mirrors `reprocessSummary` for the single-target chain: says whether a
  * master was produced and, when it wasn't, why — so the user isn't left with a
@@ -1500,6 +1534,27 @@ function JobResultActions({ job }: { job: Job }) {
           </Stack>
         ))}
         {finished > 0 ? (
+          <Group>
+            <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
+              component={Link} to="/gallery">
+              See them in the Gallery
+            </Button>
+          </Group>
+        ) : null}
+      </Stack>
+    );
+  }
+  if (job.kind === "unedited_preview_trim") {
+    const { line, trimmed, failed, retry } = previewTrimSummary(r);
+    return (
+      <Stack gap={4} mt="xs">
+        <Text size="sm">{line}</Text>
+        {trimmed.length ? <Text size="xs" c="dimmed">{trimmed.join(", ")}</Text> : null}
+        {failed.length ? (
+          <Text size="xs" c="red">Could not be read: {failed.join(", ")}</Text>
+        ) : null}
+        {retry ? <Text size="xs" c="dimmed">{retry}</Text> : null}
+        {trimmed.length ? (
           <Group>
             <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
               component={Link} to="/gallery">

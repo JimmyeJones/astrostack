@@ -1,5 +1,21 @@
 # Shipped — the record
 
+## v0.505.34 — 2026-11-08 (Builder, branch `claude/fervent-allen-dmh6fb`) — the boot-time border-trim job says on the Jobs page what it did
+
+**Found by listing every submitted job kind against `Jobs.tsx::JobResultActions`.** With `auto_crop_border` on, the
+app queues `unedited_preview_trim` by itself at start-up (`pipeline.submit_unedited_preview_trim_backfill`, v0.504.x)
+to give pictures stacked before v0.504.2 the same border trim a fresh stack's stored preview gets. Nobody pressed a
+button, and the finished row showed only its step count — so the owner saw an unexplained job and Gallery cards that
+had quietly changed, with no word on which targets, which could not be read, or whether anything else was touched.
+
+**What changed:** new pure `Jobs.previewTrimSummary(result)` — *"Trimmed the ragged border off the older pictures of
+N targets, so their cards, share and wallpaper images match their Full-res PNG."* (or *"Nothing needed trimming …"*,
+*"(cancelled early)"*, *"— N targets could not be read"*), the trimmed targets named, the unread ones in red, and —
+when anything was not reached — that it is tried again at the next start (the backfill stamps a target only once it
+was fully offered) and that stacks and edits were not touched. A row that trimmed anything offers *See them in the
+Gallery*. `Jobs.test.tsx` (+5); all five fail against `main`'s `Jobs.tsx` and pass after. Frontend only —
+no backend, config, schema, API or default change.
+
 ## v0.505.33 — 2026-11-08 (Builder, branch `claude/fervent-allen-po1pe4`) — a finished Moon/Sun sharpness check links back from the Jobs page
 
 **Found by reading which finished jobs the Jobs page lets you reach (the v0.505.31 sweep's last gap).** The Moon & Sun
