@@ -23,6 +23,11 @@ class _FakeJM:
     def maybe_flush(self, job) -> None:  # noqa: ANN001
         pass
 
+    def submit_unless_queued(self, kind, fn, *, target=None):  # noqa: ANN001
+        """Mirror of ``JobManager.submit_unless_queued`` over the stub's own
+        ``submit`` — nothing is ever queued here, so it always submits."""
+        return self.submit(kind, fn, target=target), False
+
 
 def test_pipeline_qc_phase_cancel_is_classified_cancelled(solved_library):
     # auto_qc on (no ingest/stack): a job cancelled before the QC/solve loop runs

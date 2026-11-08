@@ -914,3 +914,49 @@ def test_mixed_pointing_guard_s50_link_is_unchanged(data_root):
         assert (mixed.majority, mixed.others) == (30, 14)
     finally:
         lib.close()
+
+
+def test_process_target_second_post_while_queued_returns_the_same_job(
+        client, solved_library):
+    # A second click on "Process target" / "Restack" while the first job is
+    # still waiting its turn used to queue a second identical whole-target stack
+    # (hours on a NAS, a duplicate History row). Hold the single worker with a
+    # blocker, as another target's stack would, so both POSTs land while queued.
+    import threading
+
+    jm = client.app.state.job_manager
+    release = threading.Event()
+    started = threading.Event()
+
+    def _blocker(job):  # noqa: ANN001
+        started.set()
+        release.wait(30)
+        return {"ok": True}
+
+    blocker = jm.submit("blocker", _blocker)
+    try:
+        assert started.wait(10)
+        first = client.post("/api/targets/M_42/process")
+        second = client.post("/api/targets/M_42/process")
+        assert first.status_code == second.status_code == 200
+        assert first.json()["already_queued"] is False
+        assert second.json() == {
+            "job_id": first.json()["job_id"], "already_queued": True}
+        live = [j for j in jm.active()
+                if j.kind == "process_target" and j.target == "M_42"]
+        assert [j.id for j in live] == [first.json()["job_id"]]
+        # Another target is its own job.
+        other = client.post("/api/targets/NGC_7000/process")
+        assert other.json()["already_queued"] is False
+        assert other.json()["job_id"] != first.json()["job_id"]
+    finally:
+        release.set()
+    _wait_job(client, blocker.id)
+    body = _wait_job(client, first.json()["job_id"], timeout=120)
+    assert body["state"] == "done", body
+    _wait_job(client, other.json()["job_id"], timeout=120)
+    # Once the first has finished, a deliberate restack is a new job again.
+    again = client.post("/api/targets/M_42/process")
+    assert again.json()["already_queued"] is False
+    assert again.json()["job_id"] != first.json()["job_id"]
+    _wait_job(client, again.json()["job_id"], timeout=120)

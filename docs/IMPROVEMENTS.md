@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- `claude/fervent-allen-4pon1s` — the double-queued "Process target" / Restack bug in Bugs (`routers/pipeline.trigger_process_target`, `Target.tsx`).
+*No live claims.*
 
 ---
 
@@ -118,26 +118,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   with him; its result decides whether (1) needs one master per temperature range, like a matched dark. This
   line is replaced with the numbers when they arrive.
 
-- **🟡 REPRODUCED (Scout 2026-11-08, QA rotation sweep (4), new angle: a repeated POST on the job-submitting routes)
-  — a second click on "Process target" / "Restack" queues a second identical whole-target stack.**
-  *(Pillar: autonomy/friendliness, PRIORITY 2–3. Severity medium: hours of wasted NAS time and a duplicate run
-  row on a 35,894-sub target; nothing destructive. Confidence: reproduced. Size **S**.)*
-  `POST /api/targets/{safe}/process` (`routers/pipeline.trigger_process_target` → `pipeline.submit_process_target`)
-  has no "already active for this target" check, unlike `reprocess_all`, `refinish_pictures`,
-  `finish_unedited_pictures` and `pictures_archive`, which return the live job via `jm.active_of_kind`. The page
-  does not stop it either: `Target.tsx`'s Process target (header), *Ready to process?* and the *N subs missing
-  from your current picture* **Restack** buttons — and the same mutation in `RestoredSubsNote` /
-  `RestackGainNote` — are only `loading={process.isPending}`, true for the POST's milliseconds; the Restack card
-  stays up until the new stack *finishes*. **Repro** (scratch script, the `tests/webapp/conftest.py` library,
-  one blocker job holding the worker as another target's stack would): two POSTs → two different `job_id`s,
-  `2` active `process_target` jobs for `M_42`, both `queued`. The second one does not short-circuit when it
-  runs: `submit_process_target` has no "nothing changed" skip, so it re-stacks every sub into a new
-  `stack_runs` row. **Fix sketch:** (1) server: when a `process_target` for the same `safe` is still **queued**
-  (it has read nothing yet, so the two are identical), return its `job_id` with `"already_queued": true` —
-  additive field, same shape; (2) page: while `/api/jobs` shows a queued/running `process_target`/`stack` job
-  for this target, show those buttons as *Processing… (see Jobs)* and disabled, so the running case is covered
-  too without refusing a deliberate restack after it ends. Test: two POSTs → one job; the second answer names
-  the first id; a POST after the first finished still queues a new one.
 - **🟡 (Scout 2026-11-03 + 11-07, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/`, `.Trash-*/` or `.zfs/` folder
   a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
   *(Pillar: trust — PRIORITY 2–3; size **S**; severity moderate *if* his share has a recycle bin or sees a desktop
@@ -3175,6 +3155,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.37 **A second click on Process target / Restack no longer queues a second identical whole-target stack** (`JobManager.submit_unless_queued`, `routers/pipeline.trigger_process_target` `already_queued`, `hooks/useTargetStackJob`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.36 **A batch export (`editor_batch`) says on the Jobs page what it made and which pictures failed, and why — `Jobs.batchExportSummary`; no more "View 0 in Gallery".** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.35 **Clicking the opt-in "your job finished" desktop ping brings AstroStack forward on the Jobs page — `jobNotify.showJobNotification` had no `onclick`.** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.34 **The boot-time border-trim job (`unedited_preview_trim`) says on the Jobs page what it trimmed — `Jobs.previewTrimSummary`.** Full entry in [`SHIPPED.md`](SHIPPED.md).

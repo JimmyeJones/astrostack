@@ -1088,6 +1088,13 @@ def submit_rescue_unsolved(settings: Settings, jm: JobManager, safe: str) -> Job
 
 
 def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
+    """The one-click process job for ``safe`` (see ``submit_process_target_once``)."""
+    return submit_process_target_once(settings, jm, safe)[0]
+
+
+def submit_process_target_once(
+    settings: Settings, jm: JobManager, safe: str,
+) -> tuple[Job, bool]:
     """One-click "process this target": QC + plate-solve every frame, auto-grade
     (when enabled), then stack — the whole ``drop files → good image`` middle in
     one job, so the user reaches a finished stack without configuring the global
@@ -1197,7 +1204,9 @@ def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
         finally:
             lib.close()
 
-    return jm.submit("process_target", body, target=safe)
+    # A process job for this target that is still waiting its turn is the same
+    # job — hand it back rather than queue a second whole-target stack.
+    return jm.submit_unless_queued("process_target", body, target=safe)
 
 
 def submit_stack(

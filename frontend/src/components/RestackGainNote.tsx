@@ -4,6 +4,9 @@ import { IconCalendarQuestion, IconStack2 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { formatStampDate } from "../format";
+import {
+  processStartedMessage, STACK_BUSY_LABEL, STACK_BUSY_TITLE, useTargetStackJob,
+} from "../hooks/useTargetStackJob";
 
 /**
  * "This picture was made before AstroStack recorded when your subs were shot."
@@ -39,12 +42,13 @@ export function RestackGainNote({ safe }: { safe: string }) {
     staleTime: 30_000,
     retry: false,
   });
+  const stackJob = useTargetStackJob(safe);
   const restack = useMutation({
     mutationFn: () => api.processTarget(safe),
-    onSuccess: () => {
+    onSuccess: (r) => {
       notifications.show({
-        message: "Stacking again — this run will record when your subs were shot. "
-          + "Watch Jobs for progress.",
+        message: processStartedMessage(r.already_queued, "Stacking again — this run will record when your subs were shot. "
+            + "Watch Jobs for progress."),
         color: "violet",
       });
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -83,8 +87,10 @@ export function RestackGainNote({ safe }: { safe: string }) {
       <Group gap="xs" mt="xs">
         <Button size="xs" variant="filled" color="blue"
           leftSection={<IconStack2 size={14} />}
-          loading={restack.isPending} onClick={() => restack.mutate()}>
-          Stack it again
+          loading={restack.isPending} disabled={!!stackJob}
+          title={stackJob ? STACK_BUSY_TITLE : undefined}
+          onClick={() => restack.mutate()}>
+          {stackJob ? STACK_BUSY_LABEL : "Stack it again"}
         </Button>
       </Group>
     </Alert>
