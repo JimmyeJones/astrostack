@@ -1,5 +1,25 @@
 # Process notes & QA sweep records
 
+## 2026-11-08 (Scout, branch `claude/exciting-wozniak-nk09s6`) — QA rotation sweep (4), new angle — a repeated POST on the job-submitting routes (the double-click / "did it work?" second press): one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8595 passed / 7 skipped on `8913d787` (xdist `-n 4`, BLAS capped, 17m53s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+  No open PRs at start. **Dogfood `--mosaic`:** exit 0, nothing overflowing, no console errors; the mosaic Target
+  page's five notes agree on the 2×2's thin top-right panel; tallest page `[phone] /life-list [Still to shoot]`
+  14,513 px, the standing non-finding.
+- **Sweep (4), angle not run before** (grep `double submit` 0, `already queued` only the full-res PNG fix): which
+  routes that enqueue a job refuse or fold a second identical request? `jm.active_of_kind` guards `reprocess_all`,
+  `refinish_pictures`, `finish_unedited_pictures`, `pictures_archive`, the watcher's `pipeline` and the boot trim;
+  `targets` merge checks `jm.active()` for its sources. **Unguarded:** `/api/scan`, `/qc-solve`,
+  `/rescue-unsolved`, `/process`, `/stack`, the editor exports. Of those, only `/process` takes no options (a
+  second `/stack` with a different form is a deliberate run, a second scan is incremental) and is reached from
+  buttons that stay pressable while the job waits: Target.tsx's three `process.mutate()` buttons plus
+  `RestoredSubsNote` / `RestackGainNote` are `loading={process.isPending}` only. Repro (scratch script, not
+  landed): conftest library, a blocker job holding the single worker, two POSTs → two `job_id`s, two queued
+  `process_target` jobs for `M_42`; `submit_process_target` has no "nothing changed" skip, so the second re-stacks
+  every sub. Filed in Bugs (S, ungated) with a two-part fix sketch. Scout did not fix it: the right half is the
+  page's busy state, which is a frontend change with its own tests — Builder work.
+
 ## 2026-11-08 (Builder, branch `claude/fervent-allen-6wn2di`) — v0.505.35 (job-finished ping opens the Jobs page); dogfood `--closing --calibration --incoming-lag` CLEAN.
 
 Setup's `pip install -e .[dev,web,gui]` hung for 22 min in `poll` with PyPI reachable (curl 200 in 0.17 s); killing
@@ -840,7 +860,8 @@ synthetic sample should be re-asked on the owner's own geometry once before the 
 
 ## 2026-10-28 (Scout, branch `claude/blissful-einstein-ptp2yd`) — QA rotation sweep (4), new angle — the one router that *writes into `incoming/`* (`upload`) against §10's create-new-only rule: one bug, Scout-fixed (v0.503.17). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
-- **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+- **Suite:** 8595 passed / 7 skipped on `8913d787` (xdist `-n 4`, BLAS capped, 17m53s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
   No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the
   known non-finding only — the Dashboard's ASTAP note in a dogfood without ASTAP).
 - **Sweep (4).** `upload` was the least-named router in this file (3 mentions), and the only one that writes under
@@ -1078,7 +1099,8 @@ synthetic sample should be re-asked on the owner's own geometry once before the 
 
 ## 2026-10-25 (Scout, branch `claude/beautiful-newton-1bsiin`) — QA rotation sweep (2), new angle — the walk-away missing-files hold on a mosaic: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
-- **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+- **Suite:** 8595 passed / 7 skipped on `8913d787` (xdist `-n 4`, BLAS capped, 17m53s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
   No open PRs at start. **Suite / dogfood:** 8280 passed / 7 skipped on `86af66b4` + this run's docs (xdist `-n 4`, BLAS capped, 18m45s). Dogfood `--mosaic` CLEAN (trim 7.9 %, nothing overflowing, no console errors; the Target page's five notes agree).
 - **Sweep (2).** Per-panel code since the last (2) (`t3nyff`): v0.502.34/35 (outlier floor, mixed-pointing link —
   both scale with the solved field), v0.502.39/40 (median-pixel depth — the planner pattern), v0.503.0
@@ -1169,7 +1191,8 @@ synthetic sample should be re-asked on the owner's own geometry once before the 
 
 ## 2026-10-23 (Scout, branch `claude/beautiful-newton-v9b2h7`) — QA rotation sweep (4), new angle — the *mutating* routes against an in-flight job: one bug, Scout-fixed (v0.502.42). Inbox unchanged.
 
-- **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+- **Suite:** 8595 passed / 7 skipped on `8913d787` (xdist `-n 4`, BLAS capped, 17m53s). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
   Suite 8259 passed / 7 skipped (xdist `-n 4`, 15m58s). No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the
   Target page's five notes agree on the thin top-right panel; the week plan names the mosaic every night).
 - **Sweep (4).** Every earlier (4) sweep read GET *answers* (the 2026-10-21 crawl called all 165 GET paths); none asked
