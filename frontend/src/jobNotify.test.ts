@@ -133,6 +133,44 @@ describe("showJobNotification", () => {
     expect(ctor.mock.calls[0][0]).toMatch(/finished/i);
   });
 
+  // The ping is for the owner who walked off to another tab, and every body ends
+  // "Open AstroStack to …" — so a click on it must bring the app forward and land
+  // on the job, not just dismiss the notification.
+  it("clicking the notification focuses the app, opens the job and closes the ping", () => {
+    const close = vi.fn();
+    const ctor = vi.fn(function (this: { close: () => void }) {
+      this.close = close;
+    });
+    const focus = vi.fn();
+    vi.stubGlobal("window", { Notification: ctor, focus });
+    vi.stubGlobal("Notification", Object.assign(ctor, { permission: "granted" }));
+    const onOpen = vi.fn();
+    showJobNotification(mkJob({ state: "done" }), "Stacking", onOpen);
+
+    const n = ctor.mock.instances[0] as unknown as { onclick: (ev?: Event) => void };
+    expect(typeof n.onclick).toBe("function");
+    const preventDefault = vi.fn();
+    n.onclick({ preventDefault } as unknown as Event);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(focus).toHaveBeenCalledOnce();
+    expect(onOpen).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("a click still opens the job when the browser refuses focus", () => {
+    const ctor = vi.fn(function (this: { close: () => void }) {
+      this.close = vi.fn();
+    });
+    const focus = vi.fn(() => { throw new Error("focus refused"); });
+    vi.stubGlobal("window", { Notification: ctor, focus });
+    vi.stubGlobal("Notification", Object.assign(ctor, { permission: "granted" }));
+    const onOpen = vi.fn();
+    showJobNotification(mkJob({ state: "error" }), "Stacking", onOpen);
+    const n = ctor.mock.instances[0] as unknown as { onclick: (ev?: Event) => void };
+    expect(() => n.onclick()).not.toThrow();
+    expect(onOpen).toHaveBeenCalledOnce();
+  });
+
   it("does nothing when permission is not granted", () => {
     const ctor = vi.fn();
     vi.stubGlobal("window", { Notification: ctor });

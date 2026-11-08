@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- `claude/fervent-allen-6wn2di` — the job-finished desktop ping opens the Jobs page when clicked (`jobNotify.showJobNotification`, `GlobalJobNotifier`).
+*No live claims.*
 
 ---
 
@@ -3155,6 +3155,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.35 **Clicking the opt-in "your job finished" desktop ping brings AstroStack forward on the Jobs page — `jobNotify.showJobNotification` had no `onclick`.** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.34 **The boot-time border-trim job (`unedited_preview_trim`) says on the Jobs page what it trimmed — `Jobs.previewTrimSummary`.** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.33 **A finished Moon/Sun "Check this capture first" job links back from the Jobs page — `Jobs.JobResultActions` had *View result* for `video_stack` but nothing for `video_grade`.** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.32 **The two Settings → Maintenance "finish with Auto" jobs say on the Jobs page what they finished, left alone and could not finish, and link the Gallery — `Jobs.finishPicturesSummary`.**
