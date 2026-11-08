@@ -1,5 +1,34 @@
 # Shipped — the record
 
+## v0.505.37 — 2026-11-08 (Builder, branch `claude/fervent-allen-4pon1s`) — a second Process/Restack click no longer queues a duplicate stack
+
+**Filed reproduced by the 2026-11-08 Scout (QA rotation sweep (4)).** `POST /api/targets/{safe}/process`
+(`routers/pipeline.trigger_process_target` → `pipeline.submit_process_target`) had no "already queued for this
+target" check, and the Target page's Process target (header), *Ready to process?* and *N subs missing* **Restack**
+buttons — plus `RestoredSubsNote` / `RestackGainNote`'s *Stack it again* — were busy only for the POST's milliseconds,
+while the card offering them stays up until the new stack finishes. A second click queued a second identical
+whole-target stack: hours of NAS time and a duplicate History row on a 35,894-sub target.
+
+**What changed:** (1) server — new `JobManager.submit_unless_queued(kind, fn, target=)`: when a job of that kind for
+that target is still **queued** (it has read nothing yet, so the two are identical) it returns that job instead of
+queuing another; the check and the enqueue share the lock the worker takes to flip `queued` → `running`, so two racing
+POSTs cannot both slip in. A *running* job does not count — it may have read its frames before the newest arrived.
+`pipeline.submit_process_target_once` uses it; the route answers `{"job_id", "already_queued"}` (additive field, same
+`job_id`). (2) page — new `hooks/useTargetStackJob` reads the shared `["jobs"]` cache: while a `process_target` or
+`stack` job of this target is queued or running, all five buttons read *Processing…*, are disabled, and say why in
+their tooltip; they come back the moment it ends, so a deliberate restack afterwards is never refused. A click that the
+server answered with `already_queued` says so (*"already waiting its turn … nothing new was queued"*).
+
+**Tests:** `test_pipeline.py::test_process_target_second_post_while_queued_returns_the_same_job` (worker held by a
+blocker: two POSTs → one job, the second answer names the first id, another target is its own job, a POST after the
+first finished queues a new one) — **fails before** (reverted `submit_process_target_once` to `jm.submit`: the second
+POST got a new id). `test_reprocess_all.py::test_submit_unless_queued_dedupes_only_a_queued_job_of_the_same_target`.
+The two body-test `_FakeJM` stubs gained a `submit_unless_queued` mirror over their own `submit`. Vitest:
+`useTargetStackJob.test.ts` (5) and `RestoredSubsNote.test.tsx` busy-button test — fails before (button clickable with
+the `disabled` removed).
+
+**Upgrade-safe (§9):** no config, schema, layout or default change; the response only gains a field.
+
 ## v0.505.36 — 2026-11-08 (Builder, branch `claude/fervent-allen-yzfotq`) — a batch export says on the Jobs page what it made and what failed
 
 **Found by reading `Jobs.tsx::JobResultActions` against `pipeline.submit_editor_batch`.** The Gallery's *Apply preset

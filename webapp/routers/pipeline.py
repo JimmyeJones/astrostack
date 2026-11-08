@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -104,7 +105,7 @@ def trigger_rescue_unsolved(safe: str, request: Request) -> dict[str, str]:
 
 
 @router.post("/api/targets/{safe}/process")
-def trigger_process_target(safe: str, request: Request) -> dict[str, str]:
+def trigger_process_target(safe: str, request: Request) -> dict[str, Any]:
     """One-click "process this target": QC + solve, auto-grade (when enabled),
     then stack, chained in a single job — the whole middle of the workflow with
     no form to fill. Non-destructive (a new stack run alongside any existing)."""
@@ -114,5 +115,8 @@ def trigger_process_target(safe: str, request: Request) -> dict[str, str]:
     lib, proj = deps.open_target_project(request, safe)
     proj.close()
     lib.close()
-    job = pipeline.submit_process_target(settings, jm, safe)
-    return {"job_id": job.id}
+    # A second click while the first is still queued (the page's buttons are
+    # only busy for the POST itself) gets the queued job back, not a duplicate
+    # whole-target stack. ``already_queued`` is additive; ``job_id`` is unchanged.
+    job, already_queued = pipeline.submit_process_target_once(settings, jm, safe)
+    return {"job_id": job.id, "already_queued": already_queued}

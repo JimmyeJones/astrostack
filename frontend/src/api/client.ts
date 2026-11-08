@@ -4364,7 +4364,11 @@ export const api = {
       `/api/targets/${safe}/rescue-unsolved`, { method: "POST" },
     ),
   processTarget: (safe: string) =>
-    req<{ job_id: string }>(`/api/targets/${safe}/process`, { method: "POST" }),
+    // `already_queued`: this target's process job was still waiting its turn, so
+    // the server handed that one back instead of queuing a duplicate (absent on
+    // an older backend).
+    req<{ job_id: string; already_queued?: boolean }>(
+      `/api/targets/${safe}/process`, { method: "POST" }),
 
   // jobs
   // Ask for the whole retained history (up to the backend's hard 2000 cap), not

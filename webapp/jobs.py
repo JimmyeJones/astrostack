@@ -353,6 +353,29 @@ class JobManager:
         self._queue.put((job, fn))
         return job
 
+    def submit_unless_queued(
+        self, kind: str, fn: JobFn, *, target: str | None = None,
+    ) -> tuple[Job, bool]:
+        """Submit ``fn`` — unless a job of ``kind`` for ``target`` is still
+        **queued**, in which case return that one: ``(job, already_queued)``.
+
+        A queued job has read nothing yet, so a second identical submit would only
+        repeat it (a second click on "Process target" queued a second whole-target
+        stack — hours on a NAS). A *running* one does not count: it may have read
+        its frames before the newest ones arrived, so a deliberate re-run after it
+        is real work. The check and the enqueue share the lock the worker takes to
+        flip ``queued`` → ``running``, so two racing submits cannot both slip in.
+        """
+        with self._lock:
+            for j in self._jobs.values():
+                if j.kind == kind and j.target == target and j.state == "queued":
+                    return j, True
+            job = Job(kind=kind, target=target)
+            self._jobs[job.id] = job
+        self._persist(job)
+        self._queue.put((job, fn))
+        return job, False
+
     def active(self) -> list[Job]:
         """Every non-terminal (queued/running) job, newest first.
 

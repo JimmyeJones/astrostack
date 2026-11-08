@@ -5,6 +5,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { RestoredSubs } from "../api/client";
 import { api } from "../api/client";
 import { formatStampDate } from "../format";
+import {
+  processStartedMessage, STACK_BUSY_LABEL, STACK_BUSY_TITLE, useTargetStackJob,
+} from "../hooks/useTargetStackJob";
 
 /**
  * "Some of your subs came back after this picture was made."
@@ -37,12 +40,13 @@ export function RestoredSubsNote(
   { safe, back }: { safe: string; back: RestoredSubs | null | undefined },
 ) {
   const qc = useQueryClient();
+  const stackJob = useTargetStackJob(safe);
   const restack = useMutation({
     mutationFn: () => api.processTarget(safe),
-    onSuccess: () => {
+    onSuccess: (r) => {
       notifications.show({
-        message: "Stacking again — this run will include the subs that came back. "
-          + "Watch Jobs for progress.",
+        message: processStartedMessage(r.already_queued, "Stacking again — this run will include the subs that came back. "
+            + "Watch Jobs for progress."),
         color: "violet",
       });
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -77,8 +81,10 @@ export function RestoredSubsNote(
       <Group gap="xs" mt="xs">
         <Button size="xs" variant="filled" color="blue"
           leftSection={<IconStack2 size={14} />}
-          loading={restack.isPending} onClick={() => restack.mutate()}>
-          Stack it again
+          loading={restack.isPending} disabled={!!stackJob}
+          title={stackJob ? STACK_BUSY_TITLE : undefined}
+          onClick={() => restack.mutate()}>
+          {stackJob ? STACK_BUSY_LABEL : "Stack it again"}
         </Button>
       </Group>
     </Alert>

@@ -56,6 +56,21 @@ describe("RestoredSubsNote", () => {
     await waitFor(() => expect(proc).toHaveBeenCalledWith("m_42"));
   });
 
+  it("is busy, not clickable, while this target is already being stacked", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([{
+      id: "j9", kind: "process_target", target: "m_42", state: "running", phase: "",
+      done: 0, total: 0, detail: "", created_utc: null, started_utc: null,
+      finished_utc: null, error: null,
+    } as client.Job]);
+    const proc = vi.spyOn(client.api, "processTarget")
+      .mockResolvedValue({ job_id: "j1" });
+    renderNote(back());
+    const btn = await screen.findByRole("button", { name: /Processing…/ });
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(proc).not.toHaveBeenCalled();
+  });
+
   it("says nothing when nothing came back", () => {
     renderNote(null);
     expect(screen.queryByTestId("restored-subs-note")).toBeNull();

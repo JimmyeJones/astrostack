@@ -33,6 +33,11 @@ class _FakeJM:
         an idle queue, which is every test that isn't about yielding."""
         return []
 
+    def submit_unless_queued(self, kind, fn, *, target=None):  # noqa: ANN001
+        """Mirror of ``JobManager.submit_unless_queued`` over the stub's own
+        ``submit`` — nothing is ever queued here, so it always submits."""
+        return self.submit(kind, fn, target=target), False
+
 
 def _settings(root) -> Settings:
     return Settings(data_root=str(root), auto_ingest=False, auto_qc=False,
@@ -3263,3 +3268,22 @@ def test_process_keeps_the_merge_pin_when_auto_fails(solved_library, monkeypatch
         assert _cover_and_reason(lib, safe) == (run_id, "merge")
     finally:
         lib.close()
+
+
+def test_submit_unless_queued_dedupes_only_a_queued_job_of_the_same_target(
+        tmp_path: Path):
+    # Only a *queued* job is the same job: a running one may have read its frames
+    # before the newest arrived, so a re-run after it is real work. Don't start
+    # the worker, so submitted jobs stay queued.
+    jm = JobManager(tmp_path / "jobs.sqlite")
+    first, dup = jm.submit_unless_queued("process_target", lambda j: {}, target="M_42")
+    assert dup is False and first.state == "queued"
+    again, dup = jm.submit_unless_queued("process_target", lambda j: {}, target="M_42")
+    assert dup is True and again is first
+    other, dup = jm.submit_unless_queued("process_target", lambda j: {}, target="M_31")
+    assert dup is False and other is not first
+    stack, dup = jm.submit_unless_queued("stack", lambda j: {}, target="M_42")
+    assert dup is False and stack is not first
+    first.state = "running"
+    fresh, dup = jm.submit_unless_queued("process_target", lambda j: {}, target="M_42")
+    assert dup is False and fresh is not first

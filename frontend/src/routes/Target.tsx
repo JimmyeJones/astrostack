@@ -28,6 +28,9 @@ import { MosaicThinHoldNote } from "../components/MosaicThinHoldNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { RestackGainNote } from "../components/RestackGainNote";
 import { RestoredSubsNote } from "../components/RestoredSubsNote";
+import {
+  processStartedMessage, STACK_BUSY_LABEL, STACK_BUSY_TITLE, useTargetStackJob,
+} from "../hooks/useTargetStackJob";
 import { StackFailedNote } from "../components/target/StackFailedNote";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { InsightTabs } from "../components/InsightTabs";
@@ -650,11 +653,15 @@ export function TargetView() {
 
   // One-click "just do it": QC + plate-solve, auto-grade (when enabled) and stack
   // this target in a single job — the whole middle of the workflow without a form.
+  // A stack of this target already queued or running keeps every Process /
+  // Restack button below busy until it ends — not just for the POST.
+  const stackJob = useTargetStackJob(safe);
   const process = useMutation({
     mutationFn: () => api.processTarget(safe),
-    onSuccess: () => {
+    onSuccess: (r) => {
       notifications.show({
-        message: "Processing target — checking, solving & stacking. Watch Jobs for progress.",
+        message: processStartedMessage(r.already_queued,
+          "Processing target — checking, solving & stacking. Watch Jobs for progress."),
         color: "violet",
       });
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -1056,8 +1063,10 @@ export function TargetView() {
               <Group gap="xs" mt="xs">
                 <Button size="xs" variant="filled" color="violet"
                   leftSection={<IconSparkles size={14} />}
-                  loading={process.isPending} onClick={() => process.mutate()}>
-                  Process target
+                  loading={process.isPending} disabled={!!stackJob}
+                  title={stackJob ? STACK_BUSY_TITLE : undefined}
+                  onClick={() => process.mutate()}>
+                  {stackJob ? STACK_BUSY_LABEL : "Process target"}
                 </Button>
               </Group>
             </Alert>
@@ -1082,8 +1091,10 @@ export function TargetView() {
               <Group gap="xs" mt="xs">
                 <Button size="xs" variant="filled" color="blue"
                   leftSection={<IconStack2 size={14} />}
-                  loading={process.isPending} onClick={() => process.mutate()}>
-                  Restack
+                  loading={process.isPending} disabled={!!stackJob}
+                  title={stackJob ? STACK_BUSY_TITLE : undefined}
+                  onClick={() => process.mutate()}>
+                  {stackJob ? STACK_BUSY_LABEL : "Restack"}
                 </Button>
               </Group>
             </Alert>
@@ -1495,11 +1506,13 @@ export function TargetView() {
             leftSection={<IconSparkles size={16} />}
             onClick={() => process.mutate()}
             loading={process.isPending}
+            disabled={!!stackJob}
             aria-label="Process this target"
-            title="Quality-check, plate-solve and stack this target in one step"
+            title={stackJob ? STACK_BUSY_TITLE
+              : "Quality-check, plate-solve and stack this target in one step"}
           >
-            <Box visibleFrom="sm">Process target</Box>
-            <Box hiddenFrom="sm">Process</Box>
+            <Box visibleFrom="sm">{stackJob ? STACK_BUSY_LABEL : "Process target"}</Box>
+            <Box hiddenFrom="sm">{stackJob ? STACK_BUSY_LABEL : "Process"}</Box>
           </Button>
           <Button
             variant="default"
