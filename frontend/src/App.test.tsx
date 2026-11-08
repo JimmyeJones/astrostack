@@ -1,6 +1,7 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActiveJobsBadge, GlobalJobNotifier } from "./App";
 import * as client from "./api/client";
@@ -18,9 +19,16 @@ function mkJob(overrides: Partial<Job> = {}): Job {
 }
 
 function renderWatcher(qc: QueryClient) {
+  // Inside a router, as it is in the app: a click on a ping navigates to /jobs.
   return render(
     <QueryClientProvider client={qc}>
-      <GlobalJobNotifier />
+      <MemoryRouter initialEntries={["/gallery"]}>
+        <GlobalJobNotifier />
+        <Routes>
+          <Route path="/gallery" element={<div>gallery page</div>} />
+          <Route path="/jobs" element={<div>jobs page</div>} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -114,6 +122,29 @@ describe("GlobalJobNotifier", () => {
     const [title, opts] = ctor.mock.calls[0] as [string, NotificationOptions];
     expect(title).toContain("finished");
     expect(opts.tag).toBe("astrostack-job-job-1");
+  });
+
+  it("clicking the ping opens the Jobs page from wherever the owner was", async () => {
+    const ctor = vi.fn(function (this: { close: () => void }) {
+      this.close = vi.fn();
+    });
+    vi.stubGlobal("Notification", Object.assign(ctor, { permission: "granted", requestPermission: vi.fn() }));
+    localStorage.setItem(NOTIFY_KEY, "1");
+
+    const listJobs = vi.spyOn(client.api, "listJobs").mockResolvedValue([mkJob({ state: "running" })]);
+    const qc = new QueryClient();
+    renderWatcher(qc);
+    await waitFor(() => expect(qc.getQueryData(["jobs"])).toEqual([mkJob({ state: "running" })]));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByText("gallery page")).toBeInTheDocument();
+
+    listJobs.mockResolvedValue([mkJob({ state: "done" })]);
+    await qc.invalidateQueries({ queryKey: ["jobs"] });
+    await waitFor(() => expect(ctor).toHaveBeenCalledTimes(1));
+
+    const n = ctor.mock.instances[0] as unknown as { onclick: (ev?: Event) => void };
+    act(() => n.onclick());
+    expect(await screen.findByText("jobs page")).toBeInTheDocument();
   });
 
   it("stays silent while the opt-in is off, even across a finish", async () => {

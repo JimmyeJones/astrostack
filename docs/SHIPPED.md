@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## v0.505.35 — 2026-11-08 (Builder, branch `claude/fervent-allen-6wn2di`) — clicking the job-finished ping opens the Jobs page
+
+**Found by reading `jobNotify.ts` after the v0.505.29–.34 Jobs-page series.** The opt-in desktop notification
+(`GlobalJobNotifier` → `showJobNotification`) exists for the walk-away owner who started a stack and went to another
+tab, and every body it can say ends *"Open AstroStack to …"*. But the `Notification` it built had no `onclick`, so the
+one gesture that reads as "show me" only dismissed it, and the owner had to go hunting for the right tab and page.
+
+**What changed:** `showJobNotification(job, kindLabel, onOpen?)` sets `onclick` on the notification: it prevents the
+browser's own default, calls `window.focus()` (guarded — a browser may refuse), calls `onOpen`, and closes the ping.
+`GlobalJobNotifier` passes `() => navigate("/jobs")`, so the click lands on the Jobs page, which since v0.505.29–.34
+has a result action or a plain-language reason for every job kind. Notification text is unchanged; the feature stays
+off by default and a no-op where the API is missing or permission is not granted.
+
+**Tests (+3, all fail-before — checked by restoring the old `jobNotify.ts`/`App.tsx`):** `jobNotify.test.ts` — the
+click focuses, opens and closes; a refused `focus()` still opens. `App.test.tsx` — the watcher now renders inside a
+`MemoryRouter` as it does in the app, and a click on a ping fired while on `/gallery` lands on `/jobs`.
+
+**Upgrade-safe (§9):** frontend only; no config, schema, layout, default or API change.
+
 ## v0.505.34 — 2026-11-08 (Builder, branch `claude/fervent-allen-dmh6fb`) — the boot-time border-trim job says on the Jobs page what it did
 
 **Found by listing every submitted job kind against `Jobs.tsx::JobResultActions`.** With `auto_crop_border` on, the

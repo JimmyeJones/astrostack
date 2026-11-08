@@ -127,13 +127,41 @@ export async function requestNotificationPermission(): Promise<
 
 /** Fire one desktop notification for a finished job, if permission is granted.
  * Best-effort: silently no-ops when unsupported or not granted, and swallows a
- * constructor throw so it can never break the polling render. */
-export function showJobNotification(job: Job, kindLabel: string): void {
+ * constructor throw so it can never break the polling render.
+ *
+ * **Clicking it takes you to the job.** The ping exists for the owner who has
+ * walked off to another tab, and every body it can say ends in "Open AstroStack
+ * to …" — but a click on the notification used to do nothing at all (the OS just
+ * dismissed it), so the one gesture that reads as "show me" left them hunting
+ * for the right tab. ``onOpen`` is called after the AstroStack tab is brought
+ * forward; the caller points it at the Jobs page, which now has a result action
+ * or a plain-language reason for every kind of job it lists. */
+export function showJobNotification(
+  job: Job,
+  kindLabel: string,
+  onOpen?: () => void,
+): void {
   if (!notificationsSupported() || Notification.permission !== "granted") return;
   const { title, body } = jobNotificationText(job, kindLabel);
   try {
     // `tag` de-dupes if the same job somehow notifies twice.
-    new Notification(title, { body, tag: `astrostack-job-${job.id}` });
+    const n = new Notification(title, { body, tag: `astrostack-job-${job.id}` });
+    n.onclick = (ev?: Event) => {
+      // Without preventDefault some browsers also focus the tab themselves;
+      // doing it here makes the behaviour the same everywhere.
+      ev?.preventDefault?.();
+      try {
+        window.focus();
+      } catch {
+        /* a browser may refuse focus from a notification — the page still moves. */
+      }
+      onOpen?.();
+      try {
+        n.close();
+      } catch {
+        /* already gone */
+      }
+    };
   } catch {
     /* some browsers throw for notifications outside a user gesture — ignore. */
   }

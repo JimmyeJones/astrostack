@@ -42,6 +42,9 @@ function AppVersion() {
 // in-progress→done/error/interrupted transition, and the baseline is tracked every poll even
 // while disabled, so enabling mid-session never bursts for already-finished jobs.
 export function GlobalJobNotifier() {
+  // Clicking a ping opens the Jobs page, where every finished kind of job has
+  // its result action (or the plain reason it failed) — see showJobNotification.
+  const navigate = useNavigate();
   const { data } = useQuery({
     queryKey: ["jobs"],
     // Wrap so the default limit applies (a bare `api.listJobs` would receive the
@@ -56,11 +59,11 @@ export function GlobalJobNotifier() {
     if (!data) return;
     if (isJobNotifyEnabled()) {
       for (const j of justFinishedJobs(prevJobs.current, data)) {
-        showJobNotification(j, jobKindLabel(j.kind));
+        showJobNotification(j, jobKindLabel(j.kind), () => navigate("/jobs"));
       }
     }
     prevJobs.current = data;
-  }, [data]);
+  }, [data, navigate]);
   return null;
 }
 

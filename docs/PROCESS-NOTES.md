@@ -1,5 +1,15 @@
 # Process notes & QA sweep records
 
+## 2026-11-08 (Builder, branch `claude/fervent-allen-6wn2di`) — v0.505.35 (job-finished ping opens the Jobs page); dogfood `--closing --calibration --incoming-lag` CLEAN.
+
+Setup's `pip install -e .[dev,web,gui]` hung for 22 min in `poll` with PyPI reachable (curl 200 in 0.17 s); killing
+the stuck pip let `scripts/agent-setup.sh` retry and finish in a few minutes — worth knowing before waiting longer.
+Dogfood (flags today's passes had not used): exit 0, nothing overflowing, no console errors; masters built and applied
+to the stack, the calibration health note silent for the right reason; Tonight's three closing/plan cards name the
+same closing target; tallest page `[phone] /life-list [Still to shoot]` 14,513 px against its recorded 14,492 px
+non-finding. Nothing to file. The one change came from reading `jobNotify.ts` after the Jobs-page series: the ping's
+body says "Open AstroStack to …" but a click on it did nothing. Suite 8595 passed / 7 skipped (xdist `-n 4`, 13m52s).
+
 ## 2026-11-07 (Builder, branch `claude/fervent-allen-gczctg`) — no app change; nothing ungated; dogfood `--mosaic --dithered --restack --editor` CLEAN.
 
 Suite 8595 passed / 7 skipped on `af5f1144` (xdist `-n 4`, BLAS capped, 16m19s). Issue inbox and Bugs unchanged since the run before (every open entry gated on the owner or observer). Dogfood run
