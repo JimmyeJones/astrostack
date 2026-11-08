@@ -3155,6 +3155,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.505.33 **A finished Moon/Sun "Check this capture first" job links back from the Jobs page — `Jobs.JobResultActions` had *View result* for `video_stack` but nothing for `video_grade`.** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.32 **The two Settings → Maintenance "finish with Auto" jobs say on the Jobs page what they finished, left alone and could not finish, and link the Gallery — `Jobs.finishPicturesSummary`.**
 - ✅ v0.505.31 **A finished stack (and a Moon/Sun video stack) opens its picture from the Jobs page — `Jobs.JobResultActions` had no *View result* for the Stack form's own `stack` job.** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.29 **The Jobs page and the "Notify me when done" ping name the editor's Share and Print jobs in plain words instead of `editor_share` / `editor_print`; a drift test now fails on any submitted job kind with no label** (`Jobs.KIND_LABEL`, `tests/test_job_kind_labels.py`) — Builder code read. Full entry in [`SHIPPED.md`](SHIPPED.md).
