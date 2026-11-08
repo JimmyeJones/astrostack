@@ -1,5 +1,17 @@
 # Shipped — the record
 
+## v0.505.33 — 2026-11-08 (Builder, branch `claude/fervent-allen-po1pe4`) — a finished Moon/Sun sharpness check links back from the Jobs page
+
+**Found by reading which finished jobs the Jobs page lets you reach (the v0.505.31 sweep's last gap).** The Moon & Sun
+page's *Check this capture first* button submits a `video_grade` job that decodes the whole recording — minutes on a
+long one — and its sharpness curve and quick look land on that page's card. `Jobs.tsx::JobResultActions` linked a
+finished `video_stack` there, but had no branch for `video_grade`, so whoever left the page while the check ran found
+a finished row with no way back to what it measured.
+
+**What changed:** a finished `video_grade` row that graded at least one frame offers *See the check* →
+`/moon-sun`; a cancelled one offers nothing. `Jobs.test.tsx` (+1) fails against `main`'s `Jobs.tsx` and passes
+after. Frontend only — no backend, config, schema, API or default change.
+
 ## v0.505.32 — 2026-11-07 (Builder, branch `claude/fervent-allen-a93ah2`) — the two "finish with Auto" jobs read back what they did
 
 **Found by reading which finished jobs the Jobs page says nothing about.** Settings → Maintenance's

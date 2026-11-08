@@ -354,6 +354,24 @@ describe("JobsView process_target result actions", () => {
       .toEqual(["/targets/M_42/edit/9", "/moon-sun"]);
   });
 
+  it("links a finished Moon/Sun sharpness check back to its card", async () => {
+    // The grade-only pass decodes the whole recording; its curve lands on the
+    // Moon & Sun page, and the finished row had no way back to it.
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "vg-1", kind: "video_grade", target: "cap-1", state: "done",
+        result: { capture_id: "cap-1", n_graded: 400 },
+      }),
+      mkJob({
+        id: "vg-2", kind: "video_grade", target: "cap-2", state: "cancelled",
+        result: { cancelled: true, capture_id: "cap-2" },
+      }),
+    ]);
+    renderJobsRouted();
+    const links = await screen.findAllByRole("link", { name: "See the check" });
+    expect(links.map((a) => a.getAttribute("href"))).toEqual(["/moon-sun"]);
+  });
+
   it("falls back to History when the backend didn't report a run id", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({

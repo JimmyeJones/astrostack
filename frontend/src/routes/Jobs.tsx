@@ -1862,6 +1862,18 @@ function JobResultActions({ job }: { job: Job }) {
         View result
       </Button>
     );
+  } else if (job.kind === "video_grade" && typeof r.n_graded === "number"
+             && r.n_graded > 0) {
+    // "Check this capture first" decodes the whole recording — minutes on a
+    // long one — and its sharpness curve and quick look land on the same Moon &
+    // Sun card the check was started from. Whoever left that page while it ran
+    // found this finished row with no way back to what it measured.
+    action = (
+      <Button size="xs" variant="light" leftSection={<IconActivity size={14} />}
+        component={Link} to="/moon-sun">
+        See the check
+      </Button>
+    );
   } else if (job.kind === "editor_export" && r.safe) {
     action = (
       <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
