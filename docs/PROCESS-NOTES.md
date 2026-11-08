@@ -1,5 +1,9 @@
 # Process notes & QA sweep records
 
+## 2026-11-08 (Builder, branch `claude/fervent-allen-gilw79`) — no app change; nothing ungated; dogfood `--mosaic --editor` CLEAN.
+
+Suite 8597 passed / 7 skipped on `db58b81b` (xdist `-n 4`, BLAS capped, 16m14s). Bugs unchanged (every open entry gated on the owner or observer). Dogfood `--mosaic --editor --build`: exit 0, nothing overflowing, no console errors; Auto's mosaic trim 7.9 %; all 21 Add-menu ops re-render on both runs, Undo/Redo apply; taste chips as before (10 live, "Over-smoothed" / "Core looks flat" marked at-limit), "Hold back highlights (0.05)" offered on the mosaic. The mosaic Target page's notes read as one paragraph (4 min over ~3 fields, top-right panel 30 s behind, 23 % of the canvas 1.4× grainier, ~75 % of M42 in frame). Standing non-findings only: the Dashboard's "Plate-solving isn't set up yet" (no ASTAP here) and `[phone] /life-list [Still to shoot]` 14,513 px (by design). Follow-up check on v0.505.37 before its soak ends: `api.processTarget` has exactly three callers (`Target.tsx`, `RestoredSubsNote`, `RestackGainNote`), all behind `useTargetStackJob`, and the only server caller of `submit_process_target` is the deduped route — nothing to add.
+
 ## 2026-11-08 (Scout, branch `claude/exciting-wozniak-nk09s6`) — QA rotation sweep (4), new angle — a repeated POST on the job-submitting routes (the double-click / "did it work?" second press): one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8595 passed / 7 skipped on `8913d787` (xdist `-n 4`, BLAS capped, 17m53s). **Inbox:** the same four
