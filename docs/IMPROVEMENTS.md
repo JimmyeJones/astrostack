@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- `claude/fervent-allen-4pon1s` — the double-queued "Process target" / Restack bug in Bugs (`routers/pipeline.trigger_process_target`, `Target.tsx`).
 
 ---
 
