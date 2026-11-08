@@ -1535,6 +1535,34 @@ describe("friendlyJobError", () => {
       "ValueError: No accepted frames are plate-solved yet. Run Plate Solve first.").next)
       .toMatch(/Quality check & plate-solve/);
   });
+  it("reads a too-big mosaic canvas as itself, not as 'nothing plate-solved'", () => {
+    // Both of the engine's refusals (seestack/stack/mosaic.py) blame bad
+    // plate-solves; the plate-solve match used to win and told the owner of a
+    // solved mosaic to run plate-solve first.
+    const area = "ValueError: mosaic canvas would be 9000×21000 px (189 MP), exceeding the "
+      + "150 MP memory budget. This usually means bad plate-solves are inflating the "
+      + "field (a small object shouldn't need a huge canvas) — open the Frames table, "
+      + "reject the frames whose centre is far from the rest, then re-stack. To allow a "
+      + "genuinely large mosaic, raise ASTROSTACK_MAX_CANVAS_MEGAPIXELS.";
+    const side = "mosaic canvas would be 17000×900 px, exceeding the 16000 px limit, even "
+      + "after dropping outliers. Several frames likely have a bad plate-solve. Open the "
+      + "target's Frames table, sort by RA/Dec, and reject the ones whose centre is far "
+      + "from the rest (or re-solve them).";
+    // undefined: an older backend; canvas_too_large: this one; no_solved_frames:
+    // the kind a build before this one stamped on the same text, still on record.
+    for (const raw of [area, side]) {
+      for (const kind of [undefined, "canvas_too_large", "no_solved_frames"]) {
+        const r = friendlyJobError(raw, kind);
+        expect(r.message).toMatch(/mosaic came out far too big/);
+        expect(r.message).not.toMatch(/no accepted, plate-solved/);
+        expect(r.next).toMatch(/Frames table/);
+        expect(r.next).toMatch(/ASTROSTACK_MAX_CANVAS_MEGAPIXELS/);
+      }
+    }
+    // The genuine refusal is untouched.
+    expect(friendlyJobError("whatever", "no_solved_frames").message)
+      .toMatch(/no accepted, plate-solved frames/);
+  });
   it("translates an empty-alignment failure", () => {
     expect(friendlyJobError("ValueError: no frames could be aligned").message)
       .toMatch(/None of the frames could be aligned/);

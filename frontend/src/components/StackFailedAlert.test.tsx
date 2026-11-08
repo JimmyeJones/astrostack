@@ -54,6 +54,22 @@ describe("StackFailedAlert", () => {
     expect(screen.getByText(/tried to stack on its own and stopped/)).toBeTruthy();
   });
 
+  it("tells a walk-away mosaic the canvas was too big, even under an older stamp", () => {
+    // The owner's case: an unattended mosaic stack refused for a canvas a few
+    // wrong solves stretched. A build before canvas_too_large stamped it
+    // no_solved_frames and the scan result keeps that — it must not read as
+    // "there are no plate-solved frames to stack yet".
+    const raw = "mosaic canvas would be 17000×900 px, exceeding the 16000 px limit, even "
+      + "after dropping outliers. Several frames likely have a bad plate-solve.";
+    renderIn(<StackFailedAlert failure={{
+      ...FAILURE, safe: "M_42_mosaic", name: "M 42 (mosaic)", message: raw,
+      kind: "no_solved_frames",
+    }} />);
+    expect(screen.getByText(/mosaic came out far too big to stack/)).toBeTruthy();
+    expect(screen.queryByText(/no accepted, plate-solved frames/)).toBeNull();
+    expect(screen.getByText(/17000×900 px/)).toBeTruthy();  // the engine's own numbers
+  });
+
   it("words a manual failure differently", () => {
     renderIn(<StackFailedAlert failure={{ ...FAILURE, unattended: false }} />);
     expect(screen.getByText(/last stack stopped before it ran/)).toBeTruthy();
