@@ -5,6 +5,8 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
+
 from webapp.jobs import Job, JobManager
 
 
@@ -246,6 +248,59 @@ def test_classify_job_error_maps_known_signatures():
     assert classify_job_error(FileNotFoundError("no target 'M31'")) is None
     # Anything unrecognised stays None so the raw text is shown verbatim.
     assert classify_job_error(OSError("disk is full")) is None
+
+
+def test_classify_job_error_reads_a_too_big_mosaic_canvas_as_itself():
+    """The mosaic canvas guard's refusal is ``canvas_too_large``, not "nothing
+    is plate-solved yet".
+
+    Both of ``compute_mosaic_canvas``'s refusals blame "bad plate-solve(s)", and
+    the plate-solve phrase used to win: the owner of a fully solved mosaic whose
+    canvas a few wrong solves had stretched was told to run plate-solve first —
+    on the Jobs page, the Target page's stack-failed note and the Dashboard.
+    Driven by the engine's own messages so a reword is caught here, not by him.
+    """
+    pytest.importorskip("astropy")
+    from seestack.io.project import FrameRow
+    from seestack.stack.mosaic import compute_mosaic_canvas
+    from tests.synth import make_synth_wcs_text
+    from webapp.jobs import classify_error_message, classify_job_error
+
+    def frame(ra: float, dec: float) -> FrameRow:
+        return FrameRow(
+            id=None, source_path=f"{ra}_{dec}.fit", width_px=480, height_px=320,
+            bayer_pattern="RGGB", ra_center_deg=ra, dec_center_deg=dec,
+            pixscale_arcsec=5.0,
+            wcs_json=make_synth_wcs_text(
+                width=480, height=320, ra_center_deg=ra, dec_center_deg=dec,
+                pixscale_arcsec=5.0),
+        )
+
+    # Two pointings ~5° apart, too few frames for the outlier pass to drop
+    # either: over a tiny area budget, then over a per-side cap smaller than
+    # one frame (so dropping outliers cannot rescue it either).
+    frames = [frame(40.0, 10.0)] * 2 + [frame(44.0, 14.0)] * 2
+    refusals = []
+    for limits in ({"max_canvas_px": 100000, "max_canvas_mp": 0.5},
+                   {"max_canvas_px": 200}):
+        with pytest.raises(ValueError) as caught:
+            compute_mosaic_canvas(frames, reference_shape=(320, 480), **limits)
+        refusals.append(caught.value)
+    assert "MP memory budget" in str(refusals[0])
+    assert "px limit" in str(refusals[1])
+    for exc in refusals:
+        assert "plate-solve" in str(exc)  # the phrase that used to win
+        assert classify_job_error(exc) == "canvas_too_large"
+        # run_stack re-raises it as a fresh ValueError, and the walk-away
+        # auto-stack keeps only the text — with or without the type in front.
+        assert classify_job_error(ValueError(str(exc))) == "canvas_too_large"
+        assert classify_error_message(str(exc)) == "canvas_too_large"
+        assert classify_error_message(f"ValueError: {exc}") == "canvas_too_large"
+    # The genuine "nothing solved" refusal still reads as that.
+    assert classify_job_error(ValueError(
+        "No accepted frames are plate-solved yet. Run Plate Solve first, and "
+        "make sure at least one accepted frame solved successfully.",
+    )) == "no_solved_frames"
 
 
 def test_classify_job_error_names_a_full_disk_and_a_permission_refusal():

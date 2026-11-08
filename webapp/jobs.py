@@ -55,6 +55,8 @@ def classify_job_error(exc: BaseException) -> str | None:
     ``memory_budget`` (the OOM guard refused the stack before running),
     ``no_solved_frames`` (nothing accepted + plate-solved to stack),
     ``no_alignment`` (frames didn't overlap / solved to different fields),
+    ``canvas_too_large`` (a mosaic's union canvas is over the size or area limit,
+    almost always a few frames solved to the wrong place),
     ``no_reference_wcs`` (the reference frame isn't plate-solved),
     ``no_fits_in_folder`` (a Build-master job pointed at a folder with no FITS),
     ``disk_full`` (the disk — or the dataset's quota — ran out mid-write), and
@@ -115,6 +117,13 @@ def classify_error_message(message: str) -> str | None:
         return "not_started"
     if "working memory" in msg:
         return "memory_budget"
+    # The mosaic canvas guard (``seestack/stack/mosaic.py::compute_mosaic_canvas``)
+    # refuses a canvas too big to stack, and both its messages blame "bad
+    # plate-solves" — so it must be matched before the plate-solve phrase below,
+    # which would otherwise tell the owner of a solved mosaic that nothing is
+    # plate-solved yet.
+    if "mosaic canvas would be" in msg:
+        return "canvas_too_large"
     if ("plate-solve" in msg or "plate solved" in msg or "plate-solved" in msg):
         return "no_solved_frames"
     if ("no frames could be aligned" in msg or "no usable frames" in msg

@@ -120,6 +120,20 @@ const JOB_ERROR_KIND: Record<string, JobErrorHelp> = {
     message: "The reference frame isn’t plate-solved, so the stack has nothing to align to.",
     next: "Re-run Quality check & plate-solve, then stack again.",
   },
+  // A mosaic's union canvas came out over the size or area limit
+  // (seestack/stack/mosaic.py::compute_mosaic_canvas). Its frames ARE solved —
+  // usually a few solved to the wrong part of the sky and stretched the canvas.
+  canvas_too_large: {
+    message:
+      "This mosaic came out far too big to stack, so it was refused before running. "
+      + "That almost always means a few frames plate-solved to the wrong part of "
+      + "the sky and stretched the picture's canvas.",
+    next:
+      "Open the target's Frames table, sort by RA/Dec, and reject (or re-solve) the "
+      + "frames whose position is far from the rest, then stack again. Only if the "
+      + "mosaic really covers that much sky does the limit need raising, and that is "
+      + "set where the app is installed (ASTROSTACK_MAX_CANVAS_MEGAPIXELS), not here.",
+  },
   // A "Build master" job was pointed at a folder with no FITS frames.
   no_fits_in_folder: {
     message: "No FITS frames were found in that folder.",
@@ -175,8 +189,13 @@ const JOB_ERROR_KIND: Record<string, JobErrorHelp> = {
 export function friendlyJobError(
   raw: string, kind?: string | null,
 ): JobErrorHelp {
-  if (kind && JOB_ERROR_KIND[kind]) return JOB_ERROR_KIND[kind];
   const s = raw.toLowerCase();
+  // Ahead of the stamped kind on purpose: a build before this kind existed
+  // stamped the mosaic canvas refusal "no_solved_frames" (its text blames "bad
+  // plate-solves"), and those jobs and scan results are kept — they must stop
+  // telling the owner of a solved mosaic that nothing is plate-solved yet.
+  if (s.includes("mosaic canvas would be")) return JOB_ERROR_KIND.canvas_too_large;
+  if (kind && JOB_ERROR_KIND[kind]) return JOB_ERROR_KIND[kind];
   // The restart notes first (mirrors webapp/jobs.py::classify_error_message):
   // the "was running" one advises rejecting bad "plate-solve frames", which the
   // plate-solve match below would read as "no plate-solved frames to stack".

@@ -1,5 +1,32 @@
 # Shipped — the record
 
+## v0.505.38 — 2026-11-08 (Builder, branch `claude/fervent-allen-7mwvuw`) — a too-big mosaic canvas no longer reads as "nothing is plate-solved yet"
+
+**Found this run by code read** (after a `--big --deep --editor` dogfood pass came back CLEAN, while chasing the open
+"Better empty-states and error messages on long-running jobs" UX line). `seestack/stack/mosaic.py::compute_mosaic_canvas`
+refuses a union canvas over `MAX_CANVAS_PX` per side or `ASTROSTACK_MAX_CANVAS_MEGAPIXELS` in area, and `run_stack`
+re-raises it. **Both** of its messages blame "bad plate-solve(s)" — and `webapp/jobs.py::classify_error_message`
+(mirrored by `Jobs.friendlyJobError`) matched the phrase `plate-solve` first, so the refusal was stamped
+`no_solved_frames`. A heavy mosaic user whose fully solved mosaic had been stretched by a few wrong solves was told
+*"There are no accepted, plate-solved frames to stack yet. Run Quality check & plate-solve first"* — on the Jobs page
+(which hides the raw line), on the Target page's stack-failed note, on the Dashboard, and in a walk-away scan's
+grouped failures. The one useful instruction (reject the far-off frames) was only ever in the raw text.
+
+**What changed:** new `error_kind` **`canvas_too_large`**, matched on the engine's own `mosaic canvas would be` before
+the plate-solve phrase (server and client). Its sentence says the mosaic came out far too big, why that almost always
+happens, and what to do: Frames table → sort by RA/Dec → reject or re-solve the far-off frames; only a genuinely huge
+mosaic needs the limit raised, which is set where the app is installed. The client checks the text **before** the
+stamped kind, so jobs and scan results recorded by an older build as `no_solved_frames` read correctly too.
+
+**Tests:** `test_jobs.py::test_classify_job_error_reads_a_too_big_mosaic_canvas_as_itself` drives both real refusals
+out of `compute_mosaic_canvas` (area budget and per-side cap) and classifies them as the exception, as a re-raised
+`ValueError`, and as bare / `ValueError:`-prefixed text — **fails before** (`'no_solved_frames' == 'canvas_too_large'`).
+Vitest: `Jobs.test.tsx` *reads a too-big mosaic canvas as itself* (both texts × no kind / new kind / the old stamp) and
+`StackFailedAlert.test.tsx` *tells a walk-away mosaic the canvas was too big, even under an older stamp* — **both fail
+before** (Jobs.tsx reverted).
+
+**Upgrade-safe (§9):** no config, schema, layout, default or response-shape change; `error_kind` gains one value.
+
 ## v0.505.37 — 2026-11-08 (Builder, branch `claude/fervent-allen-4pon1s`) — a second Process/Restack click no longer queues a duplicate stack
 
 **Filed reproduced by the 2026-11-08 Scout (QA rotation sweep (4)).** `POST /api/targets/{safe}/process`
