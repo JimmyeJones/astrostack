@@ -38,11 +38,10 @@ same name once a " (mosaic)" suffix is dropped, or centres closer than
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-
 import math
 import re
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 
