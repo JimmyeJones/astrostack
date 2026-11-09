@@ -2498,9 +2498,10 @@ any of them.)*
   plain sentence keyed to the target's catalogue family (`catalog_family`, v0.505.3) — *"For a galaxy, leave the
   filter out next time; those nights caught about a third of the light."* Read-only: it never excludes a sub, and
   does not touch the stack. **Not** a narrowband/channel feature (§1): no HOO split, no per-filter stacking.
-  **Gate:** whether the S30 writes a filter card at all, and under what values — the observer can answer with a
-  count of subs per distinct value of the `FILTER` card on one target (shape and counts only; no header pasted).
-  If it writes none, drop the idea.
+  **Gate:** whether the S30 writes a filter card at all, and under what values. **⏸ Waiting on diagnostic
+  `filter_card_values` v1** (ships in v0.506.1, `seestack/diag/filter_card.py`; the observer files it as
+  `Diagnostic result: filter_card_values v1`). If every sampled sub reads `(absent)` and `other_filter_keywords`
+  is empty, drop the idea; a non-zero `target_nights_with_more_than_one_value` means a per-night tally is wrong.
 
 ### UX & polish
 - Mobile layout polish on Combine. (S) *(Calibration's masters table done v0.505.11, Tonight's planner tables v0.505.12; Combine is the deprioritised
@@ -3161,6 +3162,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.1 **Second library diagnostic, `filter_card_values` v1: does the Seestar record whether its LP filter was in, and with which values — the one gate on the "Was the light-pollution filter on?" idea** (`seestack/diag/filter_card.py`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.0 **A question for the owner's real library is now code that ships with the app: each new diagnostic runs once after an update as a queued job, its numbers-only result is served on `GET /api/diagnostics` (read-only token), and the observer files it as an issue — so nobody asks him to paste a script again** (`seestack.diag`, `webapp.diagnostics`, first diagnostic `sensor_pattern_by_temperature` v1; owner ask 2026-11-09)
 - ✅ v0.505.38 **A mosaic refused for a too-big canvas no longer reads as "there are no plate-solved frames to stack yet" — new `error_kind` `canvas_too_large` (`webapp/jobs.py::classify_error_message`, `Jobs.friendlyJobError`).** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.37 **A second click on Process target / Restack no longer queues a second identical whole-target stack** (`JobManager.submit_unless_queued`, `routers/pipeline.trigger_process_target` `already_queued`, `hooks/useTargetStackJob`). Full entry in [`SHIPPED.md`](SHIPPED.md).

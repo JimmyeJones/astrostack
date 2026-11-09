@@ -1,5 +1,30 @@
 # Shipped — the record
 
+## 2026-11-09 (Builder, branch `claude/fervent-allen-lotulm`)
+
+### v0.506.1 — diagnostic `filter_card_values` v1: does the Seestar record its LP filter?
+
+**Why.** The "Was the light-pollution filter on?" idea (Scout 2026-11-01, Features) is gated on one fact
+only the owner's subs hold: whether the S30 writes a filter card, and with which values. With nothing
+ungated in Bugs, shipping the question as a diagnostic (v0.506.0's mechanism) is the step that unblocks it
+without asking him for anything.
+
+**What.** `seestack/diag/filter_card.py`, registered after `sensor_pattern_by_temperature`. It samples up
+to 6 subs per target, one night at a time, 600 in all, and reads **headers only** (`fits.getheader`; the
+pixels are never opened). It tallies the `FILTER` card per value over subs, targets, nights and catalogue
+family (`identify_object` + `presets.catalog_family`). It also lists the *names* of any other card whose
+name says "filter" (`FILT*`, `LP*`), and counts target-nights whose subs carry more than one value. A
+value is published only when `_token` accepts it: ≤12 plain characters, no run of 4+ digits, and it passes
+`check_result_is_safe`. Anything else is counted in `filter_card_other_values` without its text. The
+`seestack.diag` contract names this one exception to "no header value".
+
+**Tests.** `tests/test_diag_filter_card.py` (+17): the tally on a three-target fixture (LP on both
+nights; IRCUT/LP with one mixed night; no card plus two values that must not be published); the result
+is safe and holds neither the path-like nor the serial-like value; `incoming/` is byte- and
+mtime-identical after a run; stop; sampling bound and night spread; `_token` cases; `ready`; registry.
+No config, schema, on-disk-layout, API-shape or default change. The result lands in
+`state/diagnostics/` like v0.506.0's.
+
 ## 2026-11-09 (owner ask, branch `claude/busy-pascal-2HNTL`)
 
 ### v0.506.0 — library diagnostics ship with the app; the observer collects them
