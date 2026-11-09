@@ -35,6 +35,7 @@ _PATH_WORDS = {
     "/api/stats": "stats",
     "/api/targets": "the target list",
     "/api/incoming-lag": "how far behind your imports are",
+    "/api/diagnostics": "the app's own diagnostic results",
 }
 
 
