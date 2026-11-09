@@ -21,7 +21,9 @@ Nobody types anything.
 * **Read-only.** It may read the library record and open FITS files to read
   them. It never writes, moves or deletes anything — above all nothing under
   ``incoming/`` (AGENTS.md §10).
-* **Numbers and catalogue names only.** No file path, no FITS header value, no
+* **Numbers and catalogue names only.** No file path, no FITS header value
+  (the one exception: a short plain equipment word such as a filter name,
+  vetted by :func:`seestack.diag.filter_card._token`), no
   site latitude/longitude, no account name, no date finer than a night. The
   result is JSON of counts and measurements; :func:`check_result_is_safe`
   refuses anything that looks like a path or a coordinate pair.
@@ -65,9 +67,9 @@ class DiagnosticStopped(RuntimeError):
 def registry() -> list[Diagnostic]:
     """Every diagnostic, in the order they run. Import here so a broken one
     fails loudly in the test suite rather than silently at boot."""
-    from seestack.diag import sensor_pattern
+    from seestack.diag import filter_card, sensor_pattern
 
-    return [sensor_pattern.DIAGNOSTIC]
+    return [sensor_pattern.DIAGNOSTIC, filter_card.DIAGNOSTIC]
 
 
 # A host or container path, a Windows path, or two decimals that could be a
