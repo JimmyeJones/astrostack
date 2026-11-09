@@ -1,5 +1,9 @@
 # Process notes & QA sweep records
 
+## 2026-11-09 (Builder, branch `claude/fervent-allen-3qy836`) — no app change; nothing ungated; dogfood `--mosaic --incoming-lag --no-site --editor` CLEAN.
+
+Suite 8638 passed / 7 skipped on `47779b98` (xdist `-n 4`, BLAS capped, 13m19s). Bugs unchanged (every open entry gated on the owner or observer; the Features entries are declined, gated on diagnostic `filter_card_values` v2, or wait on a real big upload). Dogfood `--mosaic --incoming-lag --no-site --editor`, chosen because neither `--incoming-lag` nor `--no-site` had run since 2026-10-21: exit 0, nothing overflowing, no console errors. Incoming-lag: 7 readable + 1 headerless sub seeded 11 days back; `/api/incoming-lag` reports 8 waiting with 1 unreadable, and the Dashboard note says so (`IncomingLagNote` carries the per-folder unreadable count). No site: `/tonight` renders its alert, so its planning body is unswept on this pass (by design, `VIEW_SWITCH_PRECONDITIONS`). Mosaic Target page: next-best-move ("another pass evens out the thinner part"), readiness (thinner part, more light) and the framing verdict ("more passes over the panels you already have do more than a wider grid") agree; panel map and `grain_uneven` agree on the top-right panel at ~30 s against 1 min. Auto trim 7.9 %; all 21 ops re-render on field and mosaic, Undo/Redo apply, taste chips behave (10 live, 2 at-limit). Standing non-findings only: the Dashboard's "ASTAP wasn't found" (this container), the framing verdict's 3×3/18 h clause (the gated LEAD), `[phone] /life-list [Still to shoot]` 14,513 px by design.
+
 ## 2026-11-09 (Scout, branch `claude/exciting-wozniak-xxwm76`) — QA rotation sweep (1), new angle — the deep-sky wall and the recap poster fed a North-up-turned run on a mosaic-size canvas: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8631 passed / 7 skipped on `bda3ec12` (xdist `-n 4`, BLAS capped, 13m40s). Setup's
