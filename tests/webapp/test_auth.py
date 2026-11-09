@@ -133,7 +133,9 @@ def test_the_token_reads_diagnostics_and_is_refused_everything_else(client):
     for path in ("/api/stats", "/api/jobs", "/api/targets", "/api/health",
                  # The observer's own gap: a frame that never reached the library
                  # cannot be seen to be absent from the record it reads.
-                 "/api/incoming-lag"):
+                 "/api/incoming-lag",
+                 # The shipped library diagnostics, so the owner never runs a script.
+                 "/api/diagnostics"):
         assert client.get(path, auth=ro).status_code == 200, path
 
     # Everything else is 403 — a credential we know, on a request it may not

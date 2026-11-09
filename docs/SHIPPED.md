@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-11-09 (owner ask, branch `claude/busy-pascal-2HNTL`)
+
+### v0.506.0 — library diagnostics ship with the app; the observer collects them
+
+**Why.** Investigating his colour-blotch report took three hand-pasted terminal scripts on his NAS. He said: "I
+can't keep running these random tests … have the AI on the NAS run them … it is its job, not mine." The
+observer could not do it: it reads the record and a few GET routes with a read-only token, and is
+deliberately not in the `docker` group.
+
+**What.** `seestack/diag/` holds `Diagnostic`s: read-only, sampled, cancellable, numbers and catalogue names
+only. `check_result_is_safe` refuses any string that looks like a path or a site coordinate. At boot,
+`webapp.diagnostics.submit_pending_diagnostics` queues one job of kind `diagnostics` for every
+`(name, version)` with no stored result whose `ready` check passes. Results, or a failure's exception
+class only, go to `state/diagnostics/<name>-v<version>.json`. `GET /api/diagnostics` serves them and is
+added to `_READONLY_GET_PATHS`. AGENTS.md now tells agents to ship a diagnostic rather than ask the owner.
+First diagnostic: `sensor_pattern_by_temperature` v1. It averages raw subs of different targets
+unaligned, per sensor-temperature range, with the halves from **disjoint targets**. It removes a uniform
+colour cast before measuring: in the fixture, that cast alone read as ratio 5 with r ≈ 0 on pattern-free
+subs. **Tests:** a planted cold-only blotch on eight targets is found (ratio > 3, r > 0.8) and the warm
+range reads ratio < 1.5, |r| < 0.3; plus readiness, stop, safety refusals, store-once-per-version,
+failure-by-class, ready-only queuing, the endpoint, and the read-only token's allowlist.
+
 ## v0.505.38 — 2026-11-08 (Builder, branch `claude/fervent-allen-7mwvuw`) — a too-big mosaic canvas no longer reads as "nothing is plate-solved yet"
 
 **Found this run by code read** (after a `--big --deep --editor` dogfood pass came back CLEAN, while chasing the open

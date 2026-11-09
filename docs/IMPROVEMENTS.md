@@ -113,10 +113,16 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   stack chroma blotch falls toward the noise floor, real nebular colour is untouched, and a library of one
   target declines (no sky diversity). **Owner side:** see whether his Seestar app has a dithering option.
   Dithering spreads the pattern at capture time; it is not a substitute for (1)–(3).
-  **⏸ HOLD (2026-11-01): do not start building yet.** The owner says the blotches appear only on some nights,
-  "when it is cold". A per-sensor-temperature version of the diagnostic (`FrameRow.sensor_temp_c` bins) is
-  with him; its result decides whether (1) needs one master per temperature range, like a matched dark. This
-  line is replaced with the numbers when they arrive.
+  **⏸ HOLD — waiting on diagnostic `sensor_pattern_by_temperature` v1** (ships in v0.506.0, runs on his NAS
+  after his next update; the observer files it as `Diagnostic result: sensor_pattern_by_temperature v1`).
+  Owner, 2026-11-01: worse "when it is cold". His hand-run first pass (2026-11-06) gave pattern/noise of
+  **13×** below 0 °C, **5–8×** at 5–15 °C and **2–3×** above 20 °C, and the per-range maps correlated only
+  r = −0.23…+0.65 with each other. That suggests a pattern whose **shape changes with temperature**, so
+  (1) would need one master per range, like a matched dark. But that pass split its halves *within*
+  targets, and the cold ranges had only 11–17 targets, so real sky could inflate them. v1 splits by
+  disjoint targets and removes a uniform cast before measuring. When the issue arrives, replace this line
+  with its numbers and lift the hold. If the cold ranges collapse there, look at dew or frost on the
+  optics before building (1).
 
 - **🟡 (Scout 2026-11-03 + 11-07, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/`, `.Trash-*/` or `.zfs/` folder
   a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
@@ -3155,6 +3161,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.0 **A question for the owner's real library is now code that ships with the app: each new diagnostic runs once after an update as a queued job, its numbers-only result is served on `GET /api/diagnostics` (read-only token), and the observer files it as an issue — so nobody asks him to paste a script again** (`seestack.diag`, `webapp.diagnostics`, first diagnostic `sensor_pattern_by_temperature` v1; owner ask 2026-11-09)
 - ✅ v0.505.38 **A mosaic refused for a too-big canvas no longer reads as "there are no plate-solved frames to stack yet" — new `error_kind` `canvas_too_large` (`webapp/jobs.py::classify_error_message`, `Jobs.friendlyJobError`).** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.37 **A second click on Process target / Restack no longer queues a second identical whole-target stack** (`JobManager.submit_unless_queued`, `routers/pipeline.trigger_process_target` `already_queued`, `hooks/useTargetStackJob`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.505.36 **A batch export (`editor_batch`) says on the Jobs page what it made and which pictures failed, and why — `Jobs.batchExportSummary`; no more "View 0 in Gallery".** Full entry in [`SHIPPED.md`](SHIPPED.md).
