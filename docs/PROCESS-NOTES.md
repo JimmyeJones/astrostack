@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-11-09 (Scout, branch `claude/exciting-wozniak-xxwm76`) — QA rotation sweep (1), new angle — the deep-sky wall and the recap poster fed a North-up-turned run on a mosaic-size canvas: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8631 passed / 7 skipped on `bda3ec12` (xdist `-n 4`, BLAS capped, 13m40s). Setup's
+  `pip install -e .[dev,web,gui]` again sat in `poll` ~10 min before finishing on its own. **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed; no `Diagnostic result:`
+  issue yet. No open PRs at start. **Dogfood `--mosaic`:** exit 0, nothing overflowing, no console errors; the mosaic
+  Target page's five notes agree on the 2×2's thin top-right panel; standing non-findings only (no ASTAP here;
+  `[phone] /life-list [Still to shoot]` 14,513 px by design).
+- **Sweep (1).** Took the lead the 11-05 `djc6th` (1) left: the `render/` shareables other than `/jpeg` fed a native
+  North-up run. Scratch probe (deleted, never committed) on the `solved_library` fixture: one target given a stored
+  preview of a 3400×2400 canvas turned 30° (`set_stack_preview_north_up`, 1952×1779, 48 % black exposed corners) and
+  the most integration, a second target an un-turned preview. **`/api/gallery/montage.jpg`** fits the turned preview
+  whole into its cell (`_fit_onto`; the two-tile wall is 1600×662 and the turned tile keeps its own aspect, letterboxed); **`/api/recap.jpg`**
+  backdrops it with `_cover_crop` (backdrop 55 % picture / 42 % black wedge under the veil — the stored bytes' own
+  corners minus the square trim and the text). Both resolve the picture through `targets.current_picture_path` and
+  open the stored PNG, so they show exactly what the Gallery shows — there is no second render that could disagree,
+  and no scale-dependent op on either path. The black wedges on a turned hero are the stored picture's own
+  "no data" corners, the same convention as the reel and the wall — not filed.
+- **Not yet run in a sweep (1):** the year recap's hero thumbnail (`YearHeroOut.thumbnail_url`) and the share card
+  of a pinned-cover run whose pin is older than a later North-up save.
+- **Curation:** nothing to cut or add — every Bugs entry is still gated; FOCUS run log trimmed to ten (oldest line
+  moved whole to `archive/FOCUS-to-2026-10-21.md`).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-09 (Builder, branch `claude/fervent-allen-1p92hi`) — no app change; nothing ungated; dogfood `--dithered --deep --calibration --closing --editor` CLEAN.
 
 Suite 8598 passed / 7 skipped on `cc9a0441` (xdist `-n 4`, BLAS capped, 15m33s). Bugs unchanged (every open entry gated on the owner or observer; the Features entries are declined, gated on an observer count, or wait on a real big upload); no open PRs. Dogfood `--build --dithered --deep --calibration --closing --editor` — a combination no earlier pass ran together, chosen for the non-mosaic flags the run log reaches least: exit 0, nothing overflowing, no console errors. Calibration: two generated masters built from `incoming/`, the suggester picks both confidently, run 1 records both applied, and the stack-health calibration note withdraws as designed. Closing: both closing samples listed, *Shoot these before they're gone* and *Plan my week* name the same closing target and the same "tomorrow" night. Dithered canvas 1212×784 from 78 subs, Auto trim 30.7 % against the recorded 30.3 % apron (watch for a move, not the 15 % bar); panel map silent by the documented design of this shape. Deep: frames table at 1,200 subs renders 301 rows and grows to 601 on scroll, first paint ~1.0 s. Both editor drives (field + dithered) re-render all 21 ops, Undo/Redo apply, taste chips behave (10 live, 2 at-limit). Standing non-findings only: the Dashboard's "ASTAP wasn't found" (this container), *grain 0.000/0.001* (the fixture, already filed), the single-field framing verdict's 3×3/18 h clause (the gated LEAD), `[phone] /life-list [Still to shoot]` 14,513 px by design.
