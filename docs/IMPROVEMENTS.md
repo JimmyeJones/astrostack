@@ -113,14 +113,16 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   stack chroma blotch falls toward the noise floor, real nebular colour is untouched, and a library of one
   target declines (no sky diversity). **Owner side:** see whether his Seestar app has a dithering option.
   Dithering spreads the pattern at capture time; it is not a substitute for (1)–(3).
-  **⏸ HOLD — waiting on diagnostic `sensor_pattern_by_temperature` v1** (ships in v0.506.0, runs on his NAS
-  after his next update; the observer files it as `Diagnostic result: sensor_pattern_by_temperature v1`).
+  **⏸ HOLD — waiting on diagnostic `sensor_pattern_by_temperature` v2** (v1 shipped in v0.506.0; v0.506.3
+  replaced it before it reached `stable`, so only v2 runs on his NAS after his next update; the observer files
+  it as `Diagnostic result: sensor_pattern_by_temperature v2`).
   Owner, 2026-11-01: worse "when it is cold". His hand-run first pass (2026-11-06) gave pattern/noise of
   **13×** below 0 °C, **5–8×** at 5–15 °C and **2–3×** above 20 °C, and the per-range maps correlated only
   r = −0.23…+0.65 with each other. That suggests a pattern whose **shape changes with temperature**, so
   (1) would need one master per range, like a matched dark. But that pass split its halves *within*
   targets, and the cold ranges had only 11–17 targets, so real sky could inflate them. v1 splits by
-  disjoint targets and removes a uniform cast before measuring. When the issue arrives, replace this line
+  disjoint targets and removes a uniform cast before measuring; v2 splits by disjoint *skies* (a mosaic and
+  its single field, or centres within 5°, are one sky — v1 read a nebula they share as r 0.99 / ratio 15). When the issue arrives, replace this line
   with its numbers and lift the hold. If the cold ranges collapse there, look at dew or frost on the
   optics before building (1).
 
@@ -3162,6 +3164,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.3 **Diagnostic `sensor_pattern_by_temperature` v2 splits its halves by *sky*, not by target — a mosaic and its single field (or two targets within 5°) no longer land on opposite halves and read a nebula they share as a camera pattern (`seestack.diag.sensor_pattern.sky_groups`).** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.2 **The boot-time library check (`diagnostics`) reads back on the Jobs page — `Jobs.diagnosticsSummary` — and Cancel on it now reads "cancelled", not "done" (`webapp.diagnostics.submit_pending_diagnostics` cancel sentinel).** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.1 **Second library diagnostic, `filter_card_values` v1: does the Seestar record whether its LP filter was in, and with which values — the one gate on the "Was the light-pollution filter on?" idea** (`seestack/diag/filter_card.py`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.0 **A question for the owner's real library is now code that ships with the app: each new diagnostic runs once after an update as a queued job, its numbers-only result is served on `GET /api/diagnostics` (read-only token), and the observer files it as an issue — so nobody asks him to paste a script again** (`seestack.diag`, `webapp.diagnostics`, first diagnostic `sensor_pattern_by_temperature` v1; owner ask 2026-11-09)
