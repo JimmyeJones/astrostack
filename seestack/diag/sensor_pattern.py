@@ -25,9 +25,21 @@ reads low.
 An earlier, hand-run version of this (2026-11-06) split halves *within* targets,
 so in a range with few targets real sky could repeat between them and inflate
 ``repeat_r``; the disjoint split is what this version fixes.
+
+**Different targets are not always different skies** (version 2). A mosaic and
+the single field of the same object are two targets at the same centre
+(``"M 31"`` and ``"M 31 (mosaic)"``, :func:`seestack.io.scanner.is_mosaic_target_name`),
+and a library also holds neighbours a few degrees apart (the Veil's two arcs)
+and one object filed under two names. Version 1 could put such a pair on
+opposite halves, and a bright coloured nebula they share would then read as a
+pattern fixed to the camera. So targets are first grouped into **skies** — the
+same name once a " (mosaic)" suffix is dropped, or centres closer than
+:data:`SAME_SKY_DEG` — and it is skies, not targets, that the halves split.
 """
 from __future__ import annotations
 
+import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +56,11 @@ TEMP_BINS: tuple[tuple[float, float], ...] = (
 SUBS_PER_BIN = 70
 #: A range needs this many distinct targets for the disjoint split to mean much.
 MIN_TARGETS = 4
+#: Two targets whose centres are closer than this are one sky: an S30 field is
+#: 2.1° across and a mosaic a few fields, so this is generous on purpose — a
+#: sky wrongly merged costs one target's worth of split; a sky wrongly split
+#: can manufacture the very pattern this measures.
+SAME_SKY_DEG = 5.0
 _BIN = 4          # spatial binning before measuring
 _SIGMA = 20.0     # large-scale smoothing, in binned pixels
 
@@ -93,13 +110,71 @@ def _frame_path(f: Any) -> str | None:
     return None
 
 
+def _base_name(name: str) -> str:
+    """A target's name with any " (mosaic)" suffix dropped, spacing and case folded."""
+    n = re.sub(r"\s*\(mosaic\)\s*$", "", name.strip(), flags=re.I)
+    return re.sub(r"[\s_]+", " ", n).strip().lower()
+
+
+def _unit(ra: float, dec: float) -> tuple[float, float, float]:
+    r, d = math.radians(ra), math.radians(dec)
+    return (math.cos(d) * math.cos(r), math.cos(d) * math.sin(r), math.sin(d))
+
+
+def sky_groups(entries: list[Any]) -> dict[str, str]:
+    """``safe_name`` → the safe name of the first target of its sky.
+
+    Targets are one sky when their names match once a " (mosaic)" suffix is
+    dropped, or their centres are within :data:`SAME_SKY_DEG` — transitively,
+    so a chain of overlapping fields is one sky. A target with no recorded
+    centre is grouped by name alone."""
+    parent = {e.safe_name: e.safe_name for e in entries}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra_, rb = find(a), find(b)
+        if ra_ != rb:
+            parent[max(ra_, rb)] = min(ra_, rb)
+
+    by_base: dict[str, str] = {}
+    centres: list[tuple[str, tuple[float, float, float]]] = []
+    cos_max = math.cos(math.radians(SAME_SKY_DEG))
+    for e in entries:
+        base = _base_name(e.name or e.safe_name)
+        if base in by_base:
+            union(e.safe_name, by_base[base])
+        else:
+            by_base[base] = e.safe_name
+        ra, dec = e.ra_deg, e.dec_deg
+        if ra is None or dec is None or not (np.isfinite(ra) and np.isfinite(dec)):
+            continue
+        u = _unit(float(ra), float(dec))
+        for other, v in centres:
+            if u[0] * v[0] + u[1] * v[1] + u[2] * v[2] >= cos_max:
+                union(e.safe_name, other)
+        centres.append((e.safe_name, u))
+    return {k: find(k) for k in parent}
+
+
 def _measure(by_target: dict[str, list[Any]], rng: np.random.Generator,
-             tick, should_stop) -> dict[str, Any] | None:
-    if len(by_target) < MIN_TARGETS:
+             tick, should_stop, sky_of: dict[str, str] | None = None
+             ) -> dict[str, Any] | None:
+    """Split the targets' *skies* (``sky_of``; each target its own sky when
+    absent) into two disjoint halves and compare their colour maps."""
+    skies: dict[str, list[str]] = {}
+    for t in sorted(by_target):
+        skies.setdefault((sky_of or {}).get(t, t), []).append(t)
+    if len(skies) < MIN_TARGETS:
         return None
-    names = sorted(by_target)
-    rng.shuffle(names)
-    sides = (names[0::2], names[1::2])
+    keys = sorted(skies)
+    rng.shuffle(keys)
+    sides = ([t for k in keys[0::2] for t in skies[k]],
+             [t for k in keys[1::2] for t in skies[k]])
     sums: list[np.ndarray | None] = [None, None]
     used = [0, 0]
     shape = None
@@ -139,7 +214,7 @@ def _measure(by_target: dict[str, list[Any]], rng: np.random.Generator,
     noise = float(np.sqrt((cn ** 2).mean()))
     r = float(np.corrcoef(ca.ravel(), cc.ravel())[0, 1])
     return {
-        "subs": int(sum(used)), "targets": len(by_target),
+        "subs": int(sum(used)), "targets": len(by_target), "skies": len(skies),
         "pattern": round(pattern, 4), "noise": round(noise, 4),
         "ratio": round(pattern / noise, 2) if noise > 0 else None,
         "repeat_r": round(r, 3) if np.isfinite(r) else None,
@@ -153,7 +228,9 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
     every: dict[str, list[Any]] = {}
     nights_by_bin: dict[tuple[float, float], set[str]] = {b: set() for b in TEMP_BINS}
     n_no_temp = 0
-    for entry in library.list_targets():
+    entries = library.list_targets()
+    sky_of = sky_groups(entries)
+    for entry in entries:
         try:
             proj = library.open_target(entry.safe_name)
         except Exception:  # noqa: BLE001 — a broken target is skipped
@@ -185,16 +262,17 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
     rng = np.random.default_rng(0)
     rows: list[dict[str, Any]] = []
     maps: dict[str, np.ndarray] = {}
-    overall = _measure(every, rng, tick, should_stop)
+    overall = _measure(every, rng, tick, should_stop, sky_of)
     if overall is not None:
         overall.pop("_map")
     for b in TEMP_BINS:
         label = _label(*b)
-        m = _measure(bins[b], rng, tick, should_stop)
+        m = _measure(bins[b], rng, tick, should_stop, sky_of)
         row: dict[str, Any] = {
             "range": label,
             "subs_available": sum(len(v) for v in bins[b].values()),
             "targets_available": len(bins[b]),
+            "skies_available": len({sky_of.get(t, t) for t in bins[b]}),
             "nights": len(nights_by_bin[b]),
         }
         if m is None:
@@ -218,24 +296,28 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
         "by_temperature": rows,
         "pattern_shape_between_ranges": same_shape,
         "subs_without_temperature": n_no_temp,
+        "targets": len(entries),
+        "skies": len(set(sky_of.values())),
         "how_to_read": (
             "pattern and noise are in units of one sub's sky noise; ratio well above 2 "
             "with repeat_r near +1 means a colour pattern fixed to the camera. Halves come "
-            "from different targets, so real sky cannot repeat between them. High r between "
+            "from different skies (a mosaic and its single field, or targets within a few "
+            "degrees, count as one sky), so real sky cannot repeat between them. High r between "
             "ranges means one pattern that changes strength; low r means its shape changes."
         ),
     }
 
 
 def ready(library) -> bool:  # noqa: ANN001
-    """Worth running only with subs from at least :data:`MIN_TARGETS` targets —
+    """Worth running only with subs from at least :data:`MIN_TARGETS` skies —
     below that the two halves cannot come from different skies."""
-    return sum(1 for e in library.list_targets() if (e.n_frames_accepted or 0) > 0) >= MIN_TARGETS
+    live = [e for e in library.list_targets() if (e.n_frames_accepted or 0) > 0]
+    return len(set(sky_groups(live).values())) >= MIN_TARGETS
 
 
 DIAGNOSTIC = Diagnostic(
     name="sensor_pattern_by_temperature",
-    version=1,
+    version=2,
     question=("Is a colour pattern fixed to the camera, how strong is it at each sensor "
               "temperature, and is it the same pattern at every temperature? (owner's "
               "colour-blotch report, 2026-10-28)"),

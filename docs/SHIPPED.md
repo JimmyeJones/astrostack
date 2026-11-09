@@ -1,5 +1,32 @@
 # Shipped — the record
 
+## 2026-11-09 (Builder, branch `claude/fervent-allen-w38x6w`)
+
+### v0.506.3 — diagnostic `sensor_pattern_by_temperature` v2: halves split by sky, not by target
+
+**Why.** The diagnostic that gates the owner's ⭐ colour-blotch bug averages raw subs of *different targets*
+without aligning them, on the premise that different targets share no sky, and splits the targets into two
+disjoint halves to test whether a colour pattern repeats. But a mosaic and the single field of one object are
+two targets at one centre (`"M 31"` / `"M 31 (mosaic)"`, `seestack.io.scanner.is_mosaic_target_name`), and the
+owner is a heavy mosaic user; neighbours like the Veil's two arcs share sky too. Found by reading v0.506.0's
+code. Reproduced on a synthetic library of eight targets in six skies (a field + its mosaic sharing one
+nebula, two Veil-like neighbours sharing another, four plain fields; **no camera pattern planted**): v1, on its
+own fixed seed, reported **repeat_r 0.992, ratio 15** — exactly what it tells the reader means "a colour
+pattern fixed to the camera". v1 had not reached `stable` (v0.506.0 merged the same day), so no result from it
+exists anywhere.
+
+**What.** `seestack/diag/sensor_pattern.py`: `sky_groups` joins targets whose names match once " (mosaic)" is
+dropped, or whose centres are within `SAME_SKY_DEG` = 5° (transitively; a target with no centre groups by name
+alone). `_measure` splits *skies* into the halves (`sky_of`; each target its own sky when absent, so the call
+shape is unchanged), and `ready` counts skies. The result gains `skies` / `skies_available` beside the existing
+target counts; `version` 1 → 2. Over eight seeds on the fixture v2's repeat_r stays within −0.86…+0.16.
+
+**Tests.** `tests/test_diag_sensor_pattern.py` (+3): the grouping joins a field with its mosaic and two close
+neighbours and keeps six skies apart; the shared-nebula library reads `repeat_r < 0.3` (fails before:
+`assert 0.992 < 0.3`); `ready` declines with eight targets but too few skies (fails before). The existing
+planted-pattern test passes unchanged (its empty-range row now lists `skies_available`). No config, schema,
+layout, default or API-shape change; the result JSON only gains keys.
+
 ## 2026-11-09 (Builder, branch `claude/fervent-allen-hnqmz2`)
 
 ### v0.506.2 — the boot-time library check reads back on the Jobs page, and its Cancel reads "cancelled"
