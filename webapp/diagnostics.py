@@ -125,7 +125,12 @@ def submit_pending_diagnostics(settings: Settings, jm) -> Any:  # noqa: ANN001 â
                 out = run_one(settings, d, progress=progress,
                               should_stop=job.cancel_requested)
             except DiagnosticStopped:
-                break
+                # Honour the Jobs page's Cancel: the explicit sentinel is what
+                # makes JobManager mark this run 'cancelled' â€” a bare
+                # ``{"ran": [...]}`` is truthy and would read as 'done'. What
+                # did finish is kept (and listed); the rest stays pending and
+                # is queued again at the next start.
+                return {"ran": ran, "cancelled": True}
             ran.append({"name": d.name, "version": d.version, "status": out["status"]})
         return {"ran": ran}
 

@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-11-09 (Builder, branch `claude/fervent-allen-hnqmz2`)
+
+### v0.506.2 — the boot-time library check reads back on the Jobs page, and its Cancel reads "cancelled"
+
+**Why.** v0.506.0 added a job the app queues by itself after an update (`diagnostics`). Two gaps, both found
+by reading the new code against the Jobs page's read-back series (v0.505.31–v0.505.36): (1) **Cancel on the
+Jobs page was recorded as "done"** — on a stop the job body returned `{"ran": [...]}`, a truthy dict with no
+`cancelled` sentinel, so `JobManager` kept `state = "done"` (reproduced through a real `JobManager`: a run
+cancelled mid-check read `done`); (2) a finished run showed only its kind label — a job the owner never
+started, against his library, with no word on what it did.
+
+**What.** `webapp/diagnostics.submit_pending_diagnostics`'s body returns `{"ran": [...], "cancelled": True}`
+when a diagnostic raises `DiagnosticStopped`, so the run is marked `cancelled`; what finished stays stored and
+the rest stays pending for the next start (unchanged). `Jobs.diagnosticsSummary` + a `JobResultActions` branch:
+"Ran 2 read-only checks on your library, which help improve the app — they only read your frames, and nothing
+in your library was changed", plus a line when a check could not run (stored, not retried).
+
+**Tests.** `tests/webapp/test_diagnostics.py` (+2, real `JobManager`): a cancelled run reads `cancelled`
+with the finished check listed and the stopped one still pending (fails before: `'done' == 'cancelled'`);
+a finished run reads `done` with each check's status. `Jobs.test.tsx` (+4): counts, the could-not-run line,
+garbage input, a rendered row. No config, schema, layout, default or API-shape change.
+
 ## 2026-11-09 (Builder, branch `claude/fervent-allen-lotulm`)
 
 ### v0.506.1 — diagnostic `filter_card_values` v1: does the Seestar record its LP filter?
