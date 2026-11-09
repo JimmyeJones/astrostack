@@ -38,8 +38,8 @@ from seestack.diag import Diagnostic, DiagnosticStopped, check_result_is_safe
 
 #: Subs read per target, and in all. A header read is cheap (one block), so
 #: this is about the single worker's time on a NAS, not memory.
-SUBS_PER_TARGET = 6
-MAX_SUBS = 600
+SUBS_PER_TARGET = 8
+MAX_SUBS = 800
 
 #: A value is reported as itself only if it is a short plain word: letters,
 #: digits, space, ``+ - _ . /`` and at most three digits in a row (so a serial
@@ -86,20 +86,70 @@ def _frame_path(f: Any) -> str | None:
     return None
 
 
-def _sample(frames: list[Any], k: int) -> list[Any]:
-    """Up to ``k`` frames, one per night in turn, so a target shot over many
-    nights is read on as many of them as the budget allows."""
-    by_night: dict[str, list[Any]] = {}
-    for f in frames:
-        by_night.setdefault((f.timestamp_utc or "")[:10], []).append(f)
-    queues = [by_night[n] for n in sorted(by_night)]
-    out: list[Any] = []
+def _sample(frames: list[Any], k: int) -> list[tuple[Any, int]]:
+    """Up to ``k`` ``(frame, night number)`` pairs for one target.
+
+    A "night" is one capture session — subs no more than
+    :data:`seestack.session_recap.DEFAULT_SESSION_GAP_HOURS` apart, split the
+    way every night-shaped screen splits them — numbered oldest first.
+
+    Two properties v1 lacked, both needed for the answer to mean anything on
+    the owner's targets, which run to hundreds of nights:
+
+    * **Nights spread over the whole history**, not the oldest few — a firmware
+      update that started writing the card would otherwise be invisible.
+    * **Two subs per night, its first and its last**, so a filter flipped
+      partway through a night shows up as two values. With one sub per night
+      the within-night check could only ever read zero.
+
+    When a target has fewer nights than the budget allows, the rest of the
+    budget goes to subs spread through the nights already chosen, then to the
+    newest of the nights not chosen."""
+    from seestack.session_recap import (
+        DEFAULT_SESSION_GAP_HOURS,
+        _split_sessions,
+        parse_capture_time,
+    )
+
+    timed = sorted(((dt, i, f) for i, f in enumerate(frames)
+                    if (dt := parse_capture_time(f.timestamp_utc)) is not None),
+                   key=lambda t: (t[0], t[1]))
+    sessions = [[f for _, _, f in s] for s in
+                _split_sessions(timed, DEFAULT_SESSION_GAP_HOURS)]
+    undated = [f for f in frames if parse_capture_time(f.timestamp_utc) is None]
+    if undated:
+        sessions.append(undated)  # one pseudo-night; still sampled, never merged
+    if not sessions or k <= 0:
+        return []
+    n_pick = min(len(sessions), max(1, k // 2))
+    if n_pick == 1:
+        idx = [len(sessions) - 1] if len(sessions) > 1 else [0]
+    else:
+        idx = sorted({round(j * (len(sessions) - 1) / (n_pick - 1)) for j in range(n_pick)})
+    out: list[tuple[Any, int]] = []
+    rest: list[list[Any]] = []
+    for si in idx:
+        s = sessions[si]
+        ends = [s[0], s[-1]] if len(s) > 1 else [s[0]]
+        out.extend((f, si) for f in ends)
+        middle = s[1:-1]
+        # Interior subs, centre first then outward, for any spare budget.
+        order = sorted(range(len(middle)), key=lambda m: abs(m - (len(middle) - 1) / 2))
+        rest.append([middle[m] for m in order])
+    out = out[:k]
     i = 0
-    while len(out) < k and any(queues):
-        q = queues[i % len(queues)]
+    while len(out) < k and any(rest):
+        q = rest[i % len(rest)]
         if q:
-            out.append(q.pop(len(q) // 2))
+            out.append((q.pop(0), idx[i % len(rest)]))
         i += 1
+    # Still short (the chosen nights were one sub each): the last sub of the
+    # nights not chosen, newest first.
+    for si in reversed(range(len(sessions))):
+        if len(out) >= k:
+            break
+        if si not in idx:
+            out.append((sessions[si][-1], si))
     return out
 
 
@@ -134,7 +184,7 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
     """Tally the sampled subs' filter cards. Reads headers only."""
     from astropy.io import fits
 
-    plan: list[tuple[str, str, Any]] = []   # (target, family, frame)
+    plan: list[tuple[str, str, Any, int]] = []   # (target, family, frame, night no.)
     for entry in library.list_targets():
         try:
             proj = library.open_target(entry.safe_name)
@@ -147,17 +197,18 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
         if not frames:
             continue
         fam = _family(entry)
-        plan.extend((entry.safe_name, fam, f) for f in _sample(frames, SUBS_PER_TARGET))
+        plan.extend((entry.safe_name, fam, f, night_no)
+                    for f, night_no in _sample(frames, SUBS_PER_TARGET))
     plan = plan[:MAX_SUBS]
 
     values: dict[str, dict[str, Any]] = {}
     keys: dict[str, dict[str, Any]] = {}
     other = {"subs": 0, "_distinct": set()}
-    per_night: dict[tuple[str, str], set[str]] = {}
+    per_night: dict[tuple[str, int], list[str]] = {}
     unreadable = 0
     targets: set[str] = set()
     nights: set[str] = set()
-    for i, (target, fam, f) in enumerate(plan):
+    for i, (target, fam, f, night_no) in enumerate(plan):
         if should_stop is not None and should_stop():
             raise DiagnosticStopped("stopped")
         if progress is not None:
@@ -170,6 +221,8 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
         except Exception:  # noqa: BLE001 — an unreadable sub is counted, not fatal
             unreadable += 1
             continue
+        # Tallies count distinct UTC dates (a date, never finer — the contract);
+        # the within-night check uses the session number from the sampler.
         night = (f.timestamp_utc or "")[:10] or "?"
         targets.add(target)
         nights.add(night)
@@ -184,7 +237,7 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
         else:
             tok = "(absent)"
             _bump(values, tok, target, night, fam)
-        per_night.setdefault((target, night), set()).add(tok)
+        per_night.setdefault((target, night_no), []).append(tok)
         for k in _filter_like_keys(header):
             _bump(keys, k, target, night, fam)
 
@@ -200,13 +253,19 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
                                      "distinct": len(other["_distinct"])},
         "other_filter_keywords": _finish(keys),
         "target_nights_read": len(per_night),
-        "target_nights_with_more_than_one_value": sum(
+        "target_nights_with_two_or_more_read": sum(
             1 for v in per_night.values() if len(v) > 1),
+        "target_nights_with_more_than_one_value": sum(
+            1 for v in per_night.values() if len(set(v)) > 1),
         "how_to_read": (
             "filter_card counts sampled subs by the value of their FILTER card; "
             "(absent) means the card is not written. If every sub is (absent) and "
             "other_filter_keywords is empty, the camera does not record the filter "
-            "and the LP-filter idea is dropped. Values that are not short plain "
+            "and the LP-filter idea is dropped. A night is one capture session; "
+            "each sampled night is read at its first and last sub, so "
+            "target_nights_with_more_than_one_value out of "
+            "target_nights_with_two_or_more_read is how often the value changed "
+            "within a night. Values that are not short plain "
             "words are counted in filter_card_other_values without their text."
         ),
     }
@@ -219,7 +278,7 @@ def ready(library) -> bool:  # noqa: ANN001
 
 DIAGNOSTIC = Diagnostic(
     name="filter_card_values",
-    version=1,
+    version=2,
     question=("Does the Seestar record in each sub whether its light-pollution filter "
               "was in, and with which values? (gate on the 'Was the LP filter on?' "
               "idea, Scout 2026-11-01)"),

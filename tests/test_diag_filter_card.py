@@ -137,4 +137,48 @@ def test_ready_and_registered(lib_and_incoming, tmp_path):
         assert not fc.ready(empty)
     finally:
         empty.close()
-    assert ("filter_card_values", 1) in [(d.name, d.version) for d in registry()]
+    assert ("filter_card_values", 2) in [(d.name, d.version) for d in registry()]
+
+
+@pytest.fixture
+def many_night_lib(tmp_path):
+    """The owner's shape: targets shot over many nights (more nights than the
+    per-target budget), which is where v1's one-sub-per-oldest-night sampler
+    went blind."""
+    from seestack.io.library import Library
+    from seestack.io.scanner import scan_and_organize
+
+    inc = tmp_path / "incoming"
+    # M 42: ten nights, the filter flipped in the middle of every one.
+    d = inc / "M 42_sub"
+    d.mkdir(parents=True)
+    for n in range(10):
+        for i in range(4):
+            _write(d / f"a{n}_{i}.fit", f"{10 + n}", i, FILTER="LP" if i < 2 else "IRCUT")
+    # M 31: ten nights; the card only appears on the last three (a firmware update).
+    d = inc / "M 31_sub"
+    d.mkdir(parents=True)
+    for n in range(10):
+        cards = {"FILTER": "LP"} if n >= 7 else {}
+        for i in range(2):
+            _write(d / f"b{n}_{i}.fit", f"{10 + n}", i, **cards)
+    lib = Library.open_or_create(tmp_path / "library")
+    scan_and_organize(lib, inc, copy_to_cache=False)
+    yield lib
+    lib.close()
+
+
+def test_a_mid_night_flip_is_seen_on_a_many_night_target(many_night_lib):
+    r = fc.run(many_night_lib)
+    # Every M 42 night it reads, it reads at both ends — so every one shows the flip.
+    assert r["target_nights_with_two_or_more_read"] >= 4
+    assert r["target_nights_with_more_than_one_value"] >= 4
+    assert r["target_nights_with_more_than_one_value"] <= r["target_nights_with_two_or_more_read"]
+
+
+def test_sampling_reaches_the_newest_nights(many_night_lib):
+    # The card only exists on M 31's last three nights; reading only the oldest
+    # nights would report the camera never writes it.
+    r = fc.run(many_night_lib)
+    # M 42 is LP on every night, so a second target under LP can only be M 31.
+    assert r["filter_card"]["LP"]["targets"] == 2

@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-11-09 (Builder, branch `claude/fervent-allen-j5xv2c`)
+
+### v0.506.4 — diagnostic `filter_card_values` v2: each sampled night read at both ends, nights spread over the whole history
+
+**Why.** v1 (v0.506.1, not yet on `stable`) is the one gate on the "Was the light-pollution filter on?" idea, and
+the backlog reads a zero `target_nights_with_more_than_one_value` as "a per-night tally is safe". But
+`filter_card._sample` took **one** sub per night, round-robin from the **oldest** night: on any target with more
+nights than its 6-sub budget — every deep target the owner has — each night was read once, so the within-night
+check could only ever say 0; and only the six oldest nights were read, so a card that newer firmware started
+writing would read as "the camera never records the filter" and drop the idea. Measured on a fixture: ten nights,
+the filter flipped mid-night on every one → v1 reports **0** mixed nights; a card on only the last three of ten
+nights → v1 reports no `LP` at all.
+
+**What changed.** Nights are capture sessions split by `session_recap._split_sessions` (the 6 h gap every
+night-shaped screen uses); the sampler picks up to `SUBS_PER_TARGET // 2` of them spread evenly from oldest to
+newest and reads each at its **first and last** sub, spending spare budget on interior subs and then on the newest
+unchosen nights. Budget 6 → 8 per target, 600 → 800 overall (header reads only). New field
+`target_nights_with_two_or_more_read` is the denominator the mixed count needs; `how_to_read` says so. Version
+bumped to 2, so it re-runs after the update; the backlog gate now names v2.
+
+**Tests.** +2 (`tests/test_diag_filter_card.py`), both fail on v1 (`assert 0 >= 4` and no `LP` key); the 17
+existing ones pass unchanged apart from the registry pin moving to version 2. Engine-only; no config, schema,
+on-disk or API-shape change.
+
 ## 2026-11-09 (Builder, branch `claude/fervent-allen-w38x6w`)
 
 ### v0.506.3 — diagnostic `sensor_pattern_by_temperature` v2: halves split by sky, not by target
