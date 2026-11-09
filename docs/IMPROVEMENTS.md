@@ -2501,9 +2501,11 @@ any of them.)*
   filter out next time; those nights caught about a third of the light."* Read-only: it never excludes a sub, and
   does not touch the stack. **Not** a narrowband/channel feature (§1): no HOO split, no per-filter stacking.
   **Gate:** whether the S30 writes a filter card at all, and under what values. **⏸ Waiting on diagnostic
-  `filter_card_values` v1** (ships in v0.506.1, `seestack/diag/filter_card.py`; the observer files it as
-  `Diagnostic result: filter_card_values v1`). If every sampled sub reads `(absent)` and `other_filter_keywords`
-  is empty, drop the idea; a non-zero `target_nights_with_more_than_one_value` means a per-night tally is wrong.
+  `filter_card_values` v2** (v1 shipped in v0.506.1 and could not see a mid-night flip or a card that only
+  newer firmware writes — v0.506.4; `seestack/diag/filter_card.py`; the observer files it as
+  `Diagnostic result: filter_card_values v2`, and a v1 result, if one lands, is superseded). If every sampled sub reads `(absent)` and `other_filter_keywords`
+  is empty, drop the idea; a non-zero `target_nights_with_more_than_one_value` (out of
+  `target_nights_with_two_or_more_read`) means a per-night tally is wrong.
 
 ### UX & polish
 - Mobile layout polish on Combine. (S) *(Calibration's masters table done v0.505.11, Tonight's planner tables v0.505.12; Combine is the deprioritised
@@ -3166,6 +3168,7 @@ _Newest first. One line each: what + commit/PR. Entries that had grown to paragr
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
 - ✅ v0.506.3 **Diagnostic `sensor_pattern_by_temperature` v2 splits its halves by *sky*, not by target — a mosaic and its single field (or two targets within 5°) no longer land on opposite halves and read a nebula they share as a camera pattern (`seestack.diag.sensor_pattern.sky_groups`).** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.2 **The boot-time library check (`diagnostics`) reads back on the Jobs page — `Jobs.diagnosticsSummary` — and Cancel on it now reads "cancelled", not "done" (`webapp.diagnostics.submit_pending_diagnostics` cancel sentinel).** Full entry in [`SHIPPED.md`](SHIPPED.md).
+- ✅ v0.506.4 **Diagnostic `filter_card_values` v2 samples each night at both ends and over the whole history** (`filter_card._sample`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.1 **Second library diagnostic, `filter_card_values` v1: does the Seestar record whether its LP filter was in, and with which values — the one gate on the "Was the light-pollution filter on?" idea** (`seestack/diag/filter_card.py`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.0 **A question for the owner's real library is now code that ships with the app: each new diagnostic runs once after an update as a queued job, its numbers-only result is served on `GET /api/diagnostics` (read-only token), and the observer files it as an issue — so nobody asks him to paste a script again** (`seestack.diag`, `webapp.diagnostics`, first diagnostic `sensor_pattern_by_temperature` v1; owner ask 2026-11-09)
 - ✅ v0.505.38 **A mosaic refused for a too-big canvas no longer reads as "there are no plate-solved frames to stack yet" — new `error_kind` `canvas_too_large` (`webapp/jobs.py::classify_error_message`, `Jobs.friendlyJobError`).** Full entry in [`SHIPPED.md`](SHIPPED.md).
