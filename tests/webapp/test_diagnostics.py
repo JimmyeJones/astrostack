@@ -106,3 +106,71 @@ def test_the_endpoint_serves_results(client):
     assert set(body) == {"results", "pending"}
     names = [p["name"] for p in body["pending"]] + [x["name"] for x in body["results"]]
     assert "sensor_pattern_by_temperature" in names
+
+
+def _run_through_job_manager(settings, monkeypatch, tmp_path, diags, *, cancel_after=None):
+    """Queue the real boot-time job on a real JobManager and wait for it."""
+    import threading
+    import time
+
+    from webapp.jobs import JobManager
+
+    monkeypatch.setattr(wd, "registry", lambda: diags)
+    jm = JobManager(tmp_path / "jobs.sqlite")
+    jm.start()
+    started = threading.Event()
+    if cancel_after is not None:
+        cancel_after.started = started  # the diagnostic signals when it is running
+    job = wd.submit_pending_diagnostics(settings, jm)
+    assert job is not None
+    if cancel_after is not None:
+        assert started.wait(10)
+        jm.cancel(job.id)
+    deadline = time.time() + 20
+    while jm.get(job.id).state in ("queued", "running") and time.time() < deadline:
+        time.sleep(0.02)
+    out = jm.get(job.id)
+    jm.stop()
+    return out
+
+
+def test_a_cancelled_diagnostics_job_reads_cancelled_not_done(settings, monkeypatch, tmp_path):
+    """Cancel on the Jobs page stops the run, and the job must *say* cancelled.
+
+    v0.506.0's body returned ``{"ran": []}`` on a stop — a truthy dict with no
+    cancellation sentinel — so JobManager marked the cancelled run 'done'."""
+    import time
+
+    def first(lib, **_):
+        return {"n": 1}
+
+    class Waits:
+        started = None
+
+        def __call__(self, lib, *, progress=None, should_stop=None):
+            self.started.set()
+            for _ in range(500):
+                if should_stop():
+                    raise DiagnosticStopped("stopped")
+                time.sleep(0.01)
+            return {"n": 2}
+
+    waits = Waits()
+    job = _run_through_job_manager(
+        settings, monkeypatch, tmp_path,
+        [_diag(first, name="first"), _diag(waits, name="slow")], cancel_after=waits)
+    assert job.state == "cancelled"
+    assert job.result["cancelled"] is True
+    # What finished is kept and listed; the stopped one stays pending.
+    assert [r["name"] for r in job.result["ran"]] == ["first"]
+    assert [d.name for d in wd.pending(settings)] == ["slow"]
+
+
+def test_a_finished_diagnostics_job_reads_done(settings, monkeypatch, tmp_path):
+    job = _run_through_job_manager(
+        settings, monkeypatch, tmp_path,
+        [_diag(lambda lib, **_: {"n": 1}, name="a"),
+         _diag(lambda lib, **_: {"file": "/data/x.fit"}, name="b")])
+    assert job.state == "done"
+    assert job.result == {"ran": [{"name": "a", "version": 1, "status": "done"},
+                                  {"name": "b", "version": 1, "status": "error"}]}

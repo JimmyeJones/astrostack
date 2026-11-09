@@ -15,7 +15,7 @@ import {
   heldSettlingLine, missingSubsNote,
   readErrorsNote,
   storageTroubleAlert,
-  batchExportSummary, finishPicturesSummary, previewTrimSummary,
+  batchExportSummary, diagnosticsSummary, finishPicturesSummary, previewTrimSummary,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
   rescueUnsolvedNote,
   skippedFolders, videoFoldersNote, broughtFolderInNote,
@@ -2912,5 +2912,42 @@ describe("previewTrimSummary — the boot-time border-trim job reads back on the
     );
     expect(screen.getByText(/Nothing needed trimming/)).toBeTruthy();
     expect(screen.queryByRole("link", { name: /See them in the Gallery/ })).toBeNull();
+  });
+});
+
+describe("diagnosticsSummary — the boot-time library check reads back on the Jobs page", () => {
+  it("says how many checks ran and that nothing was changed", () => {
+    expect(diagnosticsSummary({ ran: [
+      { name: "a", version: 1, status: "done" }, { name: "b", version: 1, status: "done" },
+    ] })).toBe("Ran 2 read-only checks on your library, which help improve the app — they "
+      + "only read your frames, and nothing in your library was changed.");
+  });
+
+  it("says a check that could not run is not retried", () => {
+    expect(diagnosticsSummary({ ran: [
+      { name: "a", version: 1, status: "done" }, { name: "b", version: 1, status: "error" },
+    ] })).toMatch(/\. 1 of them couldn't run on this library, and won't be tried again\.$/);
+    expect(diagnosticsSummary({ ran: [{ name: "b", version: 1, status: "error" }] }))
+      .toMatch(/\. It couldn't run on this library, and won't be tried again\.$/);
+  });
+
+  it("tolerates an empty or garbage result", () => {
+    expect(diagnosticsSummary({})).toMatch(/^No library checks were waiting to run\./);
+    expect(diagnosticsSummary({ ran: "x" })).toMatch(/^No library checks/);
+    expect(diagnosticsSummary({ ran: [null, 3] })).toMatch(/^No library checks/);
+  });
+
+  it("renders on a finished row", () => {
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <JobRow onCancel={() => {}} job={mkJob({
+            kind: "diagnostics", target: null, state: "done", phase: "", done: 0, total: 0,
+            result: { ran: [{ name: "a", version: 1, status: "done" }] },
+          })} />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    expect(screen.getByText(/Ran 1 read-only check on your library/)).toBeTruthy();
   });
 });

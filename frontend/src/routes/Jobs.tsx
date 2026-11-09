@@ -497,6 +497,33 @@ export function previewTrimSummary(r: Record<string, unknown>): {
   return { line: `${line}.`, trimmed, failed, retry };
 }
 
+/** Plain-language outcome of the boot-time "Running a read-only check on your
+ * library" job, `diagnostics` (pure, tested).
+ *
+ * Like the border trim, the app queues it by itself after an update
+ * (`webapp.diagnostics.submit_pending_diagnostics`) — nobody pressed a button —
+ * so a finished row with only a step count leaves the owner wondering what the
+ * app just did to his library. This says the one thing he needs: how many checks
+ * ran, that they only read (nothing was changed), and that one which could not
+ * run on this library is not retried. */
+export function diagnosticsSummary(r: Record<string, unknown>): string {
+  const ran = (Array.isArray(r.ran) ? r.ran : [])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === "object");
+  const n = ran.length;
+  const failed = ran.filter((x) => x.status === "error").length;
+  if (n === 0) {
+    return "No library checks were waiting to run. Nothing in your library was changed.";
+  }
+  let line = `Ran ${n} read-only check${n === 1 ? "" : "s"} on your library, which help `
+    + "improve the app — they only read your frames, and nothing in your library was changed";
+  if (failed) {
+    line += failed === n
+      ? `. ${n === 1 ? "It couldn't" : "None of them could"} run on this library, and won't be tried again`
+      : `. ${failed} of them couldn't run on this library, and won't be tried again`;
+  }
+  return `${line}.`;
+}
+
 /** Plain-language outcome of a finished one-click "Process target" job (pure,
  * tested). Mirrors `reprocessSummary` for the single-target chain: says whether a
  * master was produced and, when it wasn't, why — so the user isn't left with a
@@ -1648,6 +1675,9 @@ function JobResultActions({ job }: { job: Job }) {
         ) : null}
       </Stack>
     );
+  }
+  if (job.kind === "diagnostics") {
+    return <Text size="sm" mt="xs">{diagnosticsSummary(r)}</Text>;
   }
   if (job.kind === "pipeline") {
     const { line, held, heldFiles, heldSettling, healed } = pipelineSummary(r);
