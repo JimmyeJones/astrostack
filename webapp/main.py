@@ -34,6 +34,7 @@ from webapp.routers import (
     stackfailures, stats, storage, system, targets, unstretched, updates, upload, video,
     wishlist,
 )
+from webapp.routers import diagnostics as diagnostics_router
 from webapp.routers import pipeline as pipeline_router
 from webapp.seestar.manager import SeestarManager
 from webapp.watcher import Watcher
@@ -144,6 +145,14 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 — housekeeping must never block startup
         log.warning("Could not queue the stored-preview border trim", exc_info=True)
 
+    # Library diagnostics new in this version (seestack.diag): run each once,
+    # as a queued job, so its answer is waiting for the observer to collect.
+    try:
+        from webapp.diagnostics import submit_pending_diagnostics
+        submit_pending_diagnostics(store.get(), jm)
+    except Exception:  # noqa: BLE001 — housekeeping must never block startup
+        log.warning("Could not queue the library diagnostics", exc_info=True)
+
     watcher = Watcher(
         get_settings=store.get,
         on_batch_ready=lambda: _on_batch_ready(app),
@@ -176,6 +185,7 @@ def create_app() -> FastAPI:
         plan.router, upload.router, sample.router, video.router, lifelist.router,
         stackfailures.router, newsubs.router, wishlist.router, overtrim.router,
         glossary.router, incominglag.router, unstretched.router, updates.router,
+        diagnostics_router.router,
     ):
         app.include_router(r)
 
@@ -238,6 +248,10 @@ _READONLY_GET_PATHS = frozenset({
     # Read-only by construction (it compares counts and touches nothing), and it
     # names folders and numbers, never a path outside the library.
     "/api/incoming-lag",
+    # The shipped library diagnostics' results (`webapp.diagnostics`): numbers
+    # and catalogue names only, checked by `seestack.diag.check_result_is_safe`.
+    # The observer reads them so the owner never has to run a script himself.
+    "/api/diagnostics",
 })
 
 
@@ -372,7 +386,7 @@ def _install_auth_gate(app: FastAPI) -> None:
                         return JSONResponse(
                             {"detail": "This read-only token may only GET "
                                        "diagnostics (health, logs, stats, jobs, "
-                                       "targets)."},
+                                       "targets, incoming-lag, diagnostics)."},
                             status_code=403,
                         )
                     return JSONResponse(
