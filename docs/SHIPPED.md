@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-11-10 (Builder, branch `claude/focused-noether-9m2aks`)
+
+### v0.506.15 — overlapping deepening-reel requests render once and never serve a half-written file
+
+**Why.** The Scout's 2026-11-10 sweep (4) bug, reproduced through the real route: `GET /api/targets/{safe}/deepening-reel`
+had no single-flight guard, so while one request rendered (every master loaded — minutes on a mosaic) every request that
+arrived meanwhile saw the stale signature, unlinked the reel and rendered again (9 renders for 24 requests), and
+`write_deepening_reel` PIL-saved straight onto the served path, so a cache-hit reader could stream a truncated animation
+as a 200. The Target page's card makes the overlap ordinary: **Play**, **Download clip** and **Share clip** GET the same URL.
+
+**What changed.** `_build_or_get_deepening_reel` takes a per-reel `threading.Lock` keyed on the signature file
+(the `_FULL_RES_LOCKS` pattern from `pipeline.py`) around re-check-and-build, so a second caller waits and takes the
+cache hit; the build half moved into `_build_deepening_reel`. `write_deepening_reel` encodes to a sibling
+`<name>.<pid>.<tid>.tmp` and `os.replace`s it in, so a reader holds either the whole old reel or the whole new one;
+the stale reel is no longer unlinked before the build — only the *other* format's file afterwards (and both when nothing
+could be built). No config, schema, on-disk layout, default or API-shape change.
+
+**Tests.** +1 `tests/test_deepening_reel.py::test_reel_is_never_encoded_onto_the_served_path` and +1
+`tests/webapp/test_deepening_reel.py::test_overlapping_reel_requests_render_once_and_every_body_decodes` (12 staggered
+GETs, render slowed 0.3 s); both fail before the fix in a scratch revert (`assert 9 == 1` renders; the save went onto
+the served path).
+
 ## 2026-11-10 (Scout, branch `claude/optimistic-cannon-55nwei`)
 
 ### v0.506.14 — the full-size pictures archive says which pictures the 8000 px cap shrank

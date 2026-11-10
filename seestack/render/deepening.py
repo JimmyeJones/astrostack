@@ -24,8 +24,11 @@ stored pixels, schema, config, or default.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import os
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -684,14 +687,26 @@ def write_deepening_reel(frames: list, out_dir: Path, out_basename: str) -> Path
     # The suffixes come from `RUN_ARTEFACT_SUFFIXES` rather than being spelled
     # here, because that table is what the delete/archive/merge paths act on — a
     # reel named by hand is a reel nothing cleans up (which is what happened).
+    #
+    # Encoded to a sibling temp name and `os.replace`d in, never saved straight onto
+    # the served path: the webapp streams this file to any request that finds it
+    # cached, and a reader that opened it mid-save got a truncated animation as a
+    # 200 (Scout 2026-11-10). The replace is atomic on one filesystem, so a reader
+    # holds either the whole old reel or the whole new one.
     if features.check("webp"):
         path = out_dir / f"{out_basename}{RUN_ARTEFACT_SUFFIXES['deepening_webp']}"
-        norm[0].save(path, format="WEBP", save_all=True, append_images=norm[1:],
-                     duration=durations, loop=0, minimize_size=True)
+        save_kw = {"format": "WEBP", "minimize_size": True}
     else:
         path = out_dir / f"{out_basename}{RUN_ARTEFACT_SUFFIXES['deepening_apng']}"
-        norm[0].save(path, format="PNG", save_all=True, append_images=norm[1:],
-                     duration=durations, loop=0)
+        save_kw = {"format": "PNG"}
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        norm[0].save(tmp, save_all=True, append_images=norm[1:],
+                     duration=durations, loop=0, **save_kw)
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
     log.info("Deepening reel saved (%d stacks) → %s", len(norm), path.name)
     return path
 
