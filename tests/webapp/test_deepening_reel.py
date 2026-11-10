@@ -338,3 +338,52 @@ class _StubRun:
     def __init__(self, run_id: int) -> None:
         self.id = run_id
         self.fits_path = f"/nonexistent/{run_id}.fits"
+
+
+def test_overlapping_reel_requests_render_once_and_every_body_decodes(
+        client, solved_library, monkeypatch):
+    """Play, Download clip and Share clip all GET the reel while its first build
+    is still running. Each used to see the stale signature and render the whole
+    reel again (9 renders for 24 requests in the Scout's repro), and a cache-hit
+    reader could stream a file another request was rewriting — a 200 that PIL
+    cannot open. One render; every body a whole animation."""
+    import threading
+    import time
+    from io import BytesIO
+
+    from PIL import Image
+
+    import seestack.render.deepening as deepening
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack(solved_library, safe, "s1", subs=120, when="2026-05-12T00:00:00Z",
+               noise=0.04, seed=21)
+    _add_stack(solved_library, safe, "s2", subs=505, when="2026-05-20T00:00:00Z",
+               noise=0.01, seed=22)
+
+    renders: list[int] = []
+    real_render = deepening.render_deepening_frames
+
+    def slow_render(*a, **kw):
+        renders.append(1)
+        time.sleep(0.3)
+        return real_render(*a, **kw)
+
+    monkeypatch.setattr(deepening, "render_deepening_frames", slow_render)
+
+    results: list = [None] * 12
+    def fetch(i: int) -> None:
+        time.sleep(0.04 * i)
+        results[i] = client.get(f"/api/targets/{safe}/deepening-reel")
+
+    threads = [threading.Thread(target=fetch, args=(i,)) for i in range(len(results))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+    assert len(renders) == 1
+    for r in results:
+        assert r is not None and r.status_code == 200
+        with Image.open(BytesIO(r.content)) as im:
+            assert getattr(im, "n_frames", 1) == 2

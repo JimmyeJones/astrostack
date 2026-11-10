@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-11-10 (Scout, branch `claude/optimistic-cannon-fwsbuf`) — QA rotation sweep (2), new angle — the dark-ring gate diagnostic `sky_falloff` v2's "same target" pairing on a mosaic: one bug, Scout-fixed (v0.506.15). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+## 2026-11-10 (Scout, branch `claude/optimistic-cannon-fwsbuf`) — QA rotation sweep (2), new angle — the dark-ring gate diagnostic `sky_falloff` v2's "same target" pairing on a mosaic: one bug, Scout-fixed (v0.506.16). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8684 passed / 7 skipped on `d0b27ddf` (xdist `-n 4`, BLAS capped, 16m18s). The `.venv` trap recorded by
   `55nwei` bit again (first launch: `No module named pytest`) — `source .venv/bin/activate` in the same command.

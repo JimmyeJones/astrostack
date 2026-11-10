@@ -7,6 +7,7 @@ import contextlib
 import json
 import math
 import os
+import threading
 from collections.abc import Callable, Sequence
 from functools import partial
 from pathlib import Path
@@ -2415,17 +2416,39 @@ def _build_or_get_deepening_reel(series, lon_deg: float | None = None) -> Path |
     reel_suffixes = (RUN_ARTEFACT_SUFFIXES["deepening_webp"],
                      RUN_ARTEFACT_SUFFIXES["deepening_apng"])
     sig_file = out_dir / f"{basename}{RUN_ARTEFACT_SUFFIXES['deepening_sig']}"
-    for suffix in reel_suffixes:
-        cand = out_dir / f"{basename}{suffix}"
-        if cand.exists() and sig_file.exists():
-            with contextlib.suppress(OSError):
-                if sig_file.read_text().strip() == sig:
-                    return cand
-    # (Re)build: clear any stale reel of either format first so a format change
-    # (WEBP↔APNG) can't leave two files that the resolver disagrees on.
-    for suffix in reel_suffixes:
-        with contextlib.suppress(OSError):
-            (out_dir / f"{basename}{suffix}").unlink()
+
+    def _hit() -> Path | None:
+        for suffix in reel_suffixes:
+            cand = out_dir / f"{basename}{suffix}"
+            if cand.exists() and sig_file.exists():
+                with contextlib.suppress(OSError):
+                    if sig_file.read_text().strip() == sig:
+                        return cand
+        return None
+
+    hit = _hit()
+    if hit is not None:
+        return hit
+    # Single-flight per reel: the card's Play, Download clip and Share clip all GET
+    # this while the first build (every master loaded — minutes on a mosaic) is
+    # still running, and without the lock each of them saw the stale signature and
+    # rendered the whole reel again (Scout 2026-11-10: 9 renders for 24 requests).
+    # A second caller now waits and is served the first caller's file.
+    with _DEEPENING_REEL_LOCKS_GUARD:
+        lock = _DEEPENING_REEL_LOCKS.setdefault(str(sig_file), threading.Lock())
+    with lock:
+        hit = _hit()
+        if hit is not None:
+            return hit
+        return _build_deepening_reel(series, lon_deg, night_steps, sig, sig_file,
+                                     out_dir, basename, reel_suffixes)
+
+
+def _build_deepening_reel(series, lon_deg, night_steps, sig: str, sig_file: Path,
+                          out_dir: Path, basename: str,
+                          reel_suffixes: tuple[str, str]) -> Path | None:
+    """The build half of :func:`_build_or_get_deepening_reel`, run under its lock."""
+    runs = series.runs
     from seestack.render.deepening import build_deepening_reel, deepening_frame_label
 
     # Per-frame provenance labels, so a downloaded/shared clip carries its own
@@ -2444,13 +2467,30 @@ def _build_or_get_deepening_reel(series, lon_deg: float | None = None) -> Path |
                 night_steps[i] if night_steps else None))
     else:
         labels = [deepening_frame_label(r.timestamp_utc, r.n_frames_used) for r in runs]
+    # The stale reel stays where it is until the new one replaces it (the writer
+    # encodes to a temp name and `os.replace`s it in), so a reader streaming it is
+    # never cut off mid-file. Afterwards drop any reel left under the *other*
+    # format (WEBP↔APNG) so the resolver cannot disagree with itself — and, when
+    # nothing could be built, the stale one too.
     path = build_deepening_reel([r.fits_path for r in runs], out_dir, basename,
                                 labels=labels)
+    for suffix in reel_suffixes:
+        cand = out_dir / f"{basename}{suffix}"
+        if cand != path:
+            with contextlib.suppress(OSError):
+                cand.unlink()
     if path is None:
         return None
     with contextlib.suppress(OSError):
         sig_file.write_text(sig)
     return path
+
+
+#: One lock per deepening reel (keyed on its signature file), so overlapping
+#: requests for a reel that is still being built wait for that build instead of
+#: each starting their own — see :func:`_build_or_get_deepening_reel`.
+_DEEPENING_REEL_LOCKS: dict[str, threading.Lock] = {}
+_DEEPENING_REEL_LOCKS_GUARD = threading.Lock()
 
 
 @router.get("/api/targets/{safe}/deepening-reel/info")

@@ -682,3 +682,35 @@ def test_a_shallow_night_on_a_changed_canvas_is_not_drawn_cleaner(tmp_path, shri
     assert sd_first > sd_new * 1.2
     # One shared stretch: the sky is not lifted on the placed night.
     assert abs(med_first - med_new) <= 3.0
+
+
+def test_reel_is_never_encoded_onto_the_served_path(tmp_path, monkeypatch):
+    """The webapp streams ``master_deepening.*`` to any request that finds it
+    cached, so the writer must encode elsewhere and swap the finished file in —
+    saving straight onto it let a concurrent reader get a truncated animation as a
+    200 (Scout 2026-11-10). The old reel stays whole until the swap."""
+    from PIL import Image
+
+    from seestack.render.deepening import write_deepening_reel
+
+    frames = [Image.new("RGB", (16, 16), (i * 40, 0, 0)) for i in range(3)]
+    first = write_deepening_reel(frames[:2], tmp_path, "master")
+    old_bytes = first.read_bytes()
+
+    saved_to: list = []
+    real_save = Image.Image.save
+
+    def spy(self, fp, *a, **kw):
+        saved_to.append(fp)
+        # Mid-encode, the served reel is still the previous, complete file.
+        assert first.read_bytes() == old_bytes
+        return real_save(self, fp, *a, **kw)
+
+    monkeypatch.setattr(Image.Image, "save", spy)
+    out = write_deepening_reel(frames, tmp_path, "master")
+    assert out == first
+    assert saved_to and all(str(p) != str(out) for p in saved_to)
+    with Image.open(out) as im:
+        assert getattr(im, "n_frames", 1) == 3
+    # No temp file is left beside the outputs.
+    assert sorted(p.name for p in tmp_path.iterdir()) == [out.name]
