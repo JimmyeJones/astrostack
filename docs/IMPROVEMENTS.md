@@ -3166,6 +3166,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.5 **The two library diagnostics survey the library as four-column `SubRef`s, not whole `FrameRow`s — `sensor_pattern_by_temperature` no longer holds every accepted sub's plate solution for its whole run (`seestack.diag.iter_sub_refs`, `sub_path`).** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.3 **Diagnostic `sensor_pattern_by_temperature` v2 splits its halves by *sky*, not by target — a mosaic and its single field (or two targets within 5°) no longer land on opposite halves and read a nebula they share as a camera pattern (`seestack.diag.sensor_pattern.sky_groups`).** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.2 **The boot-time library check (`diagnostics`) reads back on the Jobs page — `Jobs.diagnosticsSummary` — and Cancel on it now reads "cancelled", not "done" (`webapp.diagnostics.submit_pending_diagnostics` cancel sentinel).** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.4 **Diagnostic `filter_card_values` v2 samples each night at both ends and over the whole history** (`filter_card._sample`). Full entry in [`SHIPPED.md`](SHIPPED.md).
