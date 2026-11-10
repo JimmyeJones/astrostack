@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-11-10 (Scout, branch `claude/optimistic-cannon-fwsbuf`) — QA rotation sweep (2), new angle — the dark-ring gate diagnostic `sky_falloff` v2's "same target" pairing on a mosaic: one bug, Scout-fixed (v0.506.15). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8684 passed / 7 skipped on `d0b27ddf` (xdist `-n 4`, BLAS capped, 16m18s). The `.venv` trap recorded by
+  `55nwei` bit again (first launch: `No module named pytest`) — `source .venv/bin/activate` in the same command.
+  **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated; no
+  `Diagnostic result:` issue yet. No open PRs at start. **Dogfood `--mosaic`:** exit 0, nothing overflowing, no
+  console errors, Auto trim 7.9 %; the Target page's notes agree (4 min of ~7 h, top-right panel 30 s behind).
+- **Sweep (2).** No per-panel code since the last (2) (`yw3dcx`, earlier today) except the unswept item it left:
+  `sky_falloff` on a mosaic. v2's whole fix is "pair only subs of one target, so the object cancels" — a
+  single-field assumption. A mosaic target's sampled subs (`_spread` over its history) land on different panels, and
+  `MIN_PAIR_SKY_STEP` *prefers* exactly the cross-panel pairs whose centre skies differ by the object. Measured with
+  `summarise` on vignette-free synthetic libraries (4 ADU noise): ⅓ mosaics 0.97 (the bar), ½ 0.93–0.96, ⅔
+  0.81–0.91; through `run` (8 fields + 16 2×2 mosaics) 0.70 / 0.81 / 0.90. Fixed in place, version 2 → 3, before v2
+  reached `stable`. **Lesson for the next diagnostic:** "within one target" is not "within one field" on this
+  owner's library — group by panel (`PANEL_LINK_DIST_DEG`) wherever a diagnostic relies on two subs seeing the
+  same sky. `sensor_pattern` was read for the same flaw: it splits by *disjoint skies*, which a mosaic only helps.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-11-10 (Scout, branch `claude/optimistic-cannon-55nwei`) — QA rotation sweep (1), new angle — the whole-library "Full-size versions" archive against a canvas wider than the Full-res PNG's 8000 px cap: one bug, Scout-fixed (v0.506.14). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8682 passed / 7 skipped on `f7b8904e` (xdist `-n 4`, BLAS capped, 15m08s). **Environment trap:** a
