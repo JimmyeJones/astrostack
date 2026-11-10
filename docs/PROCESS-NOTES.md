@@ -1,5 +1,32 @@
 # Process notes & QA sweep records
 
+## 2026-11-10 (Scout, branch `claude/optimistic-cannon-55nwei`) — QA rotation sweep (1), new angle — the whole-library "Full-size versions" archive against a canvas wider than the Full-res PNG's 8000 px cap: one bug, Scout-fixed (v0.506.14). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8682 passed / 7 skipped on `f7b8904e` (xdist `-n 4`, BLAS capped, 15m08s). **Environment trap:** a
+  later shell does not inherit the `.venv` that `agent-setup.sh` activates — the first suite launch died at once on
+  `/usr/local/bin/python: No module named pytest`. Use `.venv/bin/python -m pytest` (or `source .venv/bin/activate`)
+  in every later command. **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+  owner-gated; no `Diagnostic result:` issue yet. No open PRs at start. **Dogfood `--mosaic`:** exit 0, nothing
+  overflowing, no console errors; the mosaic Target page's notes agree on the 2×2's thin top-right panel; standing
+  non-findings only (no ASTAP here; `[phone] /life-list [Still to shoot]` 14,513 px by design).
+- **Sweep (1).** Three leads read, one bug:
+  - *The editor's "From your image" suggestions* (`levels-suggestion`, `curve-suggestion`, `op-input-histogram`,
+    `highlight-suggestion`, the FWHM-sized `psf`/`sharpen`/`star-size`) on a decimated mosaic proxy — **clean by
+    reading**: `build_proxy` strides (`rgb[::step, ::step]`) rather than averaging, so a percentile on the proxy
+    samples the full-res distribution without bias; the highlight solver already re-measures on a native window;
+    the FWHM suggestions are put on the master grid by `master_fwhm_for_run`.
+  - *Pillow's decompression-bomb limit* — the app never sets `Image.MAX_IMAGE_PIXELS`, so any `Image.open` of a
+    >179 MP image would raise. **Clean:** every `Image.open` in `seestack/`/`webapp/` reads a stored preview (≤1024
+    px), a share source capped by `_share_source_long_edge`, or a Moon/Sun still; the full-res editor PNG and the
+    archive member are handed over as files or written straight from arrays (`Image.fromarray`, no check).
+  - *The full-size archive on a canvas over the cap* — **bug, fixed as v0.506.14** (SHIPPED): an 8400 px canvas went
+    in at 8000 px and was counted in `n_full_res` with no note, against the card's "their true size" and the
+    module's own `_preview_size.txt` rule. Now `n_reduced` + `_reduced_size.txt`.
+- **Not yet run in a sweep (1):** the archive's member for a North-up-baked mosaic over the cap (the fallback rule —
+  a file at exactly the cap is reported — was read, not driven); the card toast's "N full-size pictures" wording
+  over `n_pictures` (it also counts preview-only and reduced members — a wording nit, not filed).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-10 (Builder, branch `claude/focused-noether-rbfy5l`) — v0.506.13: "1 frames" and three sibling plurals; dogfood `--mosaic --dithered --big --closing --editor` otherwise CLEAN.
 
 * **Finding:** read off code while the dogfood ran, not off a screenshot — the sample stacks are never one frame, so

@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-11-10 (Scout, branch `claude/optimistic-cannon-55nwei`)
+
+### v0.506.14 — the full-size pictures archive says which pictures the 8000 px cap shrank
+
+**Why.** QA rotation sweep (1), new angle: the whole-library "Full-size versions" archive
+(`picturesarchive.build_full_size_archive`, the Gallery's deep-sky wall card) on a canvas wider than the Full-res
+PNG's long-edge cap (`routers/stack._FULL_RES_PNG_MAX_LONG_EDGE`, 8000 px — a drizzled multi-panel mosaic reaches it).
+The card promises *"the same pictures again at their true size"*, and the module's own rule is that the archive never
+mixes sizes without saying so (it already names a preview standing in for a pruned master in `_preview_size.txt`).
+Reproduced through the real job and download: an 8400 × 240 canvas went into the zip at 8000 px wide and was counted in
+`n_full_res`, with no note. The per-run "Full-res PNG" menu already states its capped size (`full_res_png_size`); only
+the archive was silent.
+
+**What changed.** After each render the archive predicts the picture's true size with no cap
+(`pipeline.full_res_png_size`, which reads at most the coverage trim and one header). A picture the cap shrank is
+counted in a new, additive job-result field `n_reduced` (not in `n_full_res`) and named — true size and file size —
+in `_reduced_size.txt` inside the archive, which points at the FITS/TIFF downloads for every original pixel. Where the
+size can't be predicted without a render (a North-up turn, a rotating recipe), a file that came out at exactly the cap
+is reported. Rendering is unchanged; no setting, schema or on-disk change. Residual, not changed: the card's toast
+still says "N full-size pictures" over `n_pictures`, as it already did for preview-only members.
+
+**Tests.** +2 in `tests/webapp/test_pictures_archive.py`
+(`test_a_picture_shrunk_to_the_cap_is_named_not_counted_as_full_size`, `test_no_reduced_note_when_every_picture_is_true_size`);
+the first fails before the fix (`KeyError: 'n_reduced'`, the shrunk picture counted as full size).
 ## 2026-11-10 (Builder, branch `claude/focused-noether-rbfy5l`)
 
 ### v0.506.13 — "1 frame", "1 sub", "1 target": four count labels stop saying "1 frames"
