@@ -2,7 +2,7 @@
 
 ## 2026-11-10 (Scout, branch `claude/optimistic-cannon-cw2u6h`) — QA rotation sweep (4), new angle — overlapping requests on a GET that builds and caches a file: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
-- **Baseline / inbox / PRs.** No open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since
+- **Baseline / inbox / PRs.** Suite 8681 passed / 7 skipped on `1a67502c` (xdist `-n 4`, BLAS capped, 16m27s). No open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since
   2026-10-12, all owner-gated — nothing owed. No `Diagnostic result:` issue yet. `agent-setup.sh` again spent
   ~25 min in `pip install` (it finished on its own this time). **Dogfood `--mosaic`:** CLEAN (EXIT 0, nothing
   overflowing, no console errors, Auto trim 7.9 %).
