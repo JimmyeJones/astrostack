@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-11-10 (Scout, branch `claude/optimistic-cannon-i30qi1`)
+
+### v0.506.12 — the target thumbnail forces revalidation, so a new picture shows on the Library at once
+
+**Why.** QA rotation sweep (4), new angle: every image-returning GET route's cache headers against whether its URL
+changes when its picture does. `GET /api/targets/{safe}/thumbnail` is embedded at that one bare URL by the Library
+card (`api.targetThumbnailUrl`), the Life list, the Wishlist and the year/"sky so far" cards, and what it serves
+changes under it — a new stack, a pinned cover (`current_picture_path`), a merge's pin, an in-place re-save. It
+returned a plain `FileResponse`: `ETag` and `Last-Modified`, no `Cache-Control`. A browser then applies RFC 9111
+heuristic freshness, about 10 % of the file's age, and serves the old picture without asking — about three days for
+a month-old stack. Reproduced through the real client: pinning an older run as the cover changed the pixels at the
+same URL while both answers carried no `Cache-Control`. v0.210.7 fixed exactly this class for the run-preview
+endpoint (`stack.py`, `no-cache` on the preview); this route was never brought under it. The Moon/Sun stills
+already carry a cache-buster (`videoPreviewSrc`); the per-sub thumbnails are versioned in their `ETag` and
+`max-age`; the share posters are generated attachments with no `Last-Modified`.
+
+**What changed.** `routers/targets.target_thumbnail` sends `Cache-Control: no-cache`: the browser revalidates on
+each view, a cheap 304 while the picture is unchanged, the new bytes the moment it changes. No API shape, setting
+or on-disk change.
+
+**Tests.** +1 in `tests/webapp/test_target_cover.py` (`test_thumbnail_forces_revalidation`): the header is present,
+and the same URL answers with different pixels after a cover pin. Fails before the fix (no `cache-control`).
 ## 2026-11-10 (Builder, branch `claude/focused-noether-zzbnof`)
 
 ### v0.506.11 — the first-run card stops linking a step to the page it is sitting on
