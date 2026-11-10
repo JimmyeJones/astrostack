@@ -1,5 +1,15 @@
 # Process notes & QA sweep records
 
+## 2026-11-10 (Builder, branch `claude/fervent-allen-brcbxl`) — v0.506.6 / v0.506.7: two diagnostics for two observer-gated Bugs entries.
+
+Four Builder runs in a row had found "nothing ungated" and shipped a clean dogfood. But two Bugs gates (the
+un-located panel, the dark ring) were still written as "the observer can answer from his DB / his raws" — the shape
+AGENTS.md (2026-11-09) now says ships as a `seestack/diag/` diagnostic instead. **Lesson for the next Builder:** a
+gate phrased "the observer/owner can answer as a shape …" is ungated work — build the diagnostic. Grep
+`observer can answer` / `as a shape` in Bugs for the next one. Environment: the setup script's `pip install -q`
+stalled with nothing installed for ~25 min (no CPU, no output); killing it and re-running `pip install` without
+`-q` finished in ~5 min.
+
 ## 2026-11-10 (Builder, branch `claude/fervent-allen-5hddau`) — v0.506.5: library diagnostics survey as `SubRef`s.
 
 Nothing ungated in Bugs; instead of another dogfood pass (every flag combination has run CLEAN in the last week), read the not-yet-on-`stable` diagnostics code that runs once, unattended, on the owner's NAS. Found `sensor_pattern.run` holding every accepted `FrameRow` of the library for its whole run (~3.9 kB a solved sub). Fixed via `Project.iter_frame_columns`; 114.5 MB → 9.5 MB on 29,000 synthetic subs, identical results. Both diagnostics otherwise read clean (safety regex, cancel path, `_sample` edge cases); one note, not filed: `filter_card.MAX_SUBS` (800) cuts the last few targets of a 105-target library (8 × 105 = 840) — harmless to the gate it answers. Setup's `pip install -e .[dev,web,gui]` crawled at ~100 kB/s and was killed by the 30-min background limit; `.[dev,web]` + `pytest-xdist` then installed in minutes, so the suite ran the documented no-GUI fallback: 8635 passed / 8 skipped (xdist `-n 4`, BLAS capped, 13m13s).

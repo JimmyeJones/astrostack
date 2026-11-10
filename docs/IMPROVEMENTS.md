@@ -168,6 +168,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   runs this, so measure it on stars/nebula/gradient frames before shipping, and keep it off where the fit is
   unsure. **Gate:** the S30's real fall-off — the observer can answer as a shape (median sky of the outer 5 % vs
   the centre 20 % across a few hundred of his raws, no headers). Under ~3 % it is not the owner's ring.
+  **⏸ Waiting on diagnostic `sky_falloff` v1** (v0.506.7, `seestack/diag/sky_falloff.py`; the observer files it
+  as `Diagnostic result: sky_falloff v1`). Read `edge_over_centre_slope` — the pedestal-free fall-off; above ~0.97
+  this is not his ring.
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
@@ -3169,6 +3172,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.7 **Fourth library diagnostic, `sky_falloff` v1: how much darker the sky is at the edge and corners of a raw S30 sub than at its centre, with the camera's pedestal taken out — the gate on the dark-ring Bugs entry** (`seestack.diag.sky_falloff`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.6 **Third library diagnostic, `mosaic_panel_hints` v1: does the Seestar write each mosaic panel's own pointing into its subs, or the mosaic's centre — the gate on the un-located-panel Bugs entry** (`seestack.diag.mosaic_hints`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.5 **The two library diagnostics survey the library as four-column `SubRef`s, not whole `FrameRow`s — `sensor_pattern_by_temperature` no longer holds every accepted sub's plate solution for its whole run (`seestack.diag.iter_sub_refs`, `sub_path`).** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.3 **Diagnostic `sensor_pattern_by_temperature` v2 splits its halves by *sky*, not by target — a mosaic and its single field (or two targets within 5°) no longer land on opposite halves and read a nebula they share as a camera pattern (`seestack.diag.sensor_pattern.sky_groups`).** Full entry in [`SHIPPED.md`](SHIPPED.md).

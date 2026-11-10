@@ -2,6 +2,29 @@
 
 ## 2026-11-10 (Builder, branch `claude/fervent-allen-brcbxl`)
 
+### v0.506.7 — fourth library diagnostic, `sky_falloff` v1: the S30's own centre-to-edge sky fall-off
+
+**Why.** The dark-ring Bugs entry (Builder 2026-10-30) measured its mechanism on synthetic subs — a vignetted sub
+leaves a dark rim after the per-frame `Background2D` flatten, and the canvas border is where only rims land — but
+whether it is the owner's ring depends on one number only his raws can give: how much a real S30 sub vignettes. The
+entry asked the observer for it; it now ships as a diagnostic.
+
+**What it measures.** Up to 300 accepted subs, four per target spread through its history, read raw (read-only)
+and binned 2×2. Per sub: robust medians of the centre box (20 % of the frame), the 5 % side band, the four 10 %
+corners, rings of normalised radius, and the four sides' spread (a gradient's signature — it cancels in an
+all-round band). **The pedestal is removed without knowing it:** across subs under different skies,
+`edge = p + s·v_edge` and `centre = p + s·v_centre`, so the Theil–Sen slope of edge against centre is
+`v_edge / v_centre` whatever `p` is; the intercept gives the implied pedestal. (A first draft subtracted the frame's
+0.5th percentile as a "floor"; that sits near the darkest *sky*, not the pedestal, and would have exaggerated the
+fall-off many times over — caught on synthetic frames before it shipped.) On synthetic 20 %-vignetted frames with a
+500-ADU pedestal the slope reads 0.90 against a truth of ~0.89, where the raw ratio reads 0.92. A slope is withheld
+under 20 subs or when the skies are too alike to separate the pedestal (`centre_sky_p90_over_p10` < 1.2).
+
+**Tests.** +9 (`tests/test_diag_sky_falloff.py`): no vignette reads 1.0; a 20 % vignette reads ~0.90 / 0.85 with the
+pedestal taken out while the raw ratio understates it; a 15 % sky gradient does not read as vignetting; too few or
+too alike skies withhold the slope; through `run` on a scanned library `incoming/` is byte-for-byte unchanged and the
+result has no names or paths; stop, `ready`, registered. Engine-only; no config, schema, on-disk or API-shape change.
+
 ### v0.506.6 — third library diagnostic, `mosaic_panel_hints` v1: is a sub's pointing hint its panel's, or the mosaic's centre?
 
 **Why.** The second Bugs entry (Scout 2026-10-19: a mosaic panel whose subs all failed to plate-solve is missing
