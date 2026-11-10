@@ -1,5 +1,39 @@
 # Shipped — the record
 
+## 2026-11-10 (Builder, branch `claude/fervent-allen-tvk8gv`)
+
+### v0.506.9 — diagnostic `sky_falloff` v2: the slope is taken between two subs of the *same* target
+
+**Why.** v1 (v0.506.7, merged the same day, not yet on `stable`) removed the camera's pedestal by fitting one
+Theil–Sen line of edge sky against centre sky through the sampled subs of **every** target. But a single-field
+target puts its nebula or galaxy in the middle of the frame, so the centre box carries the object's light too:
+`centre = p + s·v_centre + T`, with `T` different on every target. The pooled fit reads that as extra centre sky.
+**Measured on synthetic frames** (240×400, pedestal 500, a central Gaussian object of 100–1500 ADU and 0.2–0.5 of
+the half-frame wide on each of 30–60 targets, four subs each at skies 0.8–1.25× a per-target base): a sensor with
+**no vignetting** read an edge slope of **0.826–0.896** — a "10–17 % darker edge" — which is below the 0.97 the
+dark-ring Bugs entry reads as "this is his ring", so v1 could have **confirmed that entry's mechanism falsely** on a
+nebula-heavy library like the owner's. With a real 20 % corner fall-off (truth ≈ 0.90) it read 0.74–0.80. On a
+library where only a third of targets carry a central object the pooled median was still right (0.9998 / 0.897),
+which is why v1's own synthetic tests (no objects at all) never saw it.
+
+**Fix.** `_pair_slope`: the median of the pairwise slopes taken **only between two subs of one target**, and only
+for pairs whose centre skies differ by at least 5 % (`MIN_PAIR_SKY_STEP`); fewer than 20 usable pairs
+(`MIN_PAIRS`) → `null`. Anything a target adds to both its subs alike — its object, the pedestal — cancels in every
+pair. Same data: **0.9997** with no vignette, **0.897** with the 20 % one. The ~95 % range is the distribution-free
+rank interval of that median (n/2 ± 0.98·√n). The headline keys keep their names (`edge_over_centre_slope`,
+`corner_over_centre_slope`, `rings_over_centre_slope`, now with `pairs` and `targets`); v1's pooled fit is still
+published beside them as `edge_over_centre_pooled` / `corner_over_centre_pooled` with the pedestal its intercept
+implies, so a pooled slope well below the headline says the targets' own light was biasing it. The numbers are
+computed by a new pure `summarise(measured, groups)` that `run` calls. `version` 1 → 2, so the owner's install runs
+v2 (only) after his next update; the dark-ring entry now waits on `Diagnostic result: sky_falloff v2`.
+
+**Tests.** +3 in `tests/test_diag_sky_falloff.py`: a vignette-free library whose every target has a central object
+reads 1.0 on edge and corner (and the pooled fit, published beside it, reads < 0.97 — the bias pinned); a real
+20 % vignette is still measured under central objects, rings fall outward; pairs with skies 1 % apart are not used
+however many targets there are (null, while the pooled fit still answers). **Fail-before shown:** with the headline
+switched back to the pooled fit in a scratch copy, the first two fail (0.8264 vs 1.0; 0.7405 vs 0.87–0.92). The
+registry test now pins `("sky_falloff", 2)`. Engine-only; no config, schema, on-disk or API-shape change.
+
 ## 2026-11-10 (Builder, branch `claude/fervent-allen-pbc70q`)
 
 ### v0.506.8 — fifth library diagnostic, `twin_target_overcount` v1: how inflated is the Dashboard headline today?

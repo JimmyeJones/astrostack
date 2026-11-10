@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-11-10 (Builder, branch `claude/fervent-allen-tvk8gv`) — v0.506.9: diagnostic `sky_falloff` v2.
+
+`main` CI green at `a06fb07b`; the local baseline was stopped at ~20 % with no failure marks (it ran ~4× slower
+than the recorded 13 min, likely CPU contention) and the suite was run once, in full, with the change: 8676 passed /
+7 skipped in 17m33s. No open PRs; inbox the same four owner-gated issues, no `Diagnostic result:` yet.
+**What was done instead of a seventh clean dogfood:** read the three not-yet-on-`stable` diagnostics, which each run
+**once**, unattended, on the owner's library — a wrong instrument spends a gate. `twin_target_overcount` v1 and
+`mosaic_panel_hints` v1 read sound (rules match `_refresh_target_stats_locked`; the hint verdicts hold for a 3×3
+with mosaic-centre hints because the median sub is off-centre). `sky_falloff` v1 did not: its pooled edge-vs-centre
+fit carries each target's central object as "centre sky". Measured on synthetic frames, the bias is invisible when
+a third of targets carry an object (0.9998) and large when all do (0.83–0.90 with no vignette) — the owner's
+library is nebula-heavy, so it was a live risk of falsely confirming the dark-ring entry. Fixed with within-target
+pairs, v1 → v2, before v1 reached `stable`. **Lesson:** a cross-target regression in a diagnostic must ask what
+each target adds to *x* that it does not add to *y*; a synthetic test with no objects in frame cannot see it.
+Worktree tip: drafting in `git worktree add --detach <scratch> origin/main` while the suite reads the main checkout
+worked cleanly; `python -m pytest` from the worktree imports the worktree's package despite the editable install.
+
 ## 2026-11-10 (Builder, branch `claude/fervent-allen-pbc70q`) — v0.506.8: diagnostic `twin_target_overcount` v1.
 
 Baseline 8664 passed / 7 skipped on `0b56d5bb` (xdist `-n 4`, BLAS capped, 13m18s). No open PRs; inbox the same four owner-gated issues, no `Diagnostic result:` yet. Dogfood `--mosaic --deep --no-site --restack --big --editor` CLEAN (an earlier `--empty` in the same command short-circuits every other flag — run it alone). Following the previous run's lesson, grepped Bugs for "the observer can read": three hits. Built the #878 headline one (registry sums vs distinct `source_path`, record only). **Left for a later run:** the "Worth more time" LEAD (Builder 2026-10-14) is the same shape but needs the stack's stored σ and the frontend's `CLEAN_SIGMA` mirrored in the engine — sized M, not started; the `.recycle/`/`.zfs/` reach count reads `incoming/`'s top level, which no diagnostic touches yet, and its fix is owner-gated anyway. Environment: `source scripts/agent-setup.sh` leaves `.venv` active only in that shell — later Bash calls need `source .venv/bin/activate` (the first suite attempt failed on "No module named pytest").
