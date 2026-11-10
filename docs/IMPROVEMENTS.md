@@ -3176,6 +3176,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.11 **The target thumbnail (`/api/targets/{safe}/thumbnail` — Library card, Life list, Wishlist, year card) sends `Cache-Control: no-cache`, so a new stack or a pinned cover shows at once instead of after days of heuristic browser caching** (`routers/targets.target_thumbnail`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.10 **Diagnostic `mosaic_panel_hints` v2: a per-panel hint with an ordinary go-to offset reads `per_panel`, not `mixed`, and the offset is no longer counted as a missing panel** (`seestack.diag.mosaic_hints.measure_target`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.9 **Diagnostic `sky_falloff` v2 takes the edge/centre slope only between two subs of the same target — v1's pooled fit read each target's central nebula as vignetting (a vignette-free synthetic library read 0.83–0.90) and could have confirmed the dark-ring entry falsely** (`seestack.diag.sky_falloff._pair_slope`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.8 **Fifth library diagnostic, `twin_target_overcount` v1: how much subs registered in two targets (#878) inflate the Dashboard's frame count and integration hours today — the gate on the `/api/stats` headline Bugs LEAD** (`seestack.diag.twin_overcount`). Full entry in [`SHIPPED.md`](SHIPPED.md).
@@ -4577,5 +4578,3 @@ _Newest first. One line each: what + commit/PR. Entries that had grown to paragr
 - **Editable notes/label on History cards** — the long-standing `notes` column
 
 - **Mono single-frame edge test** — verified the mono stack path on a
-
-- **Low-frame sigma-clip caution** — the Stack form now shows an inline caution

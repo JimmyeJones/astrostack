@@ -123,3 +123,32 @@ def test_pinned_run_pruned_falls_back_to_newest(client, solved_library, tmp_path
 def test_pin_missing_target_404(client, solved_library):
     r = client.put("/api/targets/does_not_exist/cover", json={"run_id": 1})
     assert r.status_code == 404
+
+
+def test_thumbnail_forces_revalidation(client, solved_library, tmp_path):
+    """``/api/targets/{safe}/thumbnail`` must say ``Cache-Control: no-cache``.
+
+    The Library card, Life list, Wishlist and year card all embed this one bare
+    URL, and what it serves changes under it — a new stack, a pinned cover, an
+    in-place re-save. ``FileResponse`` alone sends only ``ETag``/``Last-Modified``,
+    so a browser applies RFC 9111 heuristic freshness (~10 % of the file's age:
+    about three days on a month-old stack) and keeps showing the old picture
+    without asking. ``no-cache`` makes it revalidate: a cheap 304 when unchanged,
+    the new bytes the moment they change — the same rule v0.210.7 set for the
+    run preview (``test_stack_render``)."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    old_id, _ = _register_run(solved_library, safe, color=(200, 0, 0),
+                              ts="2026-05-01T00:00:00Z")
+    _register_run(solved_library, safe, color=(0, 0, 200),
+                  ts="2026-05-09T00:00:00Z")
+
+    first = client.get(f"/api/targets/{safe}/thumbnail")
+    assert first.status_code == 200
+    assert "no-cache" in first.headers.get("cache-control", "").lower()
+
+    # The same URL now answers with different pixels — which is why it may not
+    # be served from a heuristically-fresh cache.
+    client.put(f"/api/targets/{safe}/cover", json={"run_id": old_id})
+    second = client.get(f"/api/targets/{safe}/thumbnail")
+    assert _pixel(second.content, tmp_path) != _pixel(first.content, tmp_path)
+    assert "no-cache" in second.headers.get("cache-control", "").lower()

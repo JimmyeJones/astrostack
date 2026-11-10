@@ -4,6 +4,10 @@ Moved verbatim and in order from the foot of the `## Shipped` list in [`../IMPRO
 oldest last, so the working list stays no longer than a run found it (AGENTS.md §2). Newer moves are appended
 above older ones.
 
+## Moved 2026-11-10 (Scout, branch `claude/optimistic-cannon-i30qi1`)
+
+- **Low-frame sigma-clip caution** — the Stack form now shows an inline caution
+
 ## Moved 2026-10-30 (Scout, branch `claude/exciting-wozniak-1xi45k`)
 
 - **Integration time inline on History cards + Reuse settings from Gallery** —
