@@ -1840,7 +1840,15 @@ def target_thumbnail(safe: str, request: Request) -> FileResponse:
         path = current_picture_path(lib, entry)
         if path is None:
             raise HTTPException(status_code=404, detail="No preview")
-        return FileResponse(path, media_type="image/png")
+        # Every surface embeds this bare URL (Library card, Life list, Wishlist,
+        # year card) and what it answers changes under it: a new stack, a pinned
+        # cover, an in-place re-save. Without Cache-Control a browser applies
+        # heuristic freshness (~10 % of the file's age, days on an old stack)
+        # and keeps the old picture without asking; ``no-cache`` makes it
+        # revalidate — a 304 when unchanged. Same rule as the run preview
+        # (``stack.py``, v0.210.7).
+        return FileResponse(path, media_type="image/png",
+                            headers={"Cache-Control": "no-cache"})
     finally:
         lib.close()
 
