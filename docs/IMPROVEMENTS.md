@@ -3192,6 +3192,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.13 **"1 frame", "1 sub", "1 target": the thin-stack badge, the Point-here-tonight card, the merge chip and the out-of-date badge's label stop saying "1 frames"/"1 subs"/"1 targets"** (`FrameCountBadge`, `ContinueTonightCard`, `MergeSuggestionsCard`, `OutdatedTargetsBadge`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.12 **The target thumbnail (`/api/targets/{safe}/thumbnail` — Library card, Life list, Wishlist, year card) sends `Cache-Control: no-cache`, so a new stack or a pinned cover shows at once instead of after days of heuristic browser caching** (`routers/targets.target_thumbnail`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.11 **The first-run "Your first image" card says "you're here" instead of linking a step to the page it already sits on (empty Library / Gallery)** (`firstImageSteps.stepIsHere`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.10 **Diagnostic `mosaic_panel_hints` v2: a per-panel hint with an ordinary go-to offset reads `per_panel`, not `mixed`, and the offset is no longer counted as a missing panel** (`seestack.diag.mosaic_hints.measure_target`). Full entry in [`SHIPPED.md`](SHIPPED.md).

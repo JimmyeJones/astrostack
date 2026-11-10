@@ -29,8 +29,10 @@ describe("FrameCountBadge", () => {
 
   it("carries the honest thin-stack cue on a single-frame 'stack'", () => {
     renderBadge(1);
-    // Count is still shown…
-    expect(screen.getByText("1 frames")).toBeInTheDocument();
+    // Count is still shown — singular, since this is the one count the cue is
+    // about ("1 frames" shipped here until v0.506.13)…
+    expect(screen.getByText("1 frame")).toBeInTheDocument();
+    expect(screen.queryByText("1 frames")).toBeNull();
     // …plus the warning-triangle icon marking it as not a real stack.
     expect(document.querySelector(".tabler-icon-alert-triangle")).not.toBeNull();
   });

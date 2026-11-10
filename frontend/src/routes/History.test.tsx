@@ -103,7 +103,7 @@ describe("HistoryView", () => {
     ]);
 
     renderHistory();
-    await waitFor(() => expect(screen.getByText("1 frames")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("1 frame")).toBeInTheDocument());
     expect(document.querySelector(".tabler-icon-alert-triangle")).not.toBeNull();
   });
 

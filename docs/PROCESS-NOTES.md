@@ -1,5 +1,17 @@
 # Process notes & QA sweep records
 
+## 2026-11-10 (Builder, branch `claude/focused-noether-rbfy5l`) — v0.506.13: "1 frames" and three sibling plurals; dogfood `--mosaic --dithered --big --closing --editor` otherwise CLEAN.
+
+* **Finding:** read off code while the dogfood ran, not off a screenshot — the sample stacks are never one frame, so
+  no pass could photograph it. `FrameCountBadge` said "1 frames" in exactly its orange single-frame state, and a
+  `grep -rn '} \(frames\|subs\|targets\)\b'` over `frontend/src` found three more labels with no singular branch.
+  Three existing tests had pinned "1 frames" as the expected text; they now assert "1 frame". Video
+  `optionLine` (`n_frames frames`) left alone — its count comes from `seestack/video/quality.py`, whose own
+  sentences share the wording, and a one-frame lucky-imaging option is not a real shape.
+* **Environment:** `agent-setup.sh` took ~8 min (apt + pip), no hang this time. Full vitest run ~10 min.
+* **Dogfood:** numbers match the last records (trim 7.9 % / 30.7 % vs 30.3 % apron; scale diff CLEAN; editor
+  drives clean on all three canvases; no overflow, no console errors).
+
 ## 2026-11-10 (Scout, branch `claude/optimistic-cannon-cw2u6h`) — QA rotation sweep (4), new angle — overlapping requests on a GET that builds and caches a file: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8681 passed / 7 skipped on `1a67502c` (xdist `-n 4`, BLAS capped, 16m27s). No open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since

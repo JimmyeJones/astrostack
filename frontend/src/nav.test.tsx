@@ -78,10 +78,10 @@ describe("NAV_SECTIONS", () => {
   });
 });
 
-function renderApp() {
+function renderApp(outdated = 0) {
   vi.spyOn(client.api, "listJobs").mockResolvedValue([]);
   vi.spyOn(client.api, "getSystem").mockResolvedValue({ version: "9.9.9" } as never);
-  vi.spyOn(client.api, "reprocessStatus").mockResolvedValue({ outdated: 0 } as never);
+  vi.spyOn(client.api, "reprocessStatus").mockResolvedValue({ outdated } as never);
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <MantineProvider>
@@ -114,5 +114,16 @@ describe("sidebar", () => {
         expect(within(group).getByRole("link", { name: new RegExp(`^${l.label}$`) })).toBeTruthy();
       }
     }
+  });
+
+  it("reads one out-of-date target as '1 target', not '1 targets'", async () => {
+    renderApp(1);
+    expect(await screen.findByLabelText("1 target out of date")).toBeInTheDocument();
+    expect(screen.queryByLabelText("1 targets out of date")).toBeNull();
+  });
+
+  it("keeps the plural for several", async () => {
+    renderApp(3);
+    expect(await screen.findByLabelText("3 targets out of date")).toBeInTheDocument();
   });
 });
