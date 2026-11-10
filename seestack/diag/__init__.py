@@ -101,9 +101,10 @@ def sub_path(f: Any) -> str | None:
 def registry() -> list[Diagnostic]:
     """Every diagnostic, in the order they run. Import here so a broken one
     fails loudly in the test suite rather than silently at boot."""
-    from seestack.diag import filter_card, mosaic_hints, sensor_pattern
+    from seestack.diag import filter_card, mosaic_hints, sensor_pattern, sky_falloff
 
-    return [sensor_pattern.DIAGNOSTIC, filter_card.DIAGNOSTIC, mosaic_hints.DIAGNOSTIC]
+    return [sensor_pattern.DIAGNOSTIC, filter_card.DIAGNOSTIC, mosaic_hints.DIAGNOSTIC,
+            sky_falloff.DIAGNOSTIC]
 
 
 # A host or container path, a Windows path, or two decimals that could be a
