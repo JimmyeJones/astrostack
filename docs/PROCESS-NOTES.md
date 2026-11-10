@@ -1,5 +1,17 @@
 # Process notes & QA sweep records
 
+## 2026-11-10 (Builder, branch `claude/focused-noether-rbfy5l`) — v0.506.12: "1 frames" and three sibling plurals; dogfood `--mosaic --dithered --big --closing --editor` otherwise CLEAN.
+
+* **Finding:** read off code while the dogfood ran, not off a screenshot — the sample stacks are never one frame, so
+  no pass could photograph it. `FrameCountBadge` said "1 frames" in exactly its orange single-frame state, and a
+  `grep -rn '} \(frames\|subs\|targets\)\b'` over `frontend/src` found three more labels with no singular branch.
+  Three existing tests had pinned "1 frames" as the expected text; they now assert "1 frame". Video
+  `optionLine` (`n_frames frames`) left alone — its count comes from `seestack/video/quality.py`, whose own
+  sentences share the wording, and a one-frame lucky-imaging option is not a real shape.
+* **Environment:** `agent-setup.sh` took ~8 min (apt + pip), no hang this time. Full vitest run ~10 min.
+* **Dogfood:** numbers match the last records (trim 7.9 % / 30.7 % vs 30.3 % apron; scale diff CLEAN; editor
+  drives clean on all three canvases; no overflow, no console errors).
+
 ## 2026-11-10 (Builder, branch `claude/focused-noether-zzbnof`) — v0.506.11: first-run card self-links; dogfood `--empty` otherwise CLEAN.
 
 * **Environment:** `source scripts/agent-setup.sh` hung ~25 min inside `pip install -e .[dev,web,gui]` (two open

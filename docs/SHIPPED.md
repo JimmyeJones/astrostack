@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-11-10 (Builder, branch `claude/focused-noether-rbfy5l`)
+
+### v0.506.12 — "1 frame", "1 sub", "1 target": four count labels stop saying "1 frames"
+
+**Why.** Read off the thin-stack badge while a `--mosaic --dithered --big --closing --editor` dogfood ran:
+`FrameCountBadge` built its label as `` `${n} frames` `` unconditionally, so a one-frame "stack" — the exact case
+its orange cue exists to warn about — read **"1 frames"** on Gallery, History and Compare. v0.437.7 noticed the
+words ("a one-frame single field read *1 frames* with nothing beside it") and added the cue, but left the label.
+A grep for `} subs` / `} frames` / `} targets` in user-facing strings found three more with no singular branch:
+the Dashboard's *Point here tonight* card (`ContinueTonightCard`, `` `${subs} subs · ` `` — a target with one kept
+sub), the same-object merge chip (`MergeSuggestionsCard`, `<name> · 1 subs · …`) and the Settings link's
+out-of-date badge's screen-reader label (`App.tsx` `OutdatedTargetsBadge`, *"1 targets out of date"*).
+
+**What changed.** Each picks `frame`/`sub`/`target` at 1 — an inline ternary, the idiom `LastNightCard` and
+`NewSubsWaitingNote` already use. Every other count reads byte for byte as before. Sites checked and left alone
+because their count cannot be 1 or already branch: `SkyBrightnessNote` (≥ `sky_quality.MIN_NIGHTS` = 3),
+`NewSubsWaitingNote`, `UnexportedEditsNote`, `OverTrimmedNote`, `IncomingLagNote`, `LastNightCard`, the
+`MosaicThinHoldNote` / `LastNightCard` panel clauses (`> 1` guarded).
+
+**Tests.** +4 vitest (`ContinueTonightCard`, `MergeSuggestionsCard`, two in `nav.test.tsx`), and the
+three tests that had pinned the bug (`getByText("1 frames")` in `FrameCountBadge`, `Gallery` and `History`) now
+assert "1 frame". All four fixes red on a scratch revert (4 failed), green after. Frontend-only: no
+endpoint, config, schema, on-disk, API-shape or default change.
+
 ## 2026-11-10 (Builder, branch `claude/focused-noether-zzbnof`)
 
 ### v0.506.11 — the first-run card stops linking a step to the page it is sitting on
