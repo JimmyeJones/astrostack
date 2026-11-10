@@ -308,3 +308,13 @@ export function firstImageLeadText(steps: FirstImageStep[]): string {
   }
   return "Six steps from a folder of subs to a finished picture.";
 }
+
+/**
+ * Whether a step's page is the one the card is already on. Only the path is
+ * compared — a query or hash on the step's link still lands on the same page —
+ * and a trailing slash is ignored, so `/library/` is the Library too.
+ */
+export function stepIsHere(href: string, pathname: string): boolean {
+  const norm = (p: string) => (p.replace(/[?#].*$/, "").replace(/\/+$/, "") || "/");
+  return norm(href) === norm(pathname);
+}
