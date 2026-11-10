@@ -2,7 +2,7 @@
 
 ## 2026-11-10 (Scout, branch `claude/optimistic-cannon-i30qi1`)
 
-### v0.506.11 — the target thumbnail forces revalidation, so a new picture shows on the Library at once
+### v0.506.12 — the target thumbnail forces revalidation, so a new picture shows on the Library at once
 
 **Why.** QA rotation sweep (4), new angle: every image-returning GET route's cache headers against whether its URL
 changes when its picture does. `GET /api/targets/{safe}/thumbnail` is embedded at that one bare URL by the Library
@@ -22,6 +22,28 @@ or on-disk change.
 
 **Tests.** +1 in `tests/webapp/test_target_cover.py` (`test_thumbnail_forces_revalidation`): the header is present,
 and the same URL answers with different pixels after a cover pin. Fails before the fix (no `cache-control`).
+## 2026-11-10 (Builder, branch `claude/focused-noether-zzbnof`)
+
+### v0.506.11 — the first-run card stops linking a step to the page it is sitting on
+
+**Why.** A `--empty` dogfood pass (the first-run screens, no data) photographed the "Your first image" card on the
+empty **Library**: step one read *"Point AstroStack at your subs — Open Library"*, and steps three and four
+*"Pick a target"*, all linking to `/library` — the page the card was on. A link to the current route does nothing
+when tapped, so a beginner's first click on the first step of the journey read as a broken button. The empty
+**Gallery** had the same shape for *"Open a picture"* / *"Open your edit"* (both `/gallery`). The Dashboard was
+never affected (no step links to `/`).
+
+**What changed.** `FirstImageCard` reads the current route (`useLocation`); a not-yet-done step whose page is that
+route (`firstImageSteps.stepIsHere` — path only, query/hash and a trailing slash ignored, a sub-page such as
+`/library/M_42` is *not* the Library) shows a dimmed *"you're here"* in place of its link. Every other step still
+links; done steps still drop theirs. Nothing removed; the card's height is unchanged (phone page heights identical
+before/after on the `--empty` pass, no overflow, no console errors). Frontend-only — no endpoint, config, schema,
+on-disk, API-shape or default change.
+
+**Tests.** +2 in `FirstImageCard.test.tsx` (mounted at `/library` and at `/gallery`: the self-links are gone, the
+"you're here" notes are there, the other steps' links keep their targets), **both red under a scratch revert** of
+the component; +2 in `firstImageSteps.test.ts` for `stepIsHere`. Python suite 8681 passed / 7 skipped; vitest
+5014 passed; `tsc`, `vite build` clean.
 
 ## 2026-11-10 (Scout, branch `claude/exciting-wozniak-yw3dcx`)
 

@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-11-10 (Scout, branch `claude/optimistic-cannon-i30qi1`) — QA rotation sweep (4), new angle — every image-returning GET route's cache headers against whether its URL changes when its picture does: one bug, Scout-fixed (v0.506.11). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+## 2026-11-10 (Scout, branch `claude/optimistic-cannon-i30qi1`) — QA rotation sweep (4), new angle — every image-returning GET route's cache headers against whether its URL changes when its picture does: one bug, Scout-fixed (v0.506.12). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** No open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since
   2026-10-12, all owner-gated — nothing owed. No `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (EXIT 0,
@@ -26,6 +26,19 @@
     re-check rewrites in place; it 404s when the check no longer matches the clip, but a re-check that *does* match
     could be served from cache. Not checked whether its embed carries a buster — the next (4) sweep can.
 - **Rotation: (4) done → next sweep is (1).**
+## 2026-11-10 (Builder, branch `claude/focused-noether-zzbnof`) — v0.506.11: first-run card self-links; dogfood `--empty` otherwise CLEAN.
+
+* **Environment:** `source scripts/agent-setup.sh` hung ~25 min inside `pip install -e .[dev,web,gui]` (two open
+  sockets, no CPU, no output). Killing it and re-running `pip install --default-timeout=60 --retries 5 -e '.[dev,web,gui]'`
+  finished in under 10 min; the setup script then completed idempotently. Worth a `--default-timeout` in the script
+  if it recurs.
+* **Dogfood trap re-learned:** `agent-dogfood.sh` without `--build` serves the *existing* `webapp/static/`, so a
+  frontend change does not show up in its screenshots — the first after-shot of this fix still showed the old card.
+  Use `--build` when the point of the pass is to see a frontend change.
+* **Finding:** `--empty` (no Builder pass had run it recently) — the "Your first image" card on an empty Library
+  and empty Gallery linked steps to the page itself (dead tap). Fixed as v0.506.11. Everything else on the pass:
+  no overflow, no console errors; phone heights unchanged before/after (tallest `/life-list [Still to shoot]`
+  14,604 px — the catalogue list, by design with no data).
 
 ## 2026-11-10 (Scout, branch `claude/optimistic-cannon-mgl6hf`) — QA rotation sweep (3), new angle — an audit-hook trace of every write-capable call under `incoming/`, through the new diagnostics job: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 

@@ -3,6 +3,7 @@ import type { DashboardStats, SystemInfo } from "../../api/client";
 import {
   firstImageComplete, firstImageDone, firstImageDoneMessage, firstImageHasPicture,
   firstImageLeadText, firstImageNextStep, firstImageSkippedSteps, firstImageSteps,
+  stepIsHere,
 } from "./firstImageSteps";
 
 function sys(over: Partial<SystemInfo["astap"]> = {}): SystemInfo {
@@ -319,5 +320,19 @@ describe("the step that is actually ahead of you", () => {
     }));
     expect(firstImageSkippedSteps(steps).map((s) => s.key)).toEqual(["solve", "checked"]);
     expect(firstImageLeadText(steps)).toMatch(/aren't ticked/);
+  });
+});
+
+describe("stepIsHere", () => {
+  it("matches a step's page by path alone", () => {
+    expect(stepIsHere("/library", "/library")).toBe(true);
+    expect(stepIsHere("/library", "/library/")).toBe(true);
+    expect(stepIsHere("/settings/plate-solving?x=1#a", "/settings/plate-solving")).toBe(true);
+  });
+
+  it("does not match another page, a sub-page or the Dashboard", () => {
+    expect(stepIsHere("/library", "/")).toBe(false);
+    expect(stepIsHere("/library", "/library/M_42")).toBe(false);
+    expect(stepIsHere("/gallery", "/library")).toBe(false);
   });
 });

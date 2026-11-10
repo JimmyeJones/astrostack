@@ -1,12 +1,12 @@
 import { Anchor, Button, Group, List, Paper, Progress, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconCircleCheck, IconCircleDashed, IconRoute } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import {
   firstImageComplete, firstImageDone, firstImageDoneMessage, firstImageHasPicture,
-  firstImageLeadText, firstImageSteps,
+  firstImageLeadText, firstImageSteps, stepIsHere,
 } from "./firstImageSteps";
 
 // Two localStorage flags, both defensively guarded so a disabled/broken store can
@@ -53,6 +53,10 @@ export function FirstImageCard() {
     queryKey: ["system"], queryFn: api.getSystem, staleTime: 60_000,
   });
   const [dismissed, setDismissed] = useState(() => readFlag(DISMISS_KEY));
+  // The card is shown on the Library and Gallery too, where some of its steps'
+  // own pages are the page it is sitting on — and a link to the current route
+  // does nothing when tapped, so "Open Library" on the Library read as broken.
+  const here = useLocation().pathname;
 
   const loaded = !!stats.data && !!system.data;
   const steps = firstImageSteps(system.data, stats.data);
@@ -134,9 +138,13 @@ export function FirstImageCard() {
                     td={s.done ? "line-through" : undefined} span>
                     {s.label}
                   </Text>
-                  {!s.done ? (
+                  {s.done ? null : stepIsHere(s.href, here) ? (
+                    <Text size="sm" c="dimmed" span data-testid={`first-image-here-${s.key}`}>
+                      you&apos;re here
+                    </Text>
+                  ) : (
                     <Anchor component={Link} to={s.href} size="sm">{s.action}</Anchor>
-                  ) : null}
+                  )}
                 </Group>
               </List.Item>
             ))}
