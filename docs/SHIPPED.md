@@ -1,5 +1,36 @@
 # Shipped — the record
 
+## 2026-11-10 (Scout, branch `claude/exciting-wozniak-yw3dcx`)
+
+### v0.506.10 — diagnostic `mosaic_panel_hints` v2: a per-panel hint with a go-to offset no longer reads "mixed"
+
+**Why.** QA rotation sweep (2) ran v0.506.6's diagnostic on S30-shaped mosaics (2×2 and 3×3, panels ~1.8° × 1° apart,
+uneven sub counts, three to twenty nights each with its own go-to offset between the header's hint and the solve).
+v1 called a hint "on its own panel" within `PANEL_LINK_DIST_DEG` (0.25°), a dither-sized bar about a seventh of an S30
+panel step. So per-panel hints with a per-night offset of σ 0.15° read **`mixed`** on a 3×3 (share 0.64), and at 0.3°
+`mixed` on both shapes (share 0.13–0.29), with 17–25 "hint groups" for 9 panels. The missing-panel count compared
+un-located subs' *hints* with located subs' *centres*, so those same offsets showed as 3–15 false missing panels, and
+a 2×2 with mosaic-centre hints showed one false missing panel with no panel missing. The diagnostic is the gate on
+the un-located-panel Bugs entry, so a `mixed` verdict would have stalled that gate on the owner's real data. v1 has not
+reached `stable` yet (merged today).
+
+**What changed.** `seestack.diag.mosaic_hints.measure_target`: a hint is per panel when, of every located panel's
+mean centre, its own is the **nearest** (`share_hint_nearest_own_panel`, no fixed degree in it). Hints are grouped at
+**half the smallest step between two located panels** (`HINT_LINK_STEP_SHARE`, `smallest_panel_step_deg`; 0.5° when
+fewer than two panels located). A missing panel is counted by comparing un-located subs' hints with located subs'
+**hints**, so a panel's go-to offset cancels out. Hints read as the mosaic centre when they sit under half as far from
+the panels' unweighted middle as the panels do (`CENTRAL_SHARE`). The weighted middle leans toward an uneven mosaic's
+deepest panel. The v1 numbers are still reported. `version` 1 → 2.
+
+**Measured.** On the sweep's 32-case grid, every case now reads correctly (per_panel / mosaic_centre, missing
+panel counted exactly when there is one) except the extreme 3×3 at a 0.3° σ per-axis per-night offset. There the
+missing corner panel's hints merge into a neighbour's at the 0.5° link. The verdict is still right; the count says 0.
+35,880 subs on 9 panels over 20 nights: 1.1 s.
+
+**Tests.** +5 in `tests/test_diag_mosaic_hints.py`, each failing on v1. A go-to-offset per-panel hint reads
+`per_panel`. A go-to offset is not a missing panel. A lost panel is still counted under offsets. Offset mosaic-centre
+hints read `mosaic_centre`, also on an uneven mosaic. The registry test reads v2. Engine-only (a read-only
+diagnostic); no config, schema, on-disk or API-shape change.
 ## 2026-11-10 (Builder, branch `claude/fervent-allen-tvk8gv`)
 
 ### v0.506.9 — diagnostic `sky_falloff` v2: the slope is taken between two subs of the *same* target
