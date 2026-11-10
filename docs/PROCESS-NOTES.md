@@ -1,5 +1,26 @@
 # Process notes & QA sweep records
 
+## 2026-11-10 (Scout, branch `claude/optimistic-cannon-cw2u6h`) — QA rotation sweep (4), new angle — overlapping requests on a GET that builds and caches a file: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** No open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since
+  2026-10-12, all owner-gated — nothing owed. No `Diagnostic result:` issue yet. `agent-setup.sh` again spent
+  ~25 min in `pip install` (it finished on its own this time). **Dogfood `--mosaic`:** CLEAN (EXIT 0, nothing
+  overflowing, no console errors, Auto trim 7.9 %).
+- **Sweep (4), angle not run before** (grep `concurren`, `lost update`, `single-flight`: only the upload create-new
+  race and the settings lock). Two first reads came up clean: `/api/diagnostics`'s payload against the public-repo
+  rule (`check_result_is_safe` on every result, error recorded as the exception's class only, `filter_card._token`
+  refuses 4+ digit runs) and the JSON stores written by mutating routes (config under `RLock`, calibration
+  registry under `_REGISTRY_LOCK`, `noise_delta_cache` locked; `atomicio`'s fixed temp name is only safe *because*
+  of those locks — worth knowing before a new caller uses it unlocked). The angle that found something: **GETs that
+  build a file on a cache miss and write it in place** — the deepening reel, the sky-map PNG, the sky-coverage JSON.
+  The reel is the heavy one (loads every master) and the card fires overlapping GETs by design (Play's `<Image>`
+  plus Download/Share on the same URL). Threaded repro through the real route: 24 GETs 40 ms apart, render slowed
+  0.3 s → 9 renders, and on one run of three, 3 bodies were 200 but undecodable. Filed 🟡 reproduced in Bugs with
+  the fix (per-reel lock + temp-then-`os.replace`). Not filed: the sky-map / sky-coverage caches have the same
+  in-place write but are cheap, rebuilt by fingerprint, and a torn JSON read falls back to a recompute — a Builder
+  fixing the reel can give them the same temp-then-replace in passing.
+- **Rotation: (4) done → next sweep is (1)** (preview↔export parity at mosaic scale).
+
 ## 2026-11-10 (Builder, branch `claude/focused-noether-zzbnof`) — v0.506.11: first-run card self-links; dogfood `--empty` otherwise CLEAN.
 
 * **Environment:** `source scripts/agent-setup.sh` hung ~25 min inside `pip install -e .[dev,web,gui]` (two open
