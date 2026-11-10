@@ -163,7 +163,7 @@ export function ContinueTonightCard() {
             {pick.target.name}
           </Text>
           <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
-            {subs != null ? `${subs} subs · ` : ""}{so_far}
+            {subs != null ? `${subs} ${subs === 1 ? "sub" : "subs"} · ` : ""}{so_far}
           </Text>
         </Group>
         {win ? <Text size="xs" c="dimmed" mb={4}>{win}</Text> : null}

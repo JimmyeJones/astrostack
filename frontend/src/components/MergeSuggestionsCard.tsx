@@ -109,7 +109,8 @@ export function MergeSuggestionsCard() {
               {s.targets.map((t) => (
                 <Badge key={t.safe} variant="outline" color="gray" size="sm"
                   styles={WRAPPING_BADGE}>
-                  {t.name} · {t.n_frames_accepted} subs · {formatIntegration(t.total_exposure_s)}
+                  {`${t.name} · ${t.n_frames_accepted} ${t.n_frames_accepted === 1 ? "sub" : "subs"} · `
+                    + formatIntegration(t.total_exposure_s)}
                 </Badge>
               ))}
             </Group>

@@ -72,6 +72,19 @@ describe("MergeSuggestionsCard", () => {
     expect(chip).toHaveStyle({ whiteSpace: "normal", overflow: "visible" });
   });
 
+  it("says '1 sub', not '1 subs', on a folder holding a single kept sub", async () => {
+    vi.spyOn(client.api, "mergeSuggestions").mockResolvedValue([suggestion({
+      targets: [
+        { safe: "m31_n2", name: "M31 night 2", n_frames_accepted: 200, total_exposure_s: 2000 },
+        { safe: "m31_n1", name: "M31 night 1", n_frames_accepted: 1, total_exposure_s: 10 },
+      ],
+    })]);
+    renderCard();
+    expect(await screen.findByText(/^M31 night 1 · 1 sub · /)).toBeInTheDocument();
+    expect(screen.getByText(/^M31 night 2 · 200 subs · /)).toBeInTheDocument();
+    expect(screen.queryByText(/1 subs/)).toBeNull();
+  });
+
   it("says the pictures came too — the fine print promises nothing is deleted", async () => {
     vi.spyOn(client.api, "mergeSuggestions").mockResolvedValue([suggestion()]);
     vi.spyOn(client.api, "mergeTargets").mockResolvedValue(

@@ -107,7 +107,7 @@ describe("Gallery batch apply", () => {
 
     renderGallery();
 
-    await waitFor(() => expect(screen.getByText("1 frames")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("1 frame")).toBeInTheDocument());
     // The honest thin-stack cue (warning triangle) rides the frame-count badge.
     expect(document.querySelector(".tabler-icon-alert-triangle")).not.toBeNull();
   });
