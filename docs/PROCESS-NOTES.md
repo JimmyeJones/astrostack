@@ -1,5 +1,9 @@
 # Process notes & QA sweep records
 
+## 2026-11-10 (Builder, branch `claude/fervent-allen-dh3hxr`) — no app change; dogfood `--mosaic --dithered --closing --editor` CLEAN.
+
+Suite 8681 passed / 7 skipped on `337900cb` (xdist `-n 4`, BLAS capped, 16m00s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; FOCUS says nothing ungated). Dogfood `--mosaic --dithered --closing --editor`, chosen because `--dithered` and `--closing` had not run alongside `--mosaic` before: exit 0, nothing overflowing, no console errors. Mosaic: Auto trim 7.9 %; panel map, `grain_uneven` and seams notes agree on the thin top-right panel (3 subs vs 6, ~30 s behind). Dithered: canvas 1212×784 from 78 subs, Auto trim 30.7 % against the recorded 30.3 % apron, panel map silent by this shape's documented design. Closing: *Shoot these before they're gone*, *Plan my week* and its closing line name the same target and the same night. Read as one paragraph, the dithered target's readiness goal (14.2 h, "about 6 fields of sky") looked like a move from the 11.5 h quoted in v0.493.1's entry; checked against the 2×2 on the same pass (~7 h over ~3 fields) it is the same ~2.4 h a field, so not a finding. All three editor drives (field, mosaic, dithered) re-render all 21 ops, Undo/Redo apply, taste chips behave (10 live, 2 at-limit). Standing non-findings only (no ASTAP here; the single-field 3×3/18 h clause is the gated LEAD; `[phone] /life-list [Still to shoot]` 14,513 px by design).
+
 ## 2026-11-10 (Scout, branch `claude/exciting-wozniak-yw3dcx`) — QA rotation sweep (2), new angle — the `mosaic_panel_hints` diagnostic's own per-panel bar on S30-shaped mosaics: one bug, Scout-fixed (v0.506.10). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated, so nothing owed.
