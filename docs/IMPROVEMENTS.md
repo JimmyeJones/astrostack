@@ -143,6 +143,22 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   is a dataset root with `snapdir=visible`, two snapshots of 8 subs (`M 42_sub`, `NGC 7000_mosaic_sub`) plan and scan
   as one **`.zfs`** target of 16 — both objects, every sub once per snapshot, growing each day; `incoming/` unchanged.
 
+- **🟡 (Scout 2026-11-10, QA rotation sweep (4)) — two overlapping `GET /api/targets/{safe}/deepening-reel` requests
+  each rebuild the reel, and a reader can be served a half-written file as HTTP 200.** *(Pillar: trust /
+  user-friendliness — PRIORITY 3; size **S**; severity moderate-low — a "Download clip" or "Share clip" that saves a
+  broken file, and duplicate full renders of every master on a NAS with an OOM history; nothing on disk is lost.
+  Confidence: **reproduced** through the real route.)* `_build_or_get_deepening_reel` (`webapp/routers/stack.py`)
+  has no single-flight guard: while one request renders, the signature file is still stale, so every request that
+  arrives meanwhile unlinks the reel and renders again; `write_deepening_reel` (`seestack/render/deepening.py`) then
+  PIL-saves **straight onto the served path**, so a concurrent cache-hit reader can stream a file another request is
+  truncating. The card makes the overlap ordinary: **Play** mounts `<Image src>` (the slow first build — every master
+  is loaded, minutes on a mosaic) and at once shows **Download clip** / **Share clip**, which GET the same URL.
+  Scratch repro (`client` + `solved_library`, two runs, render slowed 0.3 s, 24 GETs 40 ms apart): **9 renders for 24
+  requests**, and on one of three runs **3 responses were 200 with a body PIL cannot open**. **Fix:** a per-reel
+  lock (keyed on the sig path) around check-and-build so a second caller waits and then takes the cache hit, and
+  write the animation to a sibling temp name and `os.replace` it in (sig file after). Regression test: the same
+  threaded repro asserts one render and every body decodes.
+
 - **🟡 (Builder 2026-10-30, the ⭐ 2026-10-28 entry's part (4)) — the "darker ring just inside" the ragged border is
   made by the stacker's per-frame sky flatten: on a vignetted sub, `Background2D` leaves a dark rim along every
   sub's own edge, and the canvas border is where only sub edges land.** *(Pillar: image quality / trust —
@@ -3176,7 +3192,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
-- ✅ v0.506.12 **"1 frame", "1 sub", "1 target": the thin-stack badge, the Point-here-tonight card, the merge chip and the out-of-date badge's label stop saying "1 frames"/"1 subs"/"1 targets"** (`FrameCountBadge`, `ContinueTonightCard`, `MergeSuggestionsCard`, `OutdatedTargetsBadge`). Full entry in [`SHIPPED.md`](SHIPPED.md).
+- ✅ v0.506.13 **"1 frame", "1 sub", "1 target": the thin-stack badge, the Point-here-tonight card, the merge chip and the out-of-date badge's label stop saying "1 frames"/"1 subs"/"1 targets"** (`FrameCountBadge`, `ContinueTonightCard`, `MergeSuggestionsCard`, `OutdatedTargetsBadge`). Full entry in [`SHIPPED.md`](SHIPPED.md).
+- ✅ v0.506.12 **The target thumbnail (`/api/targets/{safe}/thumbnail` — Library card, Life list, Wishlist, year card) sends `Cache-Control: no-cache`, so a new stack or a pinned cover shows at once instead of after days of heuristic browser caching** (`routers/targets.target_thumbnail`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.11 **The first-run "Your first image" card says "you're here" instead of linking a step to the page it already sits on (empty Library / Gallery)** (`firstImageSteps.stepIsHere`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.10 **Diagnostic `mosaic_panel_hints` v2: a per-panel hint with an ordinary go-to offset reads `per_panel`, not `mixed`, and the offset is no longer counted as a missing panel** (`seestack.diag.mosaic_hints.measure_target`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.9 **Diagnostic `sky_falloff` v2 takes the edge/centre slope only between two subs of the same target — v1's pooled fit read each target's central nebula as vignetting (a vignette-free synthetic library read 0.83–0.90) and could have confirmed the dark-ring entry falsely** (`seestack.diag.sky_falloff._pair_slope`). Full entry in [`SHIPPED.md`](SHIPPED.md).
@@ -4579,5 +4596,3 @@ _Newest first. One line each: what + commit/PR. Entries that had grown to paragr
 - **Editable notes/label on History cards** — the long-standing `notes` column
 
 - **Mono single-frame edge test** — verified the mono stack path on a
-
-- **Low-frame sigma-clip caution** — the Stack form now shows an inline caution

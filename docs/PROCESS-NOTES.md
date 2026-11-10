@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-11-10 (Builder, branch `claude/focused-noether-rbfy5l`) — v0.506.12: "1 frames" and three sibling plurals; dogfood `--mosaic --dithered --big --closing --editor` otherwise CLEAN.
+## 2026-11-10 (Builder, branch `claude/focused-noether-rbfy5l`) — v0.506.13: "1 frames" and three sibling plurals; dogfood `--mosaic --dithered --big --closing --editor` otherwise CLEAN.
 
 * **Finding:** read off code while the dogfood ran, not off a screenshot — the sample stacks are never one frame, so
   no pass could photograph it. `FrameCountBadge` said "1 frames" in exactly its orange single-frame state, and a
@@ -12,6 +12,55 @@
 * **Dogfood:** numbers match the last records (trim 7.9 % / 30.7 % vs 30.3 % apron; scale diff CLEAN; editor
   drives clean on all three canvases; no overflow, no console errors).
 
+## 2026-11-10 (Scout, branch `claude/optimistic-cannon-cw2u6h`) — QA rotation sweep (4), new angle — overlapping requests on a GET that builds and caches a file: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8681 passed / 7 skipped on `1a67502c` (xdist `-n 4`, BLAS capped, 16m27s). No open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since
+  2026-10-12, all owner-gated — nothing owed. No `Diagnostic result:` issue yet. `agent-setup.sh` again spent
+  ~25 min in `pip install` (it finished on its own this time). **Dogfood `--mosaic`:** CLEAN (EXIT 0, nothing
+  overflowing, no console errors, Auto trim 7.9 %).
+- **Sweep (4), angle not run before** (grep `concurren`, `lost update`, `single-flight`: only the upload create-new
+  race and the settings lock). Two first reads came up clean: `/api/diagnostics`'s payload against the public-repo
+  rule (`check_result_is_safe` on every result, error recorded as the exception's class only, `filter_card._token`
+  refuses 4+ digit runs) and the JSON stores written by mutating routes (config under `RLock`, calibration
+  registry under `_REGISTRY_LOCK`, `noise_delta_cache` locked; `atomicio`'s fixed temp name is only safe *because*
+  of those locks — worth knowing before a new caller uses it unlocked). The angle that found something: **GETs that
+  build a file on a cache miss and write it in place** — the deepening reel, the sky-map PNG, the sky-coverage JSON.
+  The reel is the heavy one (loads every master) and the card fires overlapping GETs by design (Play's `<Image>`
+  plus Download/Share on the same URL). Threaded repro through the real route: 24 GETs 40 ms apart, render slowed
+  0.3 s → 9 renders, and on one run of three, 3 bodies were 200 but undecodable. Filed 🟡 reproduced in Bugs with
+  the fix (per-reel lock + temp-then-`os.replace`). Not filed: the sky-map / sky-coverage caches have the same
+  in-place write but are cheap, rebuilt by fingerprint, and a torn JSON read falls back to a recompute — a Builder
+  fixing the reel can give them the same temp-then-replace in passing.
+- **Collision note:** `claude/optimistic-cannon-i30qi1` ran sweep (4) at the same time (a different angle, cache
+  headers; merged as v0.506.12 / #1427 while this run's suite ran). The two angles do not overlap; both records kept.
+- **Rotation: (4) done → next sweep is (1)** (preview↔export parity at mosaic scale).
+
+## 2026-11-10 (Scout, branch `claude/optimistic-cannon-i30qi1`) — QA rotation sweep (4), new angle — every image-returning GET route's cache headers against whether its URL changes when its picture does: one bug, Scout-fixed (v0.506.12). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** No open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since
+  2026-10-12, all owner-gated — nothing owed. No `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (EXIT 0,
+  nothing overflowing, no console errors, Auto trim 7.9 %). **Setup trap:** `agent-setup.sh`'s `pip install
+  .[dev,web,gui]` sat ~14 min on the 117 MB `pyside6_webengine` wheel at near-zero CPU (it looks hung; `-v` shows the
+  download); killed and installed the documented `.[dev,web]` fallback, which finished in ~2 min, and ran the Qt-skip
+  suite. Suite (Qt-skip, with the fix): 8672 passed / 8 skipped (xdist `-n 4`, BLAS capped, 16m22s).
+- **Sweep (4), new angle** (grep `Cache-Control`/`heuristic` in this file: 0). Earlier (4) sweeps read answers, bodies,
+  repeats and what a GET writes; none asked whether a browser is *allowed to keep* an answer that later changes.
+  v0.210.7 fixed that once for the run preview (`stack.py`: `no-cache` on the preview, comment names RFC 9111
+  heuristic freshness) and nobody re-asked it of the other image routes. Listed every `FileResponse`/image
+  `Response` in `webapp/routers/` without a `headers=`, then asked each whether its URL is versioned:
+  - **`GET /api/targets/{safe}/thumbnail` — the bug.** One bare URL embedded by the Library card
+    (`api.targetThumbnailUrl`), Life list, Wishlist and the stats/year cards; it resolves through
+    `current_picture_path` (cover → stamped newest → newest readable), so a new stack, a cover pin or a merge's pin
+    changes its pixels. It sent only `ETag`/`Last-Modified`, so a browser may serve the old picture for ~10 % of the
+    file's age (days on an old stack) without asking. Reproduced through the real client (cover pin: different
+    pixels at the same URL, no `cache-control` either time). Fixed: `no-cache`; +1 test, fail-before by stash revert.
+  - **Hold:** Moon/Sun `preview.png` (frontend cache-buster `videoPreviewSrc`); per-sub thumbnails (`frames.py`, versioned `ETag` +
+    `max-age`); the share posters/montage (generated `Response`s with no `Last-Modified` and `attachment`, so no
+    heuristic freshness); editor/gallery downloads (`filename=` attachments).
+  - **Lead, not filed (not reproduced):** Moon/Sun `quicklook.png` is a bare `FileResponse` at a fixed URL that a
+    re-check rewrites in place; it 404s when the check no longer matches the clip, but a re-check that *does* match
+    could be served from cache. Not checked whether its embed carries a buster — the next (4) sweep can.
+- **Rotation: (4) done → next sweep is (1).**
 ## 2026-11-10 (Builder, branch `claude/focused-noether-zzbnof`) — v0.506.11: first-run card self-links; dogfood `--empty` otherwise CLEAN.
 
 * **Environment:** `source scripts/agent-setup.sh` hung ~25 min inside `pip install -e .[dev,web,gui]` (two open
