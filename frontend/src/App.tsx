@@ -124,7 +124,7 @@ function OutdatedTargetsBadge() {
   const outdated = data?.outdated ?? 0;
   if (outdated <= 0) return null;
   return (
-    <Badge color="grape" variant="light" size="sm" aria-label={`${outdated} targets out of date`}>
+    <Badge color="grape" variant="light" size="sm" aria-label={`${outdated} ${outdated === 1 ? "target" : "targets"} out of date`}>
       {outdated}
     </Badge>
   );

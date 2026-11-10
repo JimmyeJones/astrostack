@@ -121,6 +121,20 @@ describe("ContinueTonightCard", () => {
     expect(screen.getByText("M81")).toBeInTheDocument();
   });
 
+  it("says '1 sub', not '1 subs', on a target with a single kept sub", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(
+      plan([owned({ name: "M31", frames_accepted: 1, total_exposure_s: 10 })]),
+    );
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight());
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByText("Point here tonight")).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/^1 sub · /)).toBeInTheDocument();
+    expect(screen.queryByText(/1 subs/)).toBeNull();
+  });
+
   it("self-hides when no location / no started target is up tonight", async () => {
     vi.spyOn(client.api, "getTonight").mockResolvedValue(
       plan([owned({ target_safe: "m31", score: 0 })]), // never clears the floor

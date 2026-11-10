@@ -41,7 +41,9 @@ export function FrameCountBadge({
   variant?: string;
 }) {
   const warn = thinStackWarning(nFramesUsed, fieldFulls);
-  const label = `${nFramesUsed} frames`;
+  // "1 frame", not "1 frames": a one-frame stack is exactly the case the orange
+  // cue below warns about, so it is the one count this badge must word right.
+  const label = `${nFramesUsed} ${nFramesUsed === 1 ? "frame" : "frames"}`;
   if (!warn) {
     return (
       <Badge variant={variant} color={color}>
