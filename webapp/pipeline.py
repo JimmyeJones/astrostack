@@ -3543,6 +3543,7 @@ def submit_pictures_archive(settings: Settings, jm: JobManager) -> Job:
             "n_pictures": report.n_pictures,
             "n_full_res": report.n_full_res,
             "n_preview_only": report.n_preview_only,
+            "n_reduced": report.n_reduced,
             "size_bytes": report.size_bytes,
             "skipped": report.skipped,
         }

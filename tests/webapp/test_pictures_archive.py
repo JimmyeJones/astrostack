@@ -403,3 +403,45 @@ def test_archive_trims_an_unedited_mosaic_exactly_like_its_download(
     single = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
     assert single.status_code == 200
     assert from_archive == single.content
+
+
+def test_a_picture_shrunk_to_the_cap_is_named_not_counted_as_full_size(
+    client, solved_library,
+):
+    """A canvas wider than the Full-res PNG's long-edge cap
+    (``_FULL_RES_PNG_MAX_LONG_EDGE``, 8000 px — a drizzled multi-panel mosaic
+    reaches it) goes into the archive shrunk to the cap. The card promises
+    "the same pictures again at their true size", and the archive's own rule is
+    that it never mixes sizes without saying so — so that picture is counted as
+    reduced, named in a note inside the archive, and the one at true size is
+    not."""
+    from webapp.routers.stack import _FULL_RES_PNG_MAX_LONG_EDGE as cap
+
+    safes = _safes(client)
+    big_w, big_h = cap + 400, 240
+    _add_run(solved_library, safes[0], w=big_w, h=big_h)
+    _add_run(solved_library, safes[1], w=1400, h=1100)
+
+    built = _build(client)
+    result = built["job"]["result"]
+    zf = _archive(client, built["job_id"])
+    with Image.open(io.BytesIO(zf.read(f"{safes[0]}.png"))) as im:
+        assert max(im.size) == cap  # the cap really applied
+    with Image.open(io.BytesIO(zf.read(f"{safes[1]}.png"))) as im:
+        assert im.size == (1400, 1100)
+
+    assert result["n_reduced"] == 1
+    assert result["n_full_res"] == 1
+    note = zf.read("_reduced_size.txt").decode()
+    assert f"{safes[0]}.png" in note
+    assert f"{safes[1]}.png" not in note
+    assert f"{big_w} × {big_h}" in note and str(cap) in note
+
+
+def test_no_reduced_note_when_every_picture_is_true_size(client, solved_library):
+    safes = _safes(client)
+    _add_run(solved_library, safes[0], w=1400, h=1100)
+
+    built = _build(client)
+    assert built["job"]["result"]["n_reduced"] == 0
+    assert "_reduced_size.txt" not in _archive(client, built["job_id"]).namelist()
