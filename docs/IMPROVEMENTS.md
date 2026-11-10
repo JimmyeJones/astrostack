@@ -168,9 +168,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   runs this, so measure it on stars/nebula/gradient frames before shipping, and keep it off where the fit is
   unsure. **Gate:** the S30's real fall-off — the observer can answer as a shape (median sky of the outer 5 % vs
   the centre 20 % across a few hundred of his raws, no headers). Under ~3 % it is not the owner's ring.
-  **⏸ Waiting on diagnostic `sky_falloff` v1** (v0.506.7, `seestack/diag/sky_falloff.py`; the observer files it
-  as `Diagnostic result: sky_falloff v1`). Read `edge_over_centre_slope` — the pedestal-free fall-off; above ~0.97
-  this is not his ring.
+  **⏸ Waiting on diagnostic `sky_falloff` v2** (v0.506.9 replaced v0.506.7's v1 before it reached `stable`: v1's
+  pooled fit read a central nebula as vignetting; `seestack/diag/sky_falloff.py`; the observer files it as
+  `Diagnostic result: sky_falloff v2`). Read `edge_over_centre_slope` — the pedestal-free, within-target
+  fall-off; above ~0.97 this is not his ring.
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
@@ -192,7 +193,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   un-located subs by `pointing_groups` over hints and (a) let the verdict/health note speak when any hint-panel
   has ≥ `_UNSOLVED_MIN_ACCEPTED` tried and none located, (b) gate the rescue per hint-panel. Don't lower the
   whole-target thresholds instead — that makes a single field cry wolf.
-  **⏸ Waiting on diagnostic `mosaic_panel_hints` v2** (v0.506.9, `seestack/diag/mosaic_hints.py`; the observer
+  **⏸ Waiting on diagnostic `mosaic_panel_hints` v2** (v0.506.10, `seestack/diag/mosaic_hints.py`; the observer
   files it as `Diagnostic result: mosaic_panel_hints v2`). Its `verdicts` answer the gate (`per_panel` vs
   `mosaic_centre`), and `mosaics_with_an_unlocated_only_hint_group` is the bug's occurrence on his library.
 
@@ -3175,7 +3176,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
-- ✅ v0.506.9 **Diagnostic `mosaic_panel_hints` v2: a per-panel hint with an ordinary go-to offset reads `per_panel`, not `mixed`, and the offset is no longer counted as a missing panel** (`seestack.diag.mosaic_hints.measure_target`). Full entry in [`SHIPPED.md`](SHIPPED.md).
+- ✅ v0.506.10 **Diagnostic `mosaic_panel_hints` v2: a per-panel hint with an ordinary go-to offset reads `per_panel`, not `mixed`, and the offset is no longer counted as a missing panel** (`seestack.diag.mosaic_hints.measure_target`). Full entry in [`SHIPPED.md`](SHIPPED.md).
+- ✅ v0.506.9 **Diagnostic `sky_falloff` v2 takes the edge/centre slope only between two subs of the same target — v1's pooled fit read each target's central nebula as vignetting (a vignette-free synthetic library read 0.83–0.90) and could have confirmed the dark-ring entry falsely** (`seestack.diag.sky_falloff._pair_slope`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.8 **Fifth library diagnostic, `twin_target_overcount` v1: how much subs registered in two targets (#878) inflate the Dashboard's frame count and integration hours today — the gate on the `/api/stats` headline Bugs LEAD** (`seestack.diag.twin_overcount`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.7 **Fourth library diagnostic, `sky_falloff` v1: how much darker the sky is at the edge and corners of a raw S30 sub than at its centre, with the camera's pedestal taken out — the gate on the dark-ring Bugs entry** (`seestack.diag.sky_falloff`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.6 **Third library diagnostic, `mosaic_panel_hints` v1: does the Seestar write each mosaic panel's own pointing into its subs, or the mosaic's centre — the gate on the un-located-panel Bugs entry** (`seestack.diag.mosaic_hints`). Full entry in [`SHIPPED.md`](SHIPPED.md).

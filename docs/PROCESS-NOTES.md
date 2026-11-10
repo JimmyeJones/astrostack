@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-11-10 (Scout, branch `claude/exciting-wozniak-yw3dcx`) — QA rotation sweep (2), new angle — the `mosaic_panel_hints` diagnostic's own per-panel bar on S30-shaped mosaics: one bug, Scout-fixed (v0.506.9). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+## 2026-11-10 (Scout, branch `claude/exciting-wozniak-yw3dcx`) — QA rotation sweep (2), new angle — the `mosaic_panel_hints` diagnostic's own per-panel bar on S30-shaped mosaics: one bug, Scout-fixed (v0.506.10). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated, so nothing owed.
   No `Diagnostic result:` issue yet. No open PRs at start. **Dogfood `--mosaic`:** CLEAN (EXIT 0, nothing
@@ -23,6 +23,22 @@
 - **Still unswept for (2):** `sky_falloff` v1 on a mosaic sub (it measures one raw frame, so it is per field by
   construction; worth one read once its result lands) and `twin_target_overcount` (whole-library by design).
 - **Rotation: (2) done → next sweep is (3).**
+## 2026-11-10 (Builder, branch `claude/fervent-allen-tvk8gv`) — v0.506.9: diagnostic `sky_falloff` v2.
+
+`main` CI green at `a06fb07b`; the local baseline was stopped at ~20 % with no failure marks (it ran ~4× slower
+than the recorded 13 min, likely CPU contention) and the suite was run once, in full, with the change: 8676 passed /
+7 skipped in 17m33s. No open PRs; inbox the same four owner-gated issues, no `Diagnostic result:` yet.
+**What was done instead of a seventh clean dogfood:** read the three not-yet-on-`stable` diagnostics, which each run
+**once**, unattended, on the owner's library — a wrong instrument spends a gate. `twin_target_overcount` v1 and
+`mosaic_panel_hints` v1 read sound (rules match `_refresh_target_stats_locked`; the hint verdicts hold for a 3×3
+with mosaic-centre hints because the median sub is off-centre). `sky_falloff` v1 did not: its pooled edge-vs-centre
+fit carries each target's central object as "centre sky". Measured on synthetic frames, the bias is invisible when
+a third of targets carry an object (0.9998) and large when all do (0.83–0.90 with no vignette) — the owner's
+library is nebula-heavy, so it was a live risk of falsely confirming the dark-ring entry. Fixed with within-target
+pairs, v1 → v2, before v1 reached `stable`. **Lesson:** a cross-target regression in a diagnostic must ask what
+each target adds to *x* that it does not add to *y*; a synthetic test with no objects in frame cannot see it.
+Worktree tip: drafting in `git worktree add --detach <scratch> origin/main` while the suite reads the main checkout
+worked cleanly; `python -m pytest` from the worktree imports the worktree's package despite the editable install.
 
 ## 2026-11-10 (Builder, branch `claude/fervent-allen-pbc70q`) — v0.506.8: diagnostic `twin_target_overcount` v1.
 

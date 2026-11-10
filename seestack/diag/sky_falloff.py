@@ -27,8 +27,22 @@ so a raw ratio ``edge / centre`` understates the fall-off. The pedestal is
 removed without knowing it: across subs shot under different skies (Moon,
 twilight, haze), ``edge = p + s·v_edge`` and ``centre = p + s·v_centre``, so the
 **slope** of edge against centre over many subs is ``v_edge / v_centre`` whatever
-``p`` is. That slope (a Theil–Sen fit, robust to a few odd subs) is the
-headline number; the intercept gives the pedestal it implies.
+``p`` is.
+
+**v2: the slope is taken only between two subs of the same target.** A
+single-field target puts its nebula or galaxy in the middle of the frame, so
+the centre box carries the object's light as well as the sky: ``centre = p +
+s·v_centre + T``, with ``T`` different on every target. Fitting one line through
+subs of *all* targets (v1) reads that object light as extra centre sky — on a
+library whose targets all have a central object, a sensor with **no**
+vignetting read an edge slope of ~0.90, a "10 % darker edge" that is not there,
+which would have confirmed the dark-ring entry's mechanism falsely. Between two
+subs of one target ``T`` (and the pedestal) cancel, so the headline is the
+median of the within-target pairwise slopes (Theil–Sen restricted to pairs
+that share a target), using pairs whose centre sky differs by at least
+:data:`MIN_PAIR_SKY_STEP`. v1's pooled fit is still reported beside it, with
+the pedestal its intercept implies: the two agreeing says the objects did not
+matter; the pooled one sitting lower says they did.
 
 **Privacy.** Numbers only: per-sub ratios, aggregated into percentiles. No
 names, paths, header values or dates.
@@ -49,6 +63,11 @@ RING_EDGES = (0.0, 0.2, 0.4, 0.6, 0.8, 0.9, 1.0)
 #: spread (p90/p10) below this ratio, it is reported as ``None``.
 MIN_SUBS_FOR_SLOPE = 20
 MIN_SKY_SPREAD = 1.2
+#: A within-target pair counts only when its two centre skies differ by this
+#: share of their mean — closer than that, the pair's slope is mostly noise.
+MIN_PAIR_SKY_STEP = 0.05
+#: Fewer usable within-target pairs than this and the slope is ``None``.
+MIN_PAIRS = 20
 
 
 def _spread(items: list[Any], k: int) -> list[Any]:
@@ -117,8 +136,8 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
     """Measure the sampled subs' centre-to-edge sky. Reads raws, writes nothing."""
     from seestack.io.fits_loader import load_seestar_raw
 
-    plan: list[Any] = []
-    for entry in library.list_targets():
+    plan: list[tuple[int, Any]] = []
+    for t, entry in enumerate(library.list_targets()):
         try:
             proj = library.open_target(entry.safe_name)
         except Exception:  # noqa: BLE001 — a broken target is skipped
@@ -127,13 +146,14 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
             refs = list(iter_sub_refs(proj, accepted_only=True))
         finally:
             proj.close()
-        plan.extend(_spread(refs, SUBS_PER_TARGET))
+        plan.extend((t, ref) for ref in _spread(refs, SUBS_PER_TARGET))
     if len(plan) > MAX_SUBS:
         plan = _spread(plan, MAX_SUBS)
 
     measured: list[dict[str, Any]] = []
+    groups: list[int] = []
     unreadable = 0
-    for i, ref in enumerate(plan):
+    for i, (t, ref) in enumerate(plan):
         if should_stop is not None and should_stop():
             raise DiagnosticStopped("stopped")
         if progress is not None:
@@ -150,40 +170,54 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
             unreadable += 1
         else:
             measured.append(m)
+            groups.append(t)
 
+    return {"subs_sampled": len(plan), "subs_unreadable": unreadable,
+            **summarise(measured, groups)}
+
+
+def summarise(measured: list[dict[str, Any]], groups: list[int]) -> dict[str, Any]:
+    """The published numbers for ``measured`` frames (:func:`measure_frame`
+    results), ``groups[i]`` naming the target frame ``i`` came from."""
     centre = [m["centre"] for m in measured]
 
     def ratios(xs: list[float]) -> dict[str, float] | None:
         return _pct([x / c for x, c in zip(xs, centre, strict=True)])
 
+    def within(key: str) -> dict[str, Any] | None:
+        return _pair_slope(centre, [m[key] for m in measured], groups)
+
     ring_cols = [[m["rings"][j] for m in measured] for j in range(len(RING_EDGES) - 1)]
-    edge_fit = _slope(centre, [m["edge"] for m in measured])
-    corner_fit = _slope(centre, [m["corner"] for m in measured])
     return {
-        "subs_sampled": len(plan),
         "subs_measured": len(measured),
-        "subs_unreadable": unreadable,
+        "targets_measured": len(set(groups)),
         "centre_sky_p90_over_p10": _sky_spread(centre),
-        "edge_over_centre_slope": edge_fit,
-        "corner_over_centre_slope": corner_fit,
+        "edge_over_centre_slope": within("edge"),
+        "corner_over_centre_slope": within("corner"),
         "ring_edges": list(RING_EDGES),
-        "rings_over_centre_slope": [_slope(centre, col) for col in ring_cols],
+        "rings_over_centre_slope": [_pair_slope(centre, col, groups) for col in ring_cols],
+        "edge_over_centre_pooled": _slope(centre, [m["edge"] for m in measured]),
+        "corner_over_centre_pooled": _slope(centre, [m["corner"] for m in measured]),
         "edge_over_centre_raw": ratios([m["edge"] for m in measured]),
         "corner_over_centre_raw": ratios([m["corner"] for m in measured]),
         "side_spread": _pct([m["side_spread"] for m in measured]),
         "how_to_read": (
             "edge_over_centre_slope is the headline: how bright the sky is in the band "
             "within 5 % of each side, as a share of the frame centre's, with the "
-            "camera's un-vignetted pedestal removed (the slope of edge against centre "
-            "sky over subs shot under different skies; 'low'/'high' are its 95 % "
-            "range). 1.0 means no fall-off; 0.80 means the edge sky is 20 % darker. "
-            "corner uses the four 10 % boxes, rings run from centre (0) to corner (1). "
-            "A slope is null when fewer than 20 subs were measured or the skies were "
-            "too alike (centre_sky_p90_over_p10 under 1.2) to separate the pedestal. "
-            "The 'raw' ratios include the pedestal and understate the fall-off. "
-            "side_spread is how unequal the four sides were (a sky gradient). An "
-            "edge slope above about 0.97 means the S30 barely vignettes and the "
-            "dark-ring entry's mechanism is not the owner's ring."
+            "camera's un-vignetted pedestal removed. It is the median slope of edge "
+            "against centre sky between two subs of the SAME target shot under "
+            "different skies, so a nebula or galaxy in the middle of the frame cancels "
+            "('low'/'high' are its ~95 % range; 'pairs' the pairs used). 1.0 means no "
+            "fall-off; 0.80 means the edge sky is 20 % darker. corner uses the four "
+            "10 % boxes, rings run from centre (0) to corner (1). A slope is null when "
+            "fewer than 20 within-target pairs had centre skies 5 % apart. The "
+            "'pooled' slopes are v1's single line through every target's subs, with "
+            "the pedestal its intercept implies; a pooled slope well below the "
+            "headline means the targets' own central light was biasing it. The 'raw' "
+            "ratios include the pedestal and understate the fall-off. side_spread is "
+            "how unequal the four sides were (a sky gradient). An edge slope above "
+            "about 0.97 means the S30 barely vignettes and the dark-ring entry's "
+            "mechanism is not the owner's ring."
         ),
     }
 
@@ -218,6 +252,43 @@ def _slope(x: list[float], y: list[float]) -> dict[str, float] | None:
     return out
 
 
+def _pair_slope(x: list[float], y: list[float],
+                groups: list[int]) -> dict[str, Any] | None:
+    """Theil–Sen slope of ``y`` on ``x`` over pairs **within one group** only.
+
+    The median of the pairwise slopes, taking only pairs that share a group
+    (a target) and whose ``x`` differ by at least :data:`MIN_PAIR_SKY_STEP` of
+    their mean. Anything a target adds to both of its subs alike — its own
+    object's light, the pedestal — cancels in every pair. ``low``/``high`` are
+    the distribution-free ~95 % interval of that median (rank n/2 ± 0.98·√n);
+    pairs sharing a sub are not independent, so read it as a guide."""
+    by_group: dict[int, list[int]] = {}
+    for i, g in enumerate(groups):
+        if np.isfinite(x[i]) and np.isfinite(y[i]):
+            by_group.setdefault(g, []).append(i)
+    slopes: list[float] = []
+    used: set[int] = set()
+    for g, idx in by_group.items():
+        for a in range(len(idx)):
+            for b in range(a + 1, len(idx)):
+                i, j = idx[a], idx[b]
+                dx = x[j] - x[i]
+                mean = 0.5 * (x[i] + x[j])
+                if mean <= 0 or abs(dx) < MIN_PAIR_SKY_STEP * mean:
+                    continue
+                slopes.append((y[j] - y[i]) / dx)
+                used.add(g)
+    n = len(slopes)
+    if n < MIN_PAIRS:
+        return None
+    s = np.sort(np.asarray(slopes, dtype=np.float64))
+    k = 0.98 * np.sqrt(n)
+    lo = s[max(0, int(np.floor(n / 2 - k)))]
+    hi = s[min(n - 1, int(np.ceil(n / 2 + k)))]
+    return {"slope": round(float(np.median(s)), 4), "low": round(float(lo), 4),
+            "high": round(float(hi), 4), "pairs": n, "targets": len(used)}
+
+
 def ready(library) -> bool:  # noqa: ANN001
     """Any target with an accepted sub."""
     return any((e.n_frames_accepted or 0) > 0 for e in library.list_targets())
@@ -225,7 +296,7 @@ def ready(library) -> bool:  # noqa: ANN001
 
 DIAGNOSTIC = Diagnostic(
     name="sky_falloff",
-    version=1,
+    version=2,
     question=("How much darker is the sky at the edge and corners of a raw S30 sub than "
               "at its centre? (gate on the dark-ring Bugs entry, Builder 2026-10-30)"),
     run=run,
