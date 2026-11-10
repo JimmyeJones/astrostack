@@ -44,6 +44,19 @@ that share a target), using pairs whose centre sky differs by at least
 the pedestal its intercept implies: the two agreeing says the objects did not
 matter; the pooled one sitting lower says they did.
 
+**v3: on a mosaic, a target's subs are sampled from one panel.** v2's "same
+target" assumed one field. A mosaic target is several fields, each with its own
+part of the object in its centre box and its edge band, and the subs v2 spread
+through a mosaic's history land on different panels — so a pair's centre skies
+differ *because* of the object, which is exactly the pair :data:`MIN_PAIR_SKY_STEP`
+admits, and its slope is the object's, not the sky's. Measured on synthetic
+libraries with no vignetting at all (centre/edge noise 4 ADU): a third of the
+targets mosaics read 0.97, half 0.93–0.96, two thirds 0.81–0.91. v3 clusters a
+target's plate-solved centres into panels (:data:`PANEL_LINK_DIST_DEG`, the app's
+own panel scale) and, when there are two or more — or the folder is named a
+mosaic — samples only the panel with the most subs. A mosaic-named target with
+no located panel is skipped: nothing says which panel an un-solved sub is on.
+
 **Privacy.** Numbers only: per-sub ratios, aggregated into percentiles. No
 names, paths, header values or dates.
 """
@@ -53,7 +66,7 @@ from typing import Any
 
 import numpy as np
 
-from seestack.diag import Diagnostic, DiagnosticStopped, iter_sub_refs, sub_path
+from seestack.diag import Diagnostic, DiagnosticStopped, SubRef, sub_path
 
 SUBS_PER_TARGET = 4
 MAX_SUBS = 300
@@ -68,6 +81,10 @@ MIN_SKY_SPREAD = 1.2
 MIN_PAIR_SKY_STEP = 0.05
 #: Fewer usable within-target pairs than this and the slope is ``None``.
 MIN_PAIRS = 20
+#: A cluster of solved centres needs this many subs to count as a panel.
+MIN_PANEL_SUBS = 5
+#: What :func:`run` reads per sub: :class:`SubRef` 's columns, then the solved centre.
+_COLUMNS = (*SubRef._fields, "ra_center_deg", "dec_center_deg")
 
 
 def _spread(items: list[Any], k: int) -> list[Any]:
@@ -135,17 +152,27 @@ def _pct(values: list[float]) -> dict[str, float] | None:
 def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa: ANN001
     """Measure the sampled subs' centre-to-edge sky. Reads raws, writes nothing."""
     from seestack.io.fits_loader import load_seestar_raw
+    from seestack.io.scanner import is_mosaic_target_name
 
     plan: list[tuple[int, Any]] = []
+    mosaics_one_panel = mosaics_skipped = 0
     for t, entry in enumerate(library.list_targets()):
         try:
             proj = library.open_target(entry.safe_name)
         except Exception:  # noqa: BLE001 — a broken target is skipped
             continue
         try:
-            refs = list(iter_sub_refs(proj, accepted_only=True))
+            rows = list(proj.iter_frame_columns(*_COLUMNS, accepted_only=True))
         finally:
             proj.close()
+        keep = one_panel([(r[-2], r[-1]) for r in rows],
+                         is_mosaic_name=is_mosaic_target_name(entry.name))
+        if keep is None:
+            mosaics_skipped += 1
+            continue
+        if len(keep) < len(rows):
+            mosaics_one_panel += 1
+        refs = [SubRef(*rows[i][:len(SubRef._fields)]) for i in keep]
         plan.extend((t, ref) for ref in _spread(refs, SUBS_PER_TARGET))
     if len(plan) > MAX_SUBS:
         plan = _spread(plan, MAX_SUBS)
@@ -173,7 +200,37 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
             groups.append(t)
 
     return {"subs_sampled": len(plan), "subs_unreadable": unreadable,
+            "mosaics_sampled_on_one_panel": mosaics_one_panel,
+            "mosaics_skipped_no_located_panel": mosaics_skipped,
             **summarise(measured, groups)}
+
+
+def one_panel(centres: list[tuple[Any, Any]], *, is_mosaic_name: bool) -> list[int] | None:
+    """Indices of the subs to sample from one target whose solved centres are
+    ``centres`` (``(None, None)`` when un-solved): all of them on a single field,
+    only the fullest panel's on a mosaic, ``None`` for a mosaic with no located
+    panel. See the module docstring, v3."""
+    import math
+
+    from seestack.stack.pointings import PANEL_LINK_DIST_DEG, _cluster_distinct
+
+    def finite(c: tuple[Any, Any]) -> bool:
+        return (c[0] is not None and c[1] is not None
+                and math.isfinite(float(c[0])) and math.isfinite(float(c[1])))
+
+    radecs = [(float(c[0]), float(c[1])) if finite(c) else (None, None) for c in centres]
+    labels = _cluster_distinct(radecs, PANEL_LINK_DIST_DEG) if radecs else []
+    counts: dict[int, int] = {}
+    for lab in labels:
+        if lab >= 0:
+            counts[lab] = counts.get(lab, 0) + 1
+    panels = {lab: n for lab, n in counts.items() if n >= MIN_PANEL_SUBS}
+    if len(panels) < 2 and not is_mosaic_name:
+        return list(range(len(centres)))
+    if not panels:
+        return None
+    best = max(panels, key=lambda lab: (panels[lab], -lab))
+    return [i for i, lab in enumerate(labels) if lab == best]
 
 
 def summarise(measured: list[dict[str, Any]], groups: list[int]) -> dict[str, Any]:
@@ -210,7 +267,10 @@ def summarise(measured: list[dict[str, Any]], groups: list[int]) -> dict[str, An
             "('low'/'high' are its ~95 % range; 'pairs' the pairs used). 1.0 means no "
             "fall-off; 0.80 means the edge sky is 20 % darker. corner uses the four "
             "10 % boxes, rings run from centre (0) to corner (1). A slope is null when "
-            "fewer than 20 within-target pairs had centre skies 5 % apart. The "
+            "fewer than 20 within-target pairs had centre skies 5 % apart. A mosaic "
+            "is sampled on its fullest panel only (mosaics_sampled_on_one_panel), "
+            "since its panels frame different parts of the object; a mosaic with no "
+            "plate-solved panel is left out (mosaics_skipped_no_located_panel). The "
             "'pooled' slopes are v1's single line through every target's subs, with "
             "the pedestal its intercept implies; a pooled slope well below the "
             "headline means the targets' own central light was biasing it. The 'raw' "
@@ -296,7 +356,7 @@ def ready(library) -> bool:  # noqa: ANN001
 
 DIAGNOSTIC = Diagnostic(
     name="sky_falloff",
-    version=2,
+    version=3,
     question=("How much darker is the sky at the edge and corners of a raw S30 sub than "
               "at its centre? (gate on the dark-ring Bugs entry, Builder 2026-10-30)"),
     run=run,

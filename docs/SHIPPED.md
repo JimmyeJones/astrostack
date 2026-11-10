@@ -1,5 +1,31 @@
 # Shipped — the record
 
+## 2026-11-10 (Scout, branch `claude/optimistic-cannon-fwsbuf`)
+
+### v0.506.15 — diagnostic `sky_falloff` v3 samples a mosaic on one panel
+
+**Why.** QA rotation sweep (2), new angle: the gate number behind the dark-ring Bugs entry, `sky_falloff` v2's
+`edge_over_centre_slope`, is a *whole-target* grouping of something that is really *per-panel*. v2 (v0.506.9) pairs
+two subs only when they share a target, so a target's central object cancels — true for a single field. A mosaic
+target is several fields: each panel frames a different part of the object in its centre box and its edge band, and
+the four subs v2 spread through a mosaic's history land on different panels (the Seestar cycles them). Their centre
+skies then differ *because of the object*, which is exactly what `MIN_PAIR_SKY_STEP` admits, and the pair's slope is
+the object's. Measured with `summarise` on synthetic libraries with **no** vignetting (sky 80–400 ADU, object 0–300
+ADU per panel, 4 ADU measurement noise): a third of the targets mosaics read 0.97 — the threshold — half 0.93–0.96,
+two thirds 0.81–0.91; through `run` with 16 mosaics of 24 targets, 0.70 / 0.81 / 0.90 over three seeds. Read against
+the entry's "above ~0.97 is not his ring", that would have falsely confirmed the dark-ring mechanism on a heavy
+mosaic user's library. v2 was not yet on `stable`.
+
+**What changed.** `run` reads each target's solved centres beside the sub columns and `one_panel` clusters them at
+`PANEL_LINK_DIST_DEG` (the app's panel scale; a panel needs 5 subs). A target with two or more panels, or one named
+`_mosaic`, is sampled on its fullest panel only; a `_mosaic` target with no located panel is skipped (nothing says
+which panel an un-solved sub is on). A single field is sampled exactly as v2 did. Two new counts,
+`mosaics_sampled_on_one_panel` and `mosaics_skipped_no_located_panel`, say how much of the library each rule touched.
+Version 2 → 3, so it runs once more after the owner's next update; read-only and numbers-only as before.
+
+**Tests.** +5 in `tests/test_diag_sky_falloff.py` (a fake library of 8 single fields and 16 2×2 S30 mosaics through
+the real `run`): `test_a_mosaic_panels_object_does_not_read_as_vignetting` ×3 seeds fails before the fix (0.6983,
+0.8104, 0.8961 against 1.0 ± 0.02); a real 10 % vignette still reads 0.90; `one_panel`'s rules.
 ## 2026-11-10 (Scout, branch `claude/optimistic-cannon-55nwei`)
 
 ### v0.506.14 — the full-size pictures archive says which pictures the 8000 px cap shrank

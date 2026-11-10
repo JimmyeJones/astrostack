@@ -184,10 +184,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   runs this, so measure it on stars/nebula/gradient frames before shipping, and keep it off where the fit is
   unsure. **Gate:** the S30's real fall-off — the observer can answer as a shape (median sky of the outer 5 % vs
   the centre 20 % across a few hundred of his raws, no headers). Under ~3 % it is not the owner's ring.
-  **⏸ Waiting on diagnostic `sky_falloff` v2** (v0.506.9 replaced v0.506.7's v1 before it reached `stable`: v1's
-  pooled fit read a central nebula as vignetting; `seestack/diag/sky_falloff.py`; the observer files it as
-  `Diagnostic result: sky_falloff v2`). Read `edge_over_centre_slope` — the pedestal-free, within-target
-  fall-off; above ~0.97 this is not his ring.
+  **⏸ Waiting on diagnostic `sky_falloff` v3** (`seestack/diag/sky_falloff.py`; v2 and v3 fixed v1/v2 before `stable`:
+  a central nebula, then a mosaic's panels, read as vignetting). The observer files `Diagnostic result: sky_falloff
+  v3`; read `edge_over_centre_slope` (pedestal-free, within-panel) — above ~0.97 this is not his ring.
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
@@ -3192,6 +3191,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.15 **Diagnostic `sky_falloff` v3 samples a mosaic target on one panel — v2's within-target pairs crossed panels, so each panel's own part of the object read as vignetting (a vignette-free library two-thirds mosaics read 0.70–0.90)** (`sky_falloff.one_panel`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.14 **The "Full-size versions" pictures archive names a picture the 8000 px Full-res cap shrank (`_reduced_size.txt`, job-result `n_reduced`) instead of counting it as full size** (`picturesarchive.build_full_size_archive`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.13 **"1 frame", "1 sub", "1 target": the thin-stack badge, the Point-here-tonight card, the merge chip and the out-of-date badge's label stop saying "1 frames"/"1 subs"/"1 targets"** (`FrameCountBadge`, `ContinueTonightCard`, `MergeSuggestionsCard`, `OutdatedTargetsBadge`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.12 **The target thumbnail (`/api/targets/{safe}/thumbnail` — Library card, Life list, Wishlist, year card) sends `Cache-Control: no-cache`, so a new stack or a pinned cover shows at once instead of after days of heuristic browser caching** (`routers/targets.target_thumbnail`). Full entry in [`SHIPPED.md`](SHIPPED.md).
