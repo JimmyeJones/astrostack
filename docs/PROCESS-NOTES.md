@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-11-10 (Scout, branch `claude/exciting-wozniak-yw3dcx`) — QA rotation sweep (2), new angle — the `mosaic_panel_hints` diagnostic's own per-panel bar on S30-shaped mosaics: one bug, Scout-fixed (v0.506.9). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated, so nothing owed.
+  No `Diagnostic result:` issue yet. No open PRs at start. **Dogfood `--mosaic`:** CLEAN (EXIT 0, nothing
+  overflowing, no console errors, Auto trim 7.9 %; only the known non-finding, the Dashboard's ASTAP note in a
+  dogfood without ASTAP). The Target page's five notes agree: 4 min of ~7 h, top-right panel 30 s behind a typical
+  1 min, ~75 % of M42 in frame.
+- **Sweep (2).** Per-panel code since the last (2) (`ut5fe4`, 11-06): v0.505.38 (`canvas_too_large`, a message
+  classifier with no threshold of its own; the canvas outlier pass behind it was swept 10-21/10-25) and the
+  v0.506.x diagnostics. `mosaic_panel_hints` v1 is a gate on a Bugs entry, so its verdict is itself a per-panel
+  decision. Ran `measure_target` on a scratch grid: 2×2 and 3×3 S30 layouts (step 1.8° RA × 1.0° Dec), uneven sub
+  counts, three nights each with a per-night go-to offset σ 0 / 0.05 / 0.15 / 0.3° per axis, hints per panel or at
+  the mosaic centre, with and without one panel never located. **v1 failed at σ ≥ 0.15°:** per-panel hints read
+  `mixed`, because its "own panel" bar is `PANEL_LINK_DIST_DEG` (0.25°, a dither). There were 17–25 hint groups for 9
+  panels and 3–15 false missing panels, since un-located *hints* were compared with located *centres*. A 2×2
+  mosaic-centre hint also showed one false missing panel. Fixed in place before v1 reaches `stable`: nearest-panel
+  test, hint-vs-hint orphan count at half the smallest panel step, central test against the panels' unweighted
+  middle. All 32 cases are now right except the count at the 3×3 / σ 0.3° extreme, where the verdict is right but
+  the missing panel merges into a neighbour at the 0.5° link. That is recorded in SHIPPED, not filed: whether a
+  Seestar's hint carries any such offset is exactly what the diagnostic will tell us. 35,880 subs: 1.1 s.
+- **Still unswept for (2):** `sky_falloff` v1 on a mosaic sub (it measures one raw frame, so it is per field by
+  construction; worth one read once its result lands) and `twin_target_overcount` (whole-library by design).
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-11-10 (Builder, branch `claude/fervent-allen-pbc70q`) — v0.506.8: diagnostic `twin_target_overcount` v1.
 
 Baseline 8664 passed / 7 skipped on `0b56d5bb` (xdist `-n 4`, BLAS capped, 13m18s). No open PRs; inbox the same four owner-gated issues, no `Diagnostic result:` yet. Dogfood `--mosaic --deep --no-site --restack --big --editor` CLEAN (an earlier `--empty` in the same command short-circuits every other flag — run it alone). Following the previous run's lesson, grepped Bugs for "the observer can read": three hits. Built the #878 headline one (registry sums vs distinct `source_path`, record only). **Left for a later run:** the "Worth more time" LEAD (Builder 2026-10-14) is the same shape but needs the stack's stored σ and the frontend's `CLEAN_SIGMA` mirrored in the engine — sized M, not started; the `.recycle/`/`.zfs/` reach count reads `incoming/`'s top level, which no diagnostic touches yet, and its fix is owner-gated anyway. Environment: `source scripts/agent-setup.sh` leaves `.venv` active only in that shell — later Bash calls need `source .venv/bin/activate` (the first suite attempt failed on "No module named pytest").
