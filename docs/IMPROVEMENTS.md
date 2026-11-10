@@ -143,6 +143,22 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   is a dataset root with `snapdir=visible`, two snapshots of 8 subs (`M 42_sub`, `NGC 7000_mosaic_sub`) plan and scan
   as one **`.zfs`** target of 16 — both objects, every sub once per snapshot, growing each day; `incoming/` unchanged.
 
+- **🟡 (Scout 2026-11-10, QA rotation sweep (4)) — two overlapping `GET /api/targets/{safe}/deepening-reel` requests
+  each rebuild the reel, and a reader can be served a half-written file as HTTP 200.** *(Pillar: trust /
+  user-friendliness — PRIORITY 3; size **S**; severity moderate-low — a "Download clip" or "Share clip" that saves a
+  broken file, and duplicate full renders of every master on a NAS with an OOM history; nothing on disk is lost.
+  Confidence: **reproduced** through the real route.)* `_build_or_get_deepening_reel` (`webapp/routers/stack.py`)
+  has no single-flight guard: while one request renders, the signature file is still stale, so every request that
+  arrives meanwhile unlinks the reel and renders again; `write_deepening_reel` (`seestack/render/deepening.py`) then
+  PIL-saves **straight onto the served path**, so a concurrent cache-hit reader can stream a file another request is
+  truncating. The card makes the overlap ordinary: **Play** mounts `<Image src>` (the slow first build — every master
+  is loaded, minutes on a mosaic) and at once shows **Download clip** / **Share clip**, which GET the same URL.
+  Scratch repro (`client` + `solved_library`, two runs, render slowed 0.3 s, 24 GETs 40 ms apart): **9 renders for 24
+  requests**, and on one of three runs **3 responses were 200 with a body PIL cannot open**. **Fix:** a per-reel
+  lock (keyed on the sig path) around check-and-build so a second caller waits and then takes the cache hit, and
+  write the animation to a sibling temp name and `os.replace` it in (sig file after). Regression test: the same
+  threaded repro asserts one render and every body decodes.
+
 - **🟡 (Builder 2026-10-30, the ⭐ 2026-10-28 entry's part (4)) — the "darker ring just inside" the ragged border is
   made by the stacker's per-frame sky flatten: on a vignetted sub, `Background2D` leaves a dark rim along every
   sub's own edge, and the canvas border is where only sub edges land.** *(Pillar: image quality / trust —
