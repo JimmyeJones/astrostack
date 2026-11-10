@@ -54,6 +54,12 @@ ARCHIVE_FILENAME = "my-astrostack-pictures-full.zip"
 #: render (see the module docstring's third rule).
 PREVIEW_NOTE_NAME = "_preview_size.txt"
 
+#: The note listing pictures that went in smaller than their true size because
+#: they are wider than the Full-res PNG's long-edge cap — the same promise as
+#: :data:`PREVIEW_NOTE_NAME`: the card says "at their true size", so a picture
+#: that isn't says so.
+REDUCED_NOTE_NAME = "_reduced_size.txt"
+
 #: The note listing pictures that could not be added at all — the same promise
 #: ``pictures.zip`` makes, so an archive never quietly claims to be complete.
 SKIPPED_NOTE_NAME = "_skipped.txt"
@@ -123,6 +129,9 @@ class ArchiveReport:
     n_pictures: int = 0
     n_full_res: int = 0
     n_preview_only: int = 0
+    #: Rendered, but shrunk to the long-edge cap — counted here, *not* in
+    #: ``n_full_res``, and named in :data:`REDUCED_NOTE_NAME`.
+    n_reduced: int = 0
     skipped: list[str] = field(default_factory=list)
     size_bytes: int = 0
     #: True when the user cancelled part-way; no archive is left behind.
@@ -250,6 +259,30 @@ def plan_full_size_pictures(settings) -> list[PicturePick]:  # noqa: ANN001
     return picks
 
 
+def _true_size(pick: PicturePick, trim_border: bool) -> tuple[int, int] | None:
+    """The ``(w, h)`` the run's picture has **before** the long-edge cap — what
+    :func:`webapp.pipeline.full_res_png_size` predicts with no cap — or ``None``
+    when that can't be said without rendering (a North-up turn, a rotating
+    recipe)."""
+    from webapp.pipeline import full_res_png_size
+
+    try:
+        size = full_res_png_size(pick.run, pick.recipe_json,
+                                 max_long_edge=10**9, trim_border=trim_border)
+    except Exception:  # noqa: BLE001 — an unknown size just means "judge by the file"
+        return None
+    return None if size is None else (int(size[0]), int(size[1]))
+
+
+def _reduced_line(name: str, true: tuple[int, int] | None,
+                  got: tuple[int, int] | None, cap: int) -> str:
+    """One line of :data:`REDUCED_NOTE_NAME`."""
+    got_s = f"{got[0]} × {got[1]}" if got else f"{cap} px on its long side"
+    if true is None:
+        return f"{name} — shrunk to {got_s}"
+    return f"{name} — {true[0]} × {true[1]} shrunk to {got_s}"
+
+
 def build_full_size_archive(
     settings,  # noqa: ANN001 — webapp.config.Settings
     picks: list[PicturePick],
@@ -270,6 +303,7 @@ def build_full_size_archive(
     pictures (a render is not interruptible), and a stop leaves **no** archive —
     a half-built backup that looked complete would be worse than none.
     """
+    from seestack.wallpaper import png_size
     from webapp.pipeline import cached_run_full_res_png
     from webapp.routers.stack import _FULL_RES_PNG_MAX_LONG_EDGE
 
@@ -288,6 +322,7 @@ def build_full_size_archive(
 
     report = ArchiveReport(path=str(dest), filename=ARCHIVE_FILENAME)
     preview_only: list[str] = []
+    reduced: list[str] = []
     total = len(picks)
     with zipfile.ZipFile(part, "w", zipfile.ZIP_STORED) as zf:
         for i, pick in enumerate(picks):
@@ -298,14 +333,26 @@ def build_full_size_archive(
                 progress(f"Preparing {pick.name}", i, total)
             try:
                 if pick.run is not None:
+                    trim_border = bool(settings.auto_crop_border)
                     # A picture already downloaded comes off its cache;
                     # the archive never writes one (`write=False`).
                     png = cached_run_full_res_png(
                         pick.run, pick.recipe_json, max_long_edge=cap,
-                        trim_border=bool(settings.auto_crop_border), write=False)
+                        trim_border=trim_border, write=False)
                     zf.writestr(pick.name, png)
+                    got = png_size(png)
                     del png
-                    report.n_full_res += 1
+                    # A canvas wider than the cap went in shrunk to it. The
+                    # true size is predicted without a render where it can be;
+                    # where it can't (a North-up turn), a file that came out at
+                    # exactly the cap is the cap's doing.
+                    true = _true_size(pick, trim_border)
+                    if (max(true) > cap if true is not None
+                            else got is not None and max(got) >= cap):
+                        report.n_reduced += 1
+                        reduced.append(_reduced_line(pick.name, true, got, cap))
+                    else:
+                        report.n_full_res += 1
                 elif pick.path is not None:
                     zf.write(pick.path, pick.name)
                     if pick.preview_only:
@@ -330,6 +377,15 @@ def build_full_size_archive(
                       "on disk, so there was nothing to render at full size. "
                       "Stacking that target again would give you a full-resolution "
                       "picture.\n",
+                )
+            if reduced:
+                zf.writestr(
+                    REDUCED_NOTE_NAME,
+                    f"These pictures are bigger than {cap} pixels on their long "
+                    f"side, so they were shrunk to {cap} to keep the file one a "
+                    "photo viewer can open:\n\n" + "\n".join(reduced)
+                    + "\n\nEvery original pixel is still in the target's "
+                      "full-resolution FITS and TIFF downloads.\n",
                 )
             if report.skipped:
                 zf.writestr(
