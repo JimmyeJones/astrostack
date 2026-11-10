@@ -1,5 +1,26 @@
 # Shipped — the record
 
+## 2026-11-10 (Builder, branch `claude/fervent-allen-5hddau`)
+
+### v0.506.5 — the library diagnostics survey the library as four-column `SubRef`s, not whole `FrameRow`s
+
+**Why.** Both diagnostics look at every sub before they sample a few hundred, and they did it with
+`Project.iter_frames` — `SELECT *`, so each solved sub brought its ~2 kB plate solution along.
+`sensor_pattern_by_temperature` keeps that survey (every accepted sub of the library, sorted by temperature) for
+its whole run, which reads ~560 full-size subs; `filter_card_values` held one whole target's rows at a time. Both
+run unattended as a queued job right after the owner's next update, on a box with an OOM history and a library of
+tens of thousands of subs. Measured with `tracemalloc` on a synthetic 29,000-sub, six-target library:
+`sensor_pattern.run` peak **114.5 MB → 9.5 MB**.
+
+**What changed.** New `seestack.diag.SubRef` (cached_path, source_path, timestamp_utc, sensor_temp_c — field names
+match `FrameRow`'s), `iter_sub_refs(project)` over `Project.iter_frame_columns`, and `sub_path` — the app's one
+`first_existing_frame_path` rule, replacing the two modules' private copies. Same subs, same order, same seeded
+sample, so **neither diagnostic's `version` moves** (pinned: each `run` returns an identical result through the old
+row read).
+
+**Tests.** +7 (`tests/test_diag_sub_refs.py`); three fail before (a `FrameRow` built per sub by each diagnostic, and
+the peak-vs-row-read ratio). Engine-only; no config, schema, on-disk or API-shape change.
+
 ## 2026-11-09 (Builder, branch `claude/fervent-allen-j5xv2c`)
 
 ### v0.506.4 — diagnostic `filter_card_values` v2: each sampled night read at both ends, nights spread over the whole history
