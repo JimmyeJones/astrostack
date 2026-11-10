@@ -198,4 +198,108 @@ def test_ready_and_registered(lib_and_incoming, tmp_path):
         assert not sf.ready(empty)
     finally:
         empty.close()
-    assert ("sky_falloff", 2) in [(d.name, d.version) for d in registry()]
+    assert ("sky_falloff", 3) in [(d.name, d.version) for d in registry()]
+
+
+# --- v3: a mosaic target is several fields — sample one panel -----------------
+
+class _FakeProject:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def iter_frame_columns(self, *columns, accepted_only=False):
+        for r in self._rows:
+            yield tuple(r[c] for c in columns)
+
+    def close(self):
+        pass
+
+
+class _FakeEntry:
+    def __init__(self, name):
+        self.name = name
+        self.safe_name = name
+
+
+class _FakeLibrary:
+    def __init__(self, targets):
+        self._targets = targets
+
+    def list_targets(self):
+        return [_FakeEntry(n) for n in self._targets]
+
+    def open_target(self, safe):
+        return _FakeProject(self._targets[safe])
+
+
+def _mosaic_library(tmp_path, vignette: float, seed: int = 0):
+    """8 single fields (one object, centre-weighted) and 16 S30-shaped 2×2
+    mosaics whose panels each frame a different part of the object, with a
+    true edge/centre sky fall-off of ``1 − vignette``. Returns the fake library
+    and the per-path :func:`measure_frame` result each sub would read as."""
+    rng = np.random.default_rng(seed)
+    measures, targets = {}, {}
+    k = 0
+
+    def sub(T, E, ra, dec):
+        nonlocal k
+        p = tmp_path / f"s{k}.fit"
+        p.write_bytes(b"")
+        k += 1
+        s = rng.uniform(80, 400)
+        n1, n2 = rng.normal(0, 4, 2)
+        c, e = 500 + s + T + n1, 500 + (1 - vignette) * s + E + n2
+        measures[str(p)] = {"centre": c, "edge": e, "corner": e, "rings": [c] * 6,
+                            "side_spread": 0.01}
+        return {"cached_path": None, "source_path": str(p), "timestamp_utc": None,
+                "sensor_temp_c": None, "ra_center_deg": ra, "dec_center_deg": dec}
+
+    for t in range(8):
+        T, E = rng.uniform(20, 300), rng.uniform(0, 10)
+        targets[f"T{t}"] = [sub(T, E, 10.0 * t, 5.0) for _ in range(8)]
+    for t in range(16):
+        panels = [(rng.uniform(0, 300), rng.uniform(0, 80), 100 + 10 * t + 1.8 * (p % 2),
+                   20.0 + 1.0 * (p // 2)) for p in range(4)]
+        # Seestar mosaic order: the panels cycle, so subs spread through the
+        # target's history land on every panel.
+        targets[f"M{t}_mosaic"] = [sub(*panels[i % 4]) for i in range(32)]
+    return _FakeLibrary(targets), measures
+
+
+def _run_on(monkeypatch, lib, measures):
+    import seestack.io.fits_loader as fl
+
+    monkeypatch.setattr(fl, "load_seestar_raw", lambda path, debayer=False: (str(path), None))
+    monkeypatch.setattr(sf, "measure_frame", lambda raw: measures[raw])
+    return sf.run(lib)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_a_mosaic_panels_object_does_not_read_as_vignetting(tmp_path, monkeypatch, seed):
+    # v2 paired subs from different panels of one mosaic: their centre skies
+    # differed by the object, and the slope read the object — 0.81–0.93 here
+    # for a sensor with no fall-off at all.
+    lib, measures = _mosaic_library(tmp_path, vignette=0.0, seed=seed)
+    res = _run_on(monkeypatch, lib, measures)
+    assert res["edge_over_centre_slope"]["slope"] == pytest.approx(1.0, abs=0.02)
+    assert res["mosaics_sampled_on_one_panel"] == 16
+    assert res["mosaics_skipped_no_located_panel"] == 0
+    check_result_is_safe(res)
+
+
+def test_a_real_vignette_is_still_measured_on_a_mosaic_library(tmp_path, monkeypatch):
+    lib, measures = _mosaic_library(tmp_path, vignette=0.10, seed=3)
+    res = _run_on(monkeypatch, lib, measures)
+    assert res["edge_over_centre_slope"]["slope"] == pytest.approx(0.90, abs=0.02)
+
+
+def test_one_panel_picks_the_fullest_panel_or_skips_an_unlocated_mosaic():
+    a, b, none = (10.0, 20.0), (11.8, 20.0), (None, None)
+    single = [a] * 6 + [none] * 3
+    assert sf.one_panel(single, is_mosaic_name=False) == list(range(9))
+    two = [a] * 5 + [b] * 7 + [none] * 2
+    assert sf.one_panel(two, is_mosaic_name=False) == list(range(5, 12))
+    assert sf.one_panel([a] * 6 + [none] * 4, is_mosaic_name=True) == list(range(6))
+    assert sf.one_panel([none] * 10, is_mosaic_name=True) is None
+    assert sf.one_panel([none] * 10, is_mosaic_name=False) == list(range(10))
+    assert sf.one_panel([(float("nan"), 1.0)] * 6, is_mosaic_name=True) is None
