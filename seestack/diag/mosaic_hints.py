@@ -15,13 +15,23 @@ and only the owner's subs can say which.
 **Method.** Read the record only — no FITS file is opened. For every target
 that is a mosaic (by the folder convention's name, or because its solved centres
 split into two or more panels), compare each *solved* sub's hint with the
-centre its plate solution found:
+panels its plate solutions found:
 
-* if the hints sit on the sub's own panel (within
-  :data:`~seestack.stack.pointings.PANEL_LINK_DIST_DEG`), and themselves split
-  into the same number of groups the centres do, the hint is **per panel**;
+* if the hints sit nearest the sub's *own* panel (of every located panel's
+  centre), and themselves split into groups at the panels' own scale, the hint
+  is **per panel**;
 * if every hint sits on one point near the middle of the panels, it is the
   **mosaic centre**.
+
+v2 (Scout 2026-11-10): v1 asked "is the hint within
+:data:`~seestack.stack.pointings.PANEL_LINK_DIST_DEG` (0.25°) of its own
+centre?". That bar is a dither's size, about a seventh of an S30 panel step, so a
+per-panel hint carrying an ordinary go-to offset of 0.15–0.3° read as ``mixed``
+and split one panel into a group per night — and the missing-panel count, which
+compared un-located subs' *hints* with located subs' *centres*, called those
+same offsets missing panels. v2 asks which panel a hint is *nearest*, and counts
+a missing panel by comparing hints with hints at half the smallest panel step.
+The v1 numbers are still reported beside the new ones.
 
 It also counts what the fix would find today: groups of hints that hold
 un-located subs and no located one — a panel missing from the picture.
@@ -46,6 +56,17 @@ MAX_LISTED_TARGETS = 60
 #: A hint is "on its own panel" within the panel link distance; the hint is
 #: called per-panel when at least this share of solved subs' hints are.
 PER_PANEL_SHARE = 0.8
+#: Hints are grouped — with each other, and to find a panel no located sub's hint
+#: shares — at this share of the smallest step between two located panels: a
+#: go-to offset smaller than half a step stays on its panel, a missing panel a
+#: whole step away does not join its neighbour.
+HINT_LINK_STEP_SHARE = 0.5
+#: …or at this, when fewer than two panels located and there is no step to scale
+#: by (half the short side of an S30 field, ~0.6°, rounded down).
+FALLBACK_HINT_LINK_DEG = 0.5
+#: Hints read as the mosaic's centre when their median distance from the
+#: panels' middle is under this share of the panels' own median distance.
+CENTRAL_SHARE = 0.5
 
 _COLUMNS = ("ra_hint_deg", "dec_hint_deg", "ra_center_deg", "dec_center_deg",
             "reject_reason")
@@ -119,12 +140,41 @@ def measure_target(rows: list[tuple], *, is_mosaic_name: bool) -> dict[str, Any]
     share_own = (sum(1 for d in d_own if d <= PANEL_LINK_DIST_DEG) / len(d_own)
                  if d_own else None)
 
-    # Hints of un-located subs that land on no located sub's panel: cluster the
-    # un-located subs' hints together with every located centre, and count the
-    # groups holding enough un-located subs and no located one.
-    pts = [hints[i] for i in unsolved] + [centres[i] for i in solved]
-    labels = _cluster_distinct(pts, PANEL_LINK_DIST_DEG)
-    n_un = len(unsolved)
+    # The panels' own scale: each located panel's mean centre, and the smallest
+    # step between two of them. A hint "names its panel" when, of every located
+    # panel, its own is the nearest — a test with no fixed degree in it, so a
+    # go-to offset well under half a panel step cannot turn a per-panel hint
+    # into "mixed" (v1's 0.25° bar did, at an S30 step of ~1–1.8°).
+    centre_labels = _cluster_distinct(centres, PANEL_LINK_DIST_DEG)
+    panel_mid = {lab: _mean_point([centres[i] for i in solved  # type: ignore[misc]
+                                   if centre_labels[i] == lab])
+                 for lab in centre_groups}
+    mids = list(panel_mid.values())
+    steps = [_sep(mids[a], mids[b]) for a in range(len(mids))
+             for b in range(a + 1, len(mids))]
+    panel_step = min(steps) if steps else None
+    hint_link = (max(PANEL_LINK_DIST_DEG, HINT_LINK_STEP_SHARE * panel_step)
+                 if panel_step else FALLBACK_HINT_LINK_DEG)
+    on_panel = [i for i in both if centre_labels[i] in panel_mid]
+    nearest_own = 0
+    if len(panel_mid) >= 2:
+        for i in on_panel:
+            dist = {lab: _sep(hints[i], mid) for lab, mid in panel_mid.items()}  # type: ignore[arg-type]
+            if min(dist, key=dist.get) == centre_labels[i]:  # type: ignore[arg-type]
+                nearest_own += 1
+    share_nearest = (nearest_own / len(on_panel)
+                     if on_panel and len(panel_mid) >= 2 else None)
+    hint_groups_wide = _substantial_groups(
+        _cluster_distinct(hints, hint_link), MIN_PANEL_SUBS)
+
+    # Un-located subs whose hint sits on no located sub's *hint* — like with
+    # like, so a panel's go-to offset (shared by its located and un-located
+    # subs alike) cancels out. Grouped at the panels' own scale, and counted
+    # when a group holds enough subs to be a panel.
+    unsolved_hinted = [i for i in unsolved if hints[i][0] is not None]
+    pts = [hints[i] for i in unsolved_hinted] + [hints[i] for i in both]
+    labels = _cluster_distinct(pts, hint_link)
+    n_un = len(unsolved_hinted)
     located_labels = {lab for lab in labels[n_un:] if lab >= 0}
     orphan_counts: dict[int, int] = {}
     for lab in labels[:n_un]:
@@ -132,13 +182,24 @@ def measure_target(rows: list[tuple], *, is_mosaic_name: bool) -> dict[str, Any]
             orphan_counts[lab] = orphan_counts.get(lab, 0) + 1
     orphans = {lab: n for lab, n in orphan_counts.items() if n >= MIN_PANEL_SUBS}
 
+    # The panels' own middle, one vote per panel: the sub-weighted middle above
+    # leans toward an uneven mosaic's deepest panel, which pulls the centres in
+    # and pushes a mosaic-centre hint out.
+    hints_central = False
+    if len(mids) >= 2 and hinted:
+        middle = _mean_point(mids)
+        spread = median(_sep(mid, middle) for mid in mids)
+        hints_central = median(_sep(hints[i], middle) for i in hinted) \
+            < CENTRAL_SHARE * spread  # type: ignore[arg-type]
     if len(centre_groups) < 2:
         verdict = "cannot_tell"   # no located split to compare the hints against
     elif not both:
         verdict = "no_hints"
-    elif share_own is not None and share_own >= PER_PANEL_SHARE and len(hint_groups) >= 2:
+    elif (share_nearest is not None and share_nearest >= PER_PANEL_SHARE
+          and len(hint_groups_wide) >= 2):
         verdict = "per_panel"
-    elif len(hint_groups) <= 1 and d_own and median(d_own) > PANEL_LINK_DIST_DEG:
+    elif hints_central or (len(hint_groups) <= 1 and d_own
+                           and median(d_own) > PANEL_LINK_DIST_DEG):
         verdict = "mosaic_centre"
     else:
         verdict = "mixed"
@@ -154,6 +215,9 @@ def measure_target(rows: list[tuple], *, is_mosaic_name: bool) -> dict[str, Any]
         "unlocated_with_hint": sum(1 for i in unsolved if hints[i][0] is not None),
         "located_panels": len(centre_groups),
         "hint_groups": len(hint_groups),
+        "hint_groups_at_panel_scale": len(hint_groups_wide),
+        "smallest_panel_step_deg": _r(panel_step),
+        "share_hint_nearest_own_panel": _r(share_nearest),
         "median_hint_to_own_centre_deg": _r(median(d_own)) if d_own else None,
         "share_hint_on_own_panel": _r(share_own),
         "median_hint_to_mosaic_middle_deg": _r(median(d_hint_mid)) if d_hint_mid else None,
@@ -209,15 +273,19 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
         "how_to_read": (
             "One entry per mosaic target, largest first, no names. "
             "located_panels counts the panels the plate-solved centres form; "
-            "hint_groups counts the groups the telescope's own pointing hints form. "
-            "verdict per_panel: at least 80 % of located subs carry a hint on their own "
-            "panel and the hints split too — the hint is the panel's pointing, so "
-            "un-located subs can be split by panel. mosaic_centre: the hints form one "
-            "group away from the subs' own centres — the hint is the mosaic's middle, "
-            "and a per-panel split needs another signal. cannot_tell: fewer than two "
-            "located panels. unlocated_only_hint_groups counts groups of at least 5 "
-            "un-located subs whose hints sit on no located sub's panel — under "
-            "per_panel, a panel missing from the picture today."
+            "hint_groups counts the groups the telescope's own pointing hints form at "
+            "0.25 deg (v1's scale), hint_groups_at_panel_scale at half the smallest "
+            "step between two located panels (smallest_panel_step_deg). "
+            "verdict per_panel: at least 80 % of located subs carry a hint nearer their "
+            "own panel than any other (share_hint_nearest_own_panel) and the hints "
+            "split too — the hint is the panel's pointing, so un-located subs can be "
+            "split by panel. mosaic_centre: the hints sit near the panels' middle, "
+            "under half as far from it as the subs' own centres — the hint is the "
+            "mosaic's middle, and a per-panel split needs another signal. cannot_tell: "
+            "fewer than two located panels. unlocated_only_hint_groups counts groups "
+            "of at least 5 un-located subs whose hints sit on no located sub's hint, "
+            "at the panel scale — under per_panel, a panel missing from the picture "
+            "today."
         ),
     }
 
@@ -229,7 +297,7 @@ def ready(library) -> bool:  # noqa: ANN001
 
 DIAGNOSTIC = Diagnostic(
     name="mosaic_panel_hints",
-    version=1,
+    version=2,
     question=("Does the Seestar write each mosaic panel's own pointing into its subs, "
               "or the mosaic's centre? (gate on the un-located-panel Bugs entry, "
               "Scout 2026-10-19)"),

@@ -93,6 +93,76 @@ def test_hints_wrap_across_ra_zero():
     assert m["median_hint_to_mosaic_middle_deg"] < 0.5
 
 
+# An S30 strip-and-row mosaic: panels ~1.8° apart in RA and 1° in Dec, each
+# shot over three nights with its own go-to offset between the header's hint and
+# the plate solve (v2, Scout 2026-11-10).
+S30_PANELS = [(83.0 + 1.8 * i, -6.0 + 1.0 * j) for i in range(2) for j in range(2)]
+NIGHT_OFFSETS = [(0.22, -0.18), (-0.25, 0.12), (0.05, 0.28)]
+
+
+def _offset_rows(*, hint_is_panel: bool, lost_panel: int | None = None, per_night=6):
+    middle = (83.9, -5.5)
+    rows = []
+    for p, (ra, dec) in enumerate(S30_PANELS):
+        for n, (dra, ddec) in enumerate(NIGHT_OFFSETS):
+            base = (ra, dec) if hint_is_panel else middle
+            hint = (base[0] + dra + 0.01 * p, base[1] + ddec)
+            for k in range(per_night):
+                centre = (ra + 0.003 * k, dec + 0.002 * n)
+                if p == lost_panel:
+                    rows.append(_row(hint, None, "solve_failed:no solution"))
+                else:
+                    rows.append(_row(hint, centre))
+    return rows
+
+
+def test_a_per_panel_hint_with_a_go_to_offset_still_reads_per_panel():
+    # v1 called this "mixed": every hint is 0.2–0.3° off its solve, past the
+    # 0.25° dither-sized bar, and the hints split into a group per night.
+    m = mh.measure_target(_offset_rows(hint_is_panel=True), is_mosaic_name=True)
+    assert m["share_hint_on_own_panel"] < 0.8          # v1's bar fails …
+    assert m["share_hint_nearest_own_panel"] == 1.0     # … the nearest panel holds
+    assert m["hint_groups_at_panel_scale"] == 4
+    assert m["smallest_panel_step_deg"] == pytest.approx(1.0, abs=0.01)
+    assert m["verdict"] == "per_panel"
+
+
+def test_a_go_to_offset_is_not_a_missing_panel():
+    # A panel-night all of whose subs failed to locate carries the same hint as
+    # the located subs of that panel-night; v1 compared it with the *centres*
+    # and counted the offset as a panel missing from the picture.
+    rows = _offset_rows(hint_is_panel=True)
+    rows += [_row((S30_PANELS[0][0] + 0.22, S30_PANELS[0][1] - 0.18), None,
+                  "solve_failed:x")] * 8
+    m = mh.measure_target(rows, is_mosaic_name=True)
+    assert m["unlocated"] == 8
+    assert m["unlocated_only_hint_groups"] == 0
+
+
+def test_a_lost_panel_with_go_to_offsets_is_still_counted():
+    m = mh.measure_target(_offset_rows(hint_is_panel=True, lost_panel=3),
+                          is_mosaic_name=True)
+    assert m["verdict"] == "per_panel"
+    assert m["unlocated_only_hint_groups"] == 1
+    assert m["subs_in_unlocated_only_hint_groups"] == 18
+
+
+def test_a_mosaic_centre_hint_with_a_go_to_offset_reads_mosaic_centre():
+    m = mh.measure_target(_offset_rows(hint_is_panel=False), is_mosaic_name=True)
+    assert m["verdict"] == "mosaic_centre"
+    assert m["unlocated_only_hint_groups"] == 0
+
+
+def test_an_uneven_mosaic_centre_hint_reads_mosaic_centre():
+    # One panel holds most of the subs: the sub-weighted middle leans to it, so
+    # the centre test takes the panels' own middle, one vote per panel.
+    rows = _offset_rows(hint_is_panel=False)
+    deep = [r for r in rows if r[2] is not None and abs(r[2] - S30_PANELS[0][0]) < 0.1
+            and abs(r[3] - S30_PANELS[0][1]) < 0.1]
+    m = mh.measure_target(rows + deep * 12, is_mosaic_name=True)
+    assert m["verdict"] == "mosaic_centre"
+
+
 @pytest.fixture
 def library(tmp_path):
     from seestack.io.library import Library
@@ -148,4 +218,4 @@ def test_ready_and_registered(library, tmp_path):
         assert not mh.ready(empty)
     finally:
         empty.close()
-    assert ("mosaic_panel_hints", 1) in [(d.name, d.version) for d in registry()]
+    assert ("mosaic_panel_hints", 2) in [(d.name, d.version) for d in registry()]
