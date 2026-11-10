@@ -189,6 +189,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   un-located subs by `pointing_groups` over hints and (a) let the verdict/health note speak when any hint-panel
   has ≥ `_UNSOLVED_MIN_ACCEPTED` tried and none located, (b) gate the rescue per hint-panel. Don't lower the
   whole-target thresholds instead — that makes a single field cry wolf.
+  **⏸ Waiting on diagnostic `mosaic_panel_hints` v1** (v0.506.6, `seestack/diag/mosaic_hints.py`; the observer
+  files it as `Diagnostic result: mosaic_panel_hints v1`). Its `verdicts` answer the gate (`per_panel` vs
+  `mosaic_centre`), and `mosaics_with_an_unlocated_only_hint_group` is the bug's occurrence on his library.
 
 - **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
   v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
@@ -3166,6 +3169,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.6 **Third library diagnostic, `mosaic_panel_hints` v1: does the Seestar write each mosaic panel's own pointing into its subs, or the mosaic's centre — the gate on the un-located-panel Bugs entry** (`seestack.diag.mosaic_hints`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.5 **The two library diagnostics survey the library as four-column `SubRef`s, not whole `FrameRow`s — `sensor_pattern_by_temperature` no longer holds every accepted sub's plate solution for its whole run (`seestack.diag.iter_sub_refs`, `sub_path`).** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.3 **Diagnostic `sensor_pattern_by_temperature` v2 splits its halves by *sky*, not by target — a mosaic and its single field (or two targets within 5°) no longer land on opposite halves and read a nebula they share as a camera pattern (`seestack.diag.sensor_pattern.sky_groups`).** Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.2 **The boot-time library check (`diagnostics`) reads back on the Jobs page — `Jobs.diagnosticsSummary` — and Cancel on it now reads "cancelled", not "done" (`webapp.diagnostics.submit_pending_diagnostics` cancel sentinel).** Full entry in [`SHIPPED.md`](SHIPPED.md).

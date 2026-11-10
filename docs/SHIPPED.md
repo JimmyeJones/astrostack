@@ -1,5 +1,31 @@
 # Shipped — the record
 
+## 2026-11-10 (Builder, branch `claude/fervent-allen-brcbxl`)
+
+### v0.506.6 — third library diagnostic, `mosaic_panel_hints` v1: is a sub's pointing hint its panel's, or the mosaic's centre?
+
+**Why.** The second Bugs entry (Scout 2026-10-19: a mosaic panel whose subs all failed to plate-solve is missing
+from the picture while three whole-target gates call it "a healthy night") has been gated for three weeks on one
+fact about the owner's subs: whether the Seestar writes the **panel's** pointing or the **mosaic's centre** into
+`ra_hint_deg`/`dec_hint_deg` — the only pointing an un-located sub has, and the only way to split the un-located
+subs by panel. The entry asked the observer for it; AGENTS.md (2026-11-09) says a measurement only his library can
+give ships as a diagnostic instead.
+
+**What it measures.** Record-only (no FITS file is opened). For every mosaic target — by the `(mosaic)` name, or
+because its solved centres form two or more panels — it compares each solved sub's hint with its own solved centre:
+the share of hints on their own panel (within `PANEL_LINK_DIST_DEG`), how many groups the hints form against how
+many panels the centres form, and the median hint-to-own-centre and hint-to-mosaic-middle distances. Verdict per
+mosaic: `per_panel`, `mosaic_centre`, `mixed` or `cannot_tell`. It also counts what the fix would find today —
+groups of ≥ 5 un-located subs whose hints sit on no located panel (`unlocated_only_hint_groups`) — so the result
+carries the bug's occurrence on his library as well as the design answer. Mosaics are listed anonymously, largest
+first; distances are between two pointings of one sub, never a sky position.
+
+**Tests.** +10 (`tests/test_diag_mosaic_hints.py`): both hint shapes read correctly on a 2×2 mosaic, a never-located
+panel is counted and un-located subs on a located panel are not, a single field is skipped unless named a mosaic,
+RA 0/360 wrap, and through `run` on a real `Library` — no names or paths in the result, largest first, progress,
+stop, `ready`, registered. Engine-only; no config, schema, on-disk or API-shape change (a new result file under the
+existing diagnostics store, written by the existing job).
+
 ## 2026-11-10 (Builder, branch `claude/fervent-allen-5hddau`)
 
 ### v0.506.5 — the library diagnostics survey the library as four-column `SubRef`s, not whole `FrameRow`s
