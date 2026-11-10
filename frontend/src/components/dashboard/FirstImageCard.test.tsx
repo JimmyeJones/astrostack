@@ -24,13 +24,13 @@ function stats(over: Partial<DashboardStats> = {}): DashboardStats {
   };
 }
 
-function mount(s: SystemInfo, st: DashboardStats) {
+function mount(s: SystemInfo, st: DashboardStats, path = "/") {
   vi.spyOn(client.api, "getSystem").mockResolvedValue(s);
   vi.spyOn(client.api, "getStats").mockResolvedValue(st);
   return render(
     <MantineProvider>
       <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[path]}>
           <FirstImageCard />
         </MemoryRouter>
       </QueryClientProvider>
@@ -195,6 +195,37 @@ describe("FirstImageCard", () => {
 
     await screen.findByTestId("first-image-card");
     expect(screen.getByText("Stack them into your first picture")).toBeInTheDocument();
+  });
+
+  it("says 'you're here' instead of linking to the Library from the Library", async () => {
+    // The card also sits on an empty Library (and an empty Gallery). There,
+    // "Open Library" and "Pick a target" pointed at the page itself, and a
+    // link to the current route does nothing when tapped — a beginner's first
+    // click on the first step read as a broken button.
+    mount(sys({ found: false }), stats(), "/library");
+
+    await screen.findByTestId("first-image-card");
+    expect(screen.queryByRole("link", { name: "Open Library" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Pick a target" })).toBeNull();
+    expect(screen.getByTestId("first-image-here-frames")).toHaveTextContent("you're here");
+    expect(screen.getByTestId("first-image-here-checked")).toBeInTheDocument();
+    expect(screen.getByTestId("first-image-here-stack")).toBeInTheDocument();
+    // Every step that lives somewhere else still links there.
+    expect(screen.getByRole("link", { name: "Check the setup" }))
+      .toHaveAttribute("href", "/settings/plate-solving");
+    expect(screen.getByRole("link", { name: "Open a picture" })).toHaveAttribute("href", "/gallery");
+    expect(screen.getByRole("link", { name: "Open your edit" })).toHaveAttribute("href", "/gallery");
+  });
+
+  it("does the same for the Gallery's own steps on the Gallery", async () => {
+    mount(sys(), stats({ n_frames: 40, n_frames_accepted: 32 }), "/gallery");
+
+    await screen.findByTestId("first-image-card");
+    expect(screen.queryByRole("link", { name: "Open a picture" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open your edit" })).toBeNull();
+    expect(screen.getByTestId("first-image-here-edit")).toBeInTheDocument();
+    expect(screen.getByTestId("first-image-here-export")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Pick a target" })).toHaveAttribute("href", "/library");
   });
 
   it("renders nothing while the Dashboard's data is still loading", () => {

@@ -1,5 +1,28 @@
 # Shipped — the record
 
+## 2026-11-10 (Builder, branch `claude/focused-noether-zzbnof`)
+
+### v0.506.11 — the first-run card stops linking a step to the page it is sitting on
+
+**Why.** A `--empty` dogfood pass (the first-run screens, no data) photographed the "Your first image" card on the
+empty **Library**: step one read *"Point AstroStack at your subs — Open Library"*, and steps three and four
+*"Pick a target"*, all linking to `/library` — the page the card was on. A link to the current route does nothing
+when tapped, so a beginner's first click on the first step of the journey read as a broken button. The empty
+**Gallery** had the same shape for *"Open a picture"* / *"Open your edit"* (both `/gallery`). The Dashboard was
+never affected (no step links to `/`).
+
+**What changed.** `FirstImageCard` reads the current route (`useLocation`); a not-yet-done step whose page is that
+route (`firstImageSteps.stepIsHere` — path only, query/hash and a trailing slash ignored, a sub-page such as
+`/library/M_42` is *not* the Library) shows a dimmed *"you're here"* in place of its link. Every other step still
+links; done steps still drop theirs. Nothing removed; the card's height is unchanged (phone page heights identical
+before/after on the `--empty` pass, no overflow, no console errors). Frontend-only — no endpoint, config, schema,
+on-disk, API-shape or default change.
+
+**Tests.** +2 in `FirstImageCard.test.tsx` (mounted at `/library` and at `/gallery`: the self-links are gone, the
+"you're here" notes are there, the other steps' links keep their targets), **both red under a scratch revert** of
+the component; +2 in `firstImageSteps.test.ts` for `stepIsHere`. Python suite 8681 passed / 7 skipped; vitest
+5014 passed; `tsc`, `vite build` clean.
+
 ## 2026-11-10 (Scout, branch `claude/exciting-wozniak-yw3dcx`)
 
 ### v0.506.10 — diagnostic `mosaic_panel_hints` v2: a per-panel hint with a go-to offset no longer reads "mixed"
