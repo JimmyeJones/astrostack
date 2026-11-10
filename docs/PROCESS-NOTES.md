@@ -1,5 +1,33 @@
 # Process notes & QA sweep records
 
+## 2026-11-10 (Scout, branch `claude/optimistic-cannon-mgl6hf`) — QA rotation sweep (3), new angle — an audit-hook trace of every write-capable call under `incoming/`, through the new diagnostics job: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8681 passed / 7 skipped on `a6f1dc48` (xdist `-n 4`, BLAS capped, 18m30s). No
+  open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (EXIT 0, nothing overflowing, no console
+  errors, Auto trim 7.9 %; only the known non-finding, the Dashboard's ASTAP note in a dogfood without ASTAP).
+- **Sweep (3), new angle.** Every earlier (3) sweep proved "nothing reached `incoming/`" by a before/after snapshot,
+  a read-only mount, or `test_incoming_readonly_guard`'s `_IncomingSentinel` — which wraps the *destructive* stdlib
+  calls but not a write-mode `open` / `os.open`, `os.utime`, `os.chmod` or `fits.open(mode="update")`, and a
+  snapshot cannot see a write attempt that failed or was swallowed. This one installed a `sys.addaudithook` tracer
+  that records every `open` with a write mode or write flags, every rename/replace/remove/rmdir/chmod/chown/utime/
+  truncate/mkdir/link/symlink/`shutil.rmtree`/`shutil.move`, `shutil.copyfile`'s destination, and any
+  `subprocess.Popen` argument or cwd, whose path resolves under `incoming/`, successful or not. It also covers the
+  newest code that opens the owner's raws, which no (3) sweep has reached: the five library diagnostics
+  (`seestack/diag/`, v0.506.x, not yet on `stable`), which run once, unattended, after his next update. Data: an
+  owner-shaped `incoming/` (a two-pointing `M_42_mosaic_sub/` of 10 and two single targets of 8, three nights,
+  S30 optics), `copy_to_cache` off. Path: `scan_and_organize` → `run_qc_and_solve` with the guard test's stub
+  ASTAP (one target serial, two through the process pool; 26/26 solved) → every diagnostic through
+  `webapp.diagnostics.run_one`, then again through `submit_pending_diagnostics` on a real `JobManager` (and a
+  second boot job cancelled) → `run_stack` on the mosaic. **Result: 0 write-capable calls under `incoming/`, 402
+  read-opens traced; snapshot (size, sha256, mtime) and listing identical.** Positive controls fired: an
+  `open(..., "x")`, `os.remove` and `fits.open(mode="update")` on a sub were each caught. The cancel arrived after the
+  0.5 s job had already finished on this small library, so the job read `done` — not a finding (cancel is unit-tested
+  in `tests/test_diag_*`). Not filed, but noted for a Builder with a spare slot: the tracer is ~60 lines and would
+  make a stronger fifth layer for `test_incoming_readonly_guard.py` than the sentinel, because it sees write-mode
+  opens and calls the sentinel does not wrap.
+- **Rotation: (3) done → next sweep is (4)** (the webapp routers).
+
 ## 2026-11-10 (Builder, branch `claude/fervent-allen-dh3hxr`) — no app change; dogfood `--mosaic --dithered --closing --editor` CLEAN.
 
 Suite 8681 passed / 7 skipped on `337900cb` (xdist `-n 4`, BLAS capped, 16m00s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; FOCUS says nothing ungated). Dogfood `--mosaic --dithered --closing --editor`, chosen because `--dithered` and `--closing` had not run alongside `--mosaic` before: exit 0, nothing overflowing, no console errors. Mosaic: Auto trim 7.9 %; panel map, `grain_uneven` and seams notes agree on the thin top-right panel (3 subs vs 6, ~30 s behind). Dithered: canvas 1212×784 from 78 subs, Auto trim 30.7 % against the recorded 30.3 % apron, panel map silent by this shape's documented design. Closing: *Shoot these before they're gone*, *Plan my week* and its closing line name the same target and the same night. Read as one paragraph, the dithered target's readiness goal (14.2 h, "about 6 fields of sky") looked like a move from the 11.5 h quoted in v0.493.1's entry; checked against the 2×2 on the same pass (~7 h over ~3 fields) it is the same ~2.4 h a field, so not a finding. All three editor drives (field, mosaic, dithered) re-render all 21 ops, Undo/Redo apply, taste chips behave (10 live, 2 at-limit). Standing non-findings only (no ASTAP here; the single-field 3×3/18 h clause is the gated LEAD; `[phone] /life-list [Still to shoot]` 14,513 px by design).
