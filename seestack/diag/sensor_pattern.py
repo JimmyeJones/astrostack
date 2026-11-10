@@ -40,12 +40,11 @@ from __future__ import annotations
 
 import math
 import re
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from seestack.diag import Diagnostic, DiagnosticStopped
+from seestack.diag import Diagnostic, DiagnosticStopped, iter_sub_refs, sub_path
 
 #: Sensor-temperature ranges (°C), as reported by the Seestar in each sub.
 TEMP_BINS: tuple[tuple[float, float], ...] = (
@@ -101,13 +100,6 @@ def _prepared(path: str) -> np.ndarray | None:
     b /= sd
     np.clip(b, -5.0, 5.0, out=b)
     return b.astype(np.float32)
-
-
-def _frame_path(f: Any) -> str | None:
-    for p in (getattr(f, "cached_path", None), getattr(f, "source_path", None)):
-        if p and Path(p).exists():
-            return p
-    return None
 
 
 def _base_name(name: str) -> str:
@@ -190,7 +182,7 @@ def _measure(by_target: dict[str, list[Any]], rng: np.random.Generator,
                 f = pool.pop(int(rng.integers(len(pool))))
                 picked += 1
                 tick()
-                path = _frame_path(f)
+                path = sub_path(f)
                 b = _prepared(path) if path else None
                 if b is None:
                     continue
@@ -236,7 +228,7 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
         except Exception:  # noqa: BLE001 — a broken target is skipped
             continue
         try:
-            for f in proj.iter_frames(accepted_only=True):
+            for f in iter_sub_refs(proj, accepted_only=True):
                 every.setdefault(entry.safe_name, []).append(f)
                 t = f.sensor_temp_c
                 if t is None or not np.isfinite(t):

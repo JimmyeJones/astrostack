@@ -31,10 +31,15 @@ anything else is counted under ``other_values`` without its text.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
-from seestack.diag import Diagnostic, DiagnosticStopped, check_result_is_safe
+from seestack.diag import (
+    Diagnostic,
+    DiagnosticStopped,
+    check_result_is_safe,
+    iter_sub_refs,
+    sub_path,
+)
 
 #: Subs read per target, and in all. A header read is cheap (one block), so
 #: this is about the single worker's time on a NAS, not memory.
@@ -77,13 +82,6 @@ def _filter_like_keys(header: Any) -> list[str]:
         if "FILT" in k or k.startswith("LP") or k in ("IRCUT", "UVIR"):
             out.append(k)
     return sorted(set(out))
-
-
-def _frame_path(f: Any) -> str | None:
-    for p in (getattr(f, "cached_path", None), getattr(f, "source_path", None)):
-        if p and Path(p).exists():
-            return p
-    return None
 
 
 def _sample(frames: list[Any], k: int) -> list[tuple[Any, int]]:
@@ -191,7 +189,7 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
         except Exception:  # noqa: BLE001 — a broken target is skipped
             continue
         try:
-            frames = list(proj.iter_frames())
+            frames = list(iter_sub_refs(proj))
         finally:
             proj.close()
         if not frames:
@@ -213,7 +211,7 @@ def run(library, *, progress=None, should_stop=None) -> dict[str, Any]:  # noqa:
             raise DiagnosticStopped("stopped")
         if progress is not None:
             progress("reading headers", i + 1, len(plan))
-        path = _frame_path(f)
+        path = sub_path(f)
         try:
             if path is None:
                 raise OSError("missing")

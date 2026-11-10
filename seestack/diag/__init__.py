@@ -38,9 +38,9 @@ Engine code: no ``webapp`` imports.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 #: ``(phase, done, total)`` — the engine's usual progress shape.
 Progress = Callable[[str, int, int], None]
@@ -62,6 +62,40 @@ class Diagnostic:
 
 class DiagnosticStopped(RuntimeError):
     """Raised by a diagnostic when ``should_stop`` asked it to stop."""
+
+
+class SubRef(NamedTuple):
+    """One sub, reduced to what a diagnostic needs to pick it and open it.
+
+    A diagnostic surveys **every** sub of the library before it samples a few
+    hundred, and it holds that survey for the whole run. A ``FrameRow`` is
+    ``SELECT *`` and carries the sub's plate solution (a FITS header text of
+    ~25 cards), so a survey of ``FrameRow`` s cost ~4 kB a sub — on the owner's
+    library, tens of thousands of subs, hundreds of MB held for minutes on a
+    box with an OOM history. These four columns are all any diagnostic reads.
+    The field names match ``FrameRow`` 's, so either can be handed to
+    :func:`sub_path`.
+    """
+    cached_path: str | None
+    source_path: str | None
+    timestamp_utc: str | None
+    sensor_temp_c: float | None
+
+
+def iter_sub_refs(project: Any, *, accepted_only: bool = False) -> Iterator[SubRef]:
+    """``project`` 's subs as :class:`SubRef` s, in ``iter_frames`` ' own order
+    (by id) — the same subs, without building a ``FrameRow`` for any of them."""
+    for row in project.iter_frame_columns(*SubRef._fields, accepted_only=accepted_only):
+        yield SubRef(*row)
+
+
+def sub_path(f: Any) -> str | None:
+    """The sub's readable file — its cache copy if present, else its source —
+    by the app's one rule for that (``first_existing_frame_path``)."""
+    from seestack.io.project import first_existing_frame_path
+
+    return first_existing_frame_path(getattr(f, "cached_path", None),
+                                     getattr(f, "source_path", None))
 
 
 def registry() -> list[Diagnostic]:
