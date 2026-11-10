@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-11-10 (Builder, branch `claude/fervent-allen-pbc70q`)
+
+### v0.506.8 — fifth library diagnostic, `twin_target_overcount` v1: how inflated is the Dashboard headline today?
+
+**Why.** The Bugs LEAD (Scout 2026-10-18) reproduced that `Library.campaign_stats` and `summarize_library` sum the
+registry's per-target columns, so a sub registered in two targets (#878) counts twice in the Dashboard's frame count,
+integration hours and acceptance denominator. A cheap fix is real design (the registry sum opens no project and
+`/api/stats` is polled every ~10 s), and the entry said to measure first — "the observer can read both". It now ships
+as a diagnostic, the pattern the previous run recorded for gates phrased that way.
+
+**What it measures.** The record only, no FITS file. The registry's own sums (what the headline shows) against every
+target's subs unioned by `source_path` under `_refresh_target_stats_locked`'s rules (every row / accepted rows /
+accepted positive exposure), each sub once — accepted library-wide if any target accepted it, its exposure counted
+once. The per-target counts read *now* (`record_sum`) separate a stale registry column from a double registration.
+Plus how many subs sit in two or more / three or more targets, and the sharing pairs (largest first, anonymous, with
+whether each side is named a mosaic). One 8-byte digest and a small int per distinct sub: 60,000 registered subs in
+12 targets (4 twin pairs) read in 0.8 s at a 12 MB peak, `overcount` 1.5.
+
+**Tests.** +9 (`tests/test_diag_twin_overcount.py`): #878's twin pair reads 10/7; a twin-free library reads 1.0; a
+sub rejected in one twin and kept in the other counts once as kept; a sub in three targets counts once; a stale
+registry column shows as registry ≠ record_sum with no duplicates; no names or paths in the result; an unopenable
+target is counted, not fatal; stop, `ready` (two targets with subs), registered. Engine-only; no config, schema,
+on-disk or API-shape change.
+
 ## 2026-11-10 (Builder, branch `claude/fervent-allen-brcbxl`)
 
 ### v0.506.7 — fourth library diagnostic, `sky_falloff` v1: the S30's own centre-to-edge sky fall-off

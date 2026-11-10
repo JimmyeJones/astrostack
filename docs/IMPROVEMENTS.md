@@ -236,6 +236,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   he has combined them, close this with the measurement rather than paying the hot-path cost. The honest fix if
   it must be paid is probably a registry-level "these targets are twins over the same subs" marker written at
   combine/scan time (so the sum can subtract without a library-wide source_path read), not a scan on every tile.
+  **⏸ Waiting on diagnostic `twin_target_overcount` v1** (v0.506.8, `seestack/diag/twin_overcount.py`; the observer
+  files it as `Diagnostic result: twin_target_overcount v1`). Read `overcount` (registry ÷ distinct): 1.0 on all three
+  closes this; above it, `sharing_pairs` / `pairs[].shared_subs` size the twin-marker fix.
 
 - **LEAD (Builder 2026-10-14, read off a `--no-site` dogfood pass that was otherwise CLEAN) — "Worth more
   time" ranks a target by `total_exposure_s` alone, so it cannot know the picture has already been judged
@@ -3172,6 +3175,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.8 **Fifth library diagnostic, `twin_target_overcount` v1: how much subs registered in two targets (#878) inflate the Dashboard's frame count and integration hours today — the gate on the `/api/stats` headline Bugs LEAD** (`seestack.diag.twin_overcount`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.7 **Fourth library diagnostic, `sky_falloff` v1: how much darker the sky is at the edge and corners of a raw S30 sub than at its centre, with the camera's pedestal taken out — the gate on the dark-ring Bugs entry** (`seestack.diag.sky_falloff`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.6 **Third library diagnostic, `mosaic_panel_hints` v1: does the Seestar write each mosaic panel's own pointing into its subs, or the mosaic's centre — the gate on the un-located-panel Bugs entry** (`seestack.diag.mosaic_hints`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.5 **The two library diagnostics survey the library as four-column `SubRef`s, not whole `FrameRow`s — `sensor_pattern_by_temperature` no longer holds every accepted sub's plate solution for its whole run (`seestack.diag.iter_sub_refs`, `sub_path`).** Full entry in [`SHIPPED.md`](SHIPPED.md).

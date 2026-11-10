@@ -1,5 +1,9 @@
 # Process notes & QA sweep records
 
+## 2026-11-10 (Builder, branch `claude/fervent-allen-pbc70q`) — v0.506.8: diagnostic `twin_target_overcount` v1.
+
+Baseline 8664 passed / 7 skipped on `0b56d5bb` (xdist `-n 4`, BLAS capped, 13m18s). No open PRs; inbox the same four owner-gated issues, no `Diagnostic result:` yet. Dogfood `--mosaic --deep --no-site --restack --big --editor` CLEAN (an earlier `--empty` in the same command short-circuits every other flag — run it alone). Following the previous run's lesson, grepped Bugs for "the observer can read": three hits. Built the #878 headline one (registry sums vs distinct `source_path`, record only). **Left for a later run:** the "Worth more time" LEAD (Builder 2026-10-14) is the same shape but needs the stack's stored σ and the frontend's `CLEAN_SIGMA` mirrored in the engine — sized M, not started; the `.recycle/`/`.zfs/` reach count reads `incoming/`'s top level, which no diagnostic touches yet, and its fix is owner-gated anyway. Environment: `source scripts/agent-setup.sh` leaves `.venv` active only in that shell — later Bash calls need `source .venv/bin/activate` (the first suite attempt failed on "No module named pytest").
+
 ## 2026-11-10 (Builder, branch `claude/fervent-allen-brcbxl`) — v0.506.6 / v0.506.7: two diagnostics for two observer-gated Bugs entries.
 
 Four Builder runs in a row had found "nothing ungated" and shipped a clean dogfood. But two Bugs gates (the
