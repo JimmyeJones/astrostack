@@ -1,5 +1,31 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-i0xwhr`) — QA rotation sweep (1), new angle — the Full-res PNG's STF tone against the stored preview on canvases wider than the 8000 px cap, after v0.506.19's finer load grid: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8715 passed / 7 skipped on `b6dd3518` (xdist `-n 4`, BLAS capped, 16m32s). No open PRs. Inbox: the
+  same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors, Auto
+  trim 7.9 %).
+- **Sweep (1).** Took the lead the 11-11 `dsfjim` (1) left, which v0.506.19's entry asked to have checked: does
+  the finer load grid of `full_res_load_width` move the STF tone against the stored preview? By reading, the stored
+  preview (`_write_preview_png`) runs `_autostretch_for_export` on the **native** canvas and box-shrinks it
+  afterwards. The Full-res PNG measures the STF on whatever grid `load_stack_rgb` loaded. So the fix moves the
+  download *toward* the preview's grid, never away: a 9000 px canvas trimmed to 0.8 now loads at native size, the
+  preview's own grid. Driven with the real `_write_preview_png` and `render_preview_png_full_res` on synthetic linear
+  masters (sky 0.02 ± 0.004 per pixel, gradient, faint glow, ~1 star per 4000 px, NaN left border and a NaN corner).
+  The download was box-shrunk back onto the preview grid and compared over covered pixels, in 8-bit:
+  7900 px (control, same grid) **0.00 / max 0**; 12000 px untrimmed **mean 1.37, p99 10, max 26**; 16000 px
+  untrimmed **2.64 / 20 / 29**; 9000 px trimmed 0.8 (now native) **0.70**, which is my crop rounding against the
+  preview, not tone; 12000 px trimmed 0.9 **1.11 / 7 / 19**. Sky median equal in every case (17 vs 17; 16 vs 17 at
+  16000 px). The residual sits on the stars and is the documented averaging-vs-stretching non-linearity
+  (`render_preview_png_full_res` docstring, `tests/test_asinh_curve_residual.py`), well under the asinh path's
+  accepted 16. Not filed. Pre-existing for any canvas over the cap, and the owner's largest mosaic is ~3.5k px.
+  The menu's size line half of the lead shipped with v0.506.19's own webapp tests (`full_res_png_size` replays
+  the load grid), so it was read, not re-driven.
+- **Not yet run in a sweep (1):** the archive's member for a North-up-baked mosaic over the cap (the fallback rule —
+  a file at exactly the cap is reported — still read, not driven).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-vrbblx`) — QA rotation sweep (4), new angle — what the observer's read-only token can make its seven allowlisted GETs *write* or *disclose*: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8712 passed / 7 skipped on `5a34c1bd` (xdist `-n 4`, BLAS capped, 17m18s). No open PRs. Inbox: the
