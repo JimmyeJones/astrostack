@@ -1,5 +1,18 @@
 # Shipped — the record
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-crb7x5`)
+
+### v0.506.25 — an API GET that names no route is a 404, not the SPA shell with 200
+
+**What.** With the frontend built, `_mount_spa`'s catch-all `GET /{full_path:path}` answered *every* unmatched
+GET — including `/api`, `/api/` and any `/api/<typo>` — with `index.html` and status 200. `spa` now returns
+`404 {"detail": "Not Found"}` for the `api` path segment (exactly `api` or `api/…`); every other path behaves as
+before. Found by Scout sweep (4); no frontend call hits it today (all 220 `/api` paths in `frontend/src` resolve).
+
+**Tests.** `tests/webapp/test_spa_static.py`: five unknown-`/api` GETs answer 404 JSON (parametrised), and an
+end-to-end `create_app()` with a built static dir keeps `/api/health` 200, `/library` the shell and
+`/api/no-such-route` 404 — all six fail before; `/apiary` still gets the shell. Suite 8758 passed / 7 skipped.
+
 ## 2026-11-11 (Builder, branch `claude/focused-noether-tg89tj`)
 
 ### v0.506.24 — the editor's Print menu sizes the cropped picture, so its default is one the export prints

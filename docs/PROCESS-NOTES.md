@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-crb7x5`) — QA rotation sweep (4), new angle — GETs under `/api` that name *no* route, against the built SPA's catch-all, and every frontend `/api` path against the server's route table: one bug, Scout-fixed (v0.506.25). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8758 passed / 7 skipped with the fix on `1ca7f834` (xdist `-n 4`, BLAS capped, 16m11s). No open PRs. Inbox: the
+  same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors,
+  Auto trim 7.9 %).
+- **Sweep (4), angle not run before** (grep `percent-enc`, `content-type`, `If-None-Match`, `/api/` + `shell` in this
+  file: 0). Every earlier (4) sweep called routes that *exist*; none asked what a path under `/api` that names no
+  route answers once the frontend is built (the test tree has no `webapp/static/`, so the suite never mounts the
+  catch-all). Ran it on `create_app()` with the dogfood's built frontend: `GET /api/no-such-route`,
+  `/api/targets/M_42/no-such`, `/api/diagnosticz`, `/api`, `/api/` — **all `200 text/html`, the SPA shell**
+  (`_mount_spa`'s `/{full_path:path}` catches them); an unknown POST is 405, a GET on a POST-only path is the shell
+  too. Then extracted all 220 `/api/...` literals from `frontend/src` (non-test) and matched them against
+  `app.openapi()` paths: every one resolves (the 15 regex misses were `${…}` query suffixes, each checked by hand),
+  so **no screen hits it today** — the harm is latent: the next typo'd or version-skewed path surfaces in
+  `client.ts` `req` as "Unexpected token '<' … is not valid JSON", and the observer's read-only client (whose clone
+  has drifted from the deployed app, #1015) reads a missing endpoint as a 200. **Scout-fixed** (one guard in `spa`,
+  404 JSON under the `/api` *segment* only — `/apiary` still gets the shell; no client route lives under `/api`):
+  6 tests fail before, pass after. Route-shape note: `app.routes` holds `_IncludedRouter` wrappers in this FastAPI,
+  so a route-table walk needs `app.openapi()["paths"]`.
+- **Not yet run in a sweep (4):** wrong-method on a real path (a GET on a POST-only route is now 404, not 405 —
+  harmless, not pursued); `HEAD` on the file-serving GETs.
+- **Rotation: (4) done → next sweep is (1)** (preview↔export parity at mosaic scale).
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-5y9dxt`) — QA rotation sweep (3), new angle — a sub caught *mid-copy* by a manual scan, solved by a stub ASTAP, then finished: the plain truncated copy recovers CLEAN; a *pre-sized* (zero-filled) copy keeps a blank-frame QC — one bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8751 passed / 7 skipped on `71aad059` (xdist `-n 4`, BLAS capped, 17m31s). No open
