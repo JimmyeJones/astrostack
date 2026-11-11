@@ -253,6 +253,46 @@ def preview_grid_size(
     return int(full_w), int(full_h)
 
 
+#: The narrowest kept fraction of the canvas width a trim may widen the
+#: Full-res load for. Auto's trim (``largest_covered_rect(min_frac=0.5)``) never
+#: keeps less than half the canvas *area*, so never less than half its width:
+#: this floor is never reached by the app's own trim and only bounds the load —
+#: at most twice the cap wide — against a caller handing a sliver.
+_TRIM_LOAD_MIN_FRACTION = 0.5
+
+
+def full_res_load_width(
+    canvas_w: int, crop: tuple[float, float, float, float] | None,
+    max_long_edge: int, *, display_space: bool = False,
+) -> int:
+    """The ``max_width`` :func:`render_preview_png_full_res` loads a canvas at.
+
+    Without a trim it is the cap itself, as it always was. With one, the canvas
+    is loaded wide enough that the **trimmed** width — not the whole canvas —
+    lands at the cap, so the cut picture is not shrunk below its true size. A
+    9000 px canvas trimmed to a true 7200 px used to be area-averaged to 8000
+    first and come out 6400 px (Scout 2026-11-11). Never wider than the canvas
+    (a narrower one is read at native size whatever ``max_width`` says), and a
+    finished display-space edit, which ignores ``crop``, keeps the cap. Shared
+    with ``webapp.pipeline.full_res_png_size`` so the menu predicts the file's
+    own size with the same arithmetic."""
+    if crop is None or display_space or int(canvas_w) <= max_long_edge:
+        return max_long_edge
+    frac = min(1.0, max(float(crop[2]) - float(crop[0]), _TRIM_LOAD_MIN_FRACTION))
+    return max(max_long_edge, min(int(canvas_w), math.ceil(max_long_edge / frac)))
+
+
+def _fits_canvas_width(fits_path: str | Path) -> int:
+    """``NAXIS1`` of the first HDU carrying pixels — the header only."""
+    from astropy.io import fits as _fits
+
+    with _fits.open(fits_path, memmap=True) as hdul:
+        for hdu in hdul:
+            if int(hdu.header.get("NAXIS", 0) or 0) >= 2:
+                return int(hdu.header.get("NAXIS1", 0) or 0)
+    return 0
+
+
 def load_stack_rgb(
     fits_path: str | Path, *, max_width: int = 1024,
 ) -> tuple[np.ndarray, bool]:
@@ -505,7 +545,9 @@ def render_preview_png_full_res(
     bytes.
 
     ``crop`` is fractional ``(x0, y0, x1, y1)`` canvas bounds — the ragged-border
-    trim a picture nobody edited gets on download (the webapp decides when). It
+    trim a picture nobody edited gets on download (the webapp decides when). A
+    canvas wider than the cap is loaded at :func:`full_res_load_width`, so the
+    *trimmed* picture — not the canvas — is what meets the cap. It
     is cut **after** the stretch, so the tone is the one measured on the whole
     canvas, i.e. still the stored preview's look, and before the North-up turn,
     because the bounds are fractions of the canvas grid. It goes through the
@@ -520,9 +562,19 @@ def render_preview_png_full_res(
 
     from seestack.stack.output import _autostretch_for_export
 
-    # ``load_stack_rgb`` area-averages the width down to ``max_long_edge`` during
-    # load (cheap for a wide image); a tall image's height is capped after stretch.
-    rgb, display_space = load_stack_rgb(fits_path, max_width=max_long_edge)
+    # ``load_stack_rgb`` area-averages the width down during load (cheap for a
+    # wide image); a tall image's height is capped after stretch. With a trim the
+    # load targets the *trimmed* width (``full_res_load_width``) — shrinking the
+    # whole canvas to the cap and only then cutting left a trimmed picture that
+    # fits under the cap smaller than its true size, for no reason.
+    load_w = max_long_edge
+    if crop is not None:
+        from seestack.stack.output import fits_is_display_space
+
+        load_w = full_res_load_width(
+            _fits_canvas_width(fits_path), crop, max_long_edge,
+            display_space=fits_is_display_space(fits_path))
+    rgb, display_space = load_stack_rgb(fits_path, max_width=load_w)
     # This function owns ``rgb`` — nothing else can see it — and never reads it
     # again once the stretch has run, so every step below consumes rather than
     # copies. On the owner's 3494×2470 mosaic the decimated array is ~104 MB and
@@ -536,7 +588,7 @@ def render_preview_png_full_res(
         stretched = asinh_stretch(
             rgb, stretch=float(stretch), black=float(black),
             stats=_preview_grid_asinh_stats(
-                fits_path, rgb, rendered_max_width=max_long_edge))
+                fits_path, rgb, rendered_max_width=load_w))
     else:
         stretched = _autostretch_for_export(rgb, copy=False)
     del rgb  # the stretch is the only reader; free it before the clip
