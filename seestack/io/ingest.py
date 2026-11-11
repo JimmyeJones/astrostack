@@ -413,6 +413,28 @@ def ingest_files(
                 # QC verdict and plate solution alone; the new mtime is still
                 # recorded below so this doesn't re-check on every future scan.
                 content_changed = False
+                # ...unless the QC on record says it measured a *blank* frame.
+                # A writer that pre-sizes the file (full length up front, the
+                # tail zero-filled — how a Windows/SMB copy lands on a share)
+                # leaves a sub that a scan can catch mid-copy with its final size
+                # and header already in place: it is QC'd as zeros (star_count 0)
+                # and, once the copy finishes, reads here as a timestamp-only
+                # re-copy — so the good sub kept a cloudy-looking QC for ever
+                # (Scout 2026-11-11, sweep (3)). Re-QC it once: the plate solution
+                # is the header's, so it stays; a user's own verdict is never
+                # touched; and the new mtime is recorded below, so a genuinely
+                # blank sub re-copied by a NAS re-sync costs one QC, not one per
+                # scan.
+                if (prior.id is not None and prior.star_count == 0
+                        and prior.accept and not prior.user_override):
+                    if copy_to_cache and prior.cached_path:
+                        # The Stage-1 copy was taken from the same pre-sized
+                        # file, so its size matches and the size-only staleness
+                        # check below can't see it — re-copy it outright.
+                        recovered = _copy_to_stage1(project, cache, src,
+                                                    prior.id, force=True)
+                    project.reset_frame_qc(prior.id)
+                    refreshed = True
             if content_changed and _source_incomplete(src):
                 # The fingerprint changed but the source isn't a complete, readable
                 # FITS yet — a copy / in-place rewrite caught mid-flight by the
