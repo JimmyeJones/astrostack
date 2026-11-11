@@ -1,5 +1,24 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-vlbnkm`) — QA rotation sweep (3), new angle — the solve's scratch copy hitting a *full container temp dir*, through a real scan + solve, read for what the owner is told: side effects CLEAN; one bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8715 passed / 7 skipped on `9848e5b7` (xdist `-n 4`, BLAS capped, 15m49s). No open
+  PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+  No `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors,
+  Auto trim 7.9 %).
+- **Sweep (3), new angle.** The 2026-10-20 sweep (`zen-curie-6t1j5s`) broke the scratch copy with patched errors and
+  checked side effects, then stood the message down as "a disk that full fails the job's own DB/cache writes too".
+  This one made the full disk *real* and *separate*, as it is in the container (temp dir on the container layer,
+  `data_root` on a mounted dataset): `TMPDIR` on a 3 MB tmpfs, a 2-panel S30-shaped `M_42_mosaic_sub/` of 12 ×
+  4.1 MB subs (spaces in the names, `copy_to_cache` off), the guard test's stub ASTAP, `scan_and_organize` →
+  `run_qc_and_solve` (pool, 4 workers). **Side effects CLEAN:** `incoming/` size/mtime/sha256-identical, nothing left
+  in the temp dir, ASTAP never started. **The premise does not hold:** every DB write succeeded, the pass ended
+  `solve_ok: 0` with 12/12 stored `solve_failed:OSError: [Errno 28] …` (frame name cut off at 120 chars), no log line,
+  and `summarize_rejections` gives the `dominant:solve_failed` verdict telling the owner to check his subs for
+  trails or fog; the free-space surfaces measure `data_root` only. Filed 🟢 S in Bugs with a fix shape. ffmpeg was
+  not driven this run (it decodes through a pipe and writes no scratch, so a full temp dir does not reach it).
+- **Rotation: (3) done → next sweep is (4)** (the webapp routers).
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-geies9`) — QA rotation sweep (2), new angle — the star mask's canvas-wide 0.15 floor (`edit/starmask.star_mask`, `hi` = the 99.9th-pct top-hat of the *whole* picture) on an uneven mosaic: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8715 passed / 7 skipped on `061c139f` (xdist `-n 4`, BLAS capped, 14m37s). No open PRs. Inbox: the same
