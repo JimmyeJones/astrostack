@@ -1,5 +1,30 @@
 # Shipped — the record
 
+## 2026-11-11 (Builder, branch `claude/focused-noether-paumkw`)
+
+### v0.506.18 — a sub whose file name is not valid UTF-8 is one unreadable sub, never a failed scan
+
+**Why.** Scout 2026-11-11 QA sweep (3) filed it reproduced: Python holds a non-UTF-8 name with surrogate escapes, SQLite
+refuses to store one, and `Project.add_frame`'s `UnicodeEncodeError` propagated out of `ingest_files`, out of
+`scan_and_organize`'s per-unit loop and out of the pipeline's scan step — so every target sorted after the file never
+ingested and nothing was QC'd, solved or stacked, on every scan, until the file was renamed (which the app must never do,
+AGENTS.md §10). Likelihood on the owner's install is unknown (a `utf8only` ZFS dataset refuses such names; a
+legacy-encoding share or copy can leave one).
+
+**What changed.** `seestack.io.ingest.name_is_valid_text` / `printable_name`: `ingest_files` reports such a file as an
+error with a plain-language reason (`NAME_NOT_TEXT_ERROR`: "rename it on your computer") instead of raising, so it lands in
+the scan's existing unreadable-subs note; the names reaching the job summary and the remembered unreadable-folders record
+show the bad bytes as U+FFFD so they survive JSON. A *folder* whose name is not valid text goes straight to
+`_hold_back_unreadable_new_target`, which counts its files as unreadable and mints no target (the registry lookup itself
+would have raised). `scan_and_organize`'s per-unit loop now lets every other target ingest when one raises, then re-raises
+the first failure, so a real fault (full disk, locked registry) still fails the step loudly. `RingBufferLogHandler`
+sanitises surrogates in a record, because one log line quoting such a path made every `/api/logs` response fail to encode
+until it aged out. `incoming/` is only read.
+
+**Tests.** +5 in `tests/test_ingest_non_utf8_names.py` (the Scout's repro tree scans all three targets with one error and a
+byte-identical `incoming/`; a bad-name folder is reported, not registered; a scoped scan; per-unit isolation) and +1 in
+`tests/webapp/test_logs.py`. All five behavioural tests fail with the fix reverted.
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-usq0cn`)
 
 ### v0.506.17 — a plate solve whose ASTAP console output is not UTF-8 is still a solve
