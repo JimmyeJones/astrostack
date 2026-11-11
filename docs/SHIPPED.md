@@ -2,7 +2,7 @@
 
 ## 2026-11-11 (Builder, branch `claude/focused-noether-po8hte`)
 
-### v0.506.22 — a full container temp dir is a setup problem, not subs that "couldn't be located"
+### v0.506.23 — a full container temp dir is a setup problem, not subs that "couldn't be located"
 
 **What.** Every plate solve copies its sub into a scratch dir under `tempfile.gettempdir()` — the container's own
 layer, a different filesystem from the mounted library. When that was full, every solve failed before ASTAP ran
@@ -50,6 +50,20 @@ not done (the log line and banner carry the cause).
   dir and its free space, and give it a plain banner; optionally add the temp dir's free space to `/api/system`.
   Regression test: point `TMPDIR` at a full location (or patch `shutil.copy2` to raise ENOSPC) and assert the
   canonical reason and that no `solve_failed` verdict blames the subs.
+
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-kab7ux`)
+
+### v0.506.22 — a frame id or page window past SQLite's integer range is "no such frame", not a 500
+
+**Why.** The Scout's sweep (4) fed hostile numbers to every GET route (302 requests): everything was clamped or
+refused except the frames routes, where an id or `offset`/`limit` above 2⁶³−1 reached `sqlite3` and raised
+`OverflowError` — four 500s (`GET /frames`, `GET`/`PATCH /frames/{id}`, `/frames/{id}/preview`). No screen sends
+such a number; fixed for robustness because it is two clamps.
+
+**What changed.** `seestack.io.project.Project.get_frame` returns `None` for an id outside SQLite's INTEGER range
+(so the routes' existing 404 answers it); `Project.iter_frames_page` clamps `offset`/`limit` to that range (a huge
+`limit` returns every row, a huge `offset` none). Test: `tests/webapp/test_frames_out_of_range_ids.py` (fails 5/5
+before).
 
 ## 2026-11-11 (Builder, branch `claude/focused-noether-mpprlu`)
 

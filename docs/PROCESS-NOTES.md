@@ -1,5 +1,28 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-kab7ux`) — QA rotation sweep (4), new angle — hostile numbers in every GET route's numeric and `recipe` query params and in its `run_id`/`frame_id` path params: one bug, Scout-fixed (v0.506.22). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8715 passed / 7 skipped on `c722bb69` (xdist `-n 4`, BLAS capped, 17m34s). No open
+  PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+  No `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors,
+  Auto trim 7.9 %).
+- **Sweep (4), angle not run before** (grep `99999`, `OverflowError`, `query param` bounds in this file: the
+  2026-10 non-finite sweep fed bare `NaN`/`Infinity` into *mutating bodies* only). Enumerated the 169 GET routes
+  from the routers, then on a real scanned library with a 600×400 stack run fed every `int`/`float` query param
+  `nan`, `inf`, `-inf`, ±1e308, -1, 0 and ±10²⁰, every `recipe` query param a base64 recipe carrying a NaN
+  `tone.levels.black`, an infinite `tone.stretch.target_bg` and a NaN `geometry.crop.x0`, and every `run_id` /
+  `frame_id` path param 10²⁰ — 302 requests. **Clamps hold everywhere a size reaches memory** (render `size`,
+  loupe `size`, before-after `width` via `build_before_after`, frame preview `size`, montage `limit`, star-mask
+  `size_px`/`grow`, stats/recap `months`; stack-estimate's knobs go through `validate_stack_options`), and every
+  NaN/inf recipe is refused or rendered without a 500. Run-id routes look the run up in Python, so a 10²⁰ run id is
+  a clean 404. **One bug, four 500s:** `GET /frames?offset=10²⁰` / `?limit=10²⁰`, `GET /frames/10²⁰`, its
+  `/preview` (and by the same call `PATCH /frames/10²⁰`) — `sqlite3` raises `OverflowError` binding an int past
+  2⁶³−1. No screen sends one, so it is a robustness fix, not a user-visible one; Scout-fixed because it is two
+  clamps (`Project.get_frame` → `None`, `iter_frames_page` clamps to the range) with a test that fails 5/5 before.
+  The Content-Disposition angle (non-ASCII target names in download headers) was checked first and is dead:
+  `make_safe_name` and `safe_basename` are ASCII-only, so every header filename is latin-1-safe.
+- **Rotation: (4) done → next sweep is (1)** (preview↔export parity at mosaic scale).
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-vlbnkm`) — QA rotation sweep (3), new angle — the solve's scratch copy hitting a *full container temp dir*, through a real scan + solve, read for what the owner is told: side effects CLEAN; one bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8715 passed / 7 skipped on `9848e5b7` (xdist `-n 4`, BLAS capped, 15m49s). No open
