@@ -1,5 +1,26 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-jy9aay`) — QA rotation sweep (4), new angle — the editor's download-by-job routes and the files their jobs leave on disk: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8693 passed / 7 skipped on `080dbfd5` (xdist `-n 4`, BLAS capped). No open PRs. Inbox: the
+  same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (EXIT 0, nothing overflowing, no console errors,
+  Auto trim 7.9 %).
+- **Sweep (4), angle not run before** (grep `download_png`, `submit_editor_png`, `_edit_` in this file and the
+  backlog: no sweep had asked it). Every earlier (4) sweep read a route's *answer*, *headers* or *concurrency*; none
+  asked what a job-backed download leaves behind once it has been handed over. `GET …/editor/png|share|print/{job_id}`
+  serves `job.result["png_path"/"jpeg_path"]`, and the jobs that make them (`pipeline.submit_editor_png`,
+  `submit_editor_share`, `submit_editor_print`) write a **new timestamped file per click** into the target's
+  `output/`. Nothing removes them: they are not in `RUN_ARTEFACT_SUFFIXES`, so `routers/storage.purge_stack_run`
+  (run Delete and "Prune old stacks") leaves them, and no other code path globs them. **Reproduced** on the
+  `tests/webapp` fixture (two `export-png` + one `share` on an 800×1000 run, then the run's `DELETE` → 200, all
+  three still on disk and in `output_bytes`); **measured** ~43 MB for one PNG of a 4200×6400 stretched sky. Filed
+  🟡 S in Bugs with a fix shape.
+- **Read clean:** the download routes do not check the job's `safe`/`run_id` against the URL's, but the only caller
+  (`frontend/src/api/client.ts`) builds the URL from the job it just submitted, so no screen can reach a mismatch.
+  Same-second timestamp collisions between two exports of one run need two full-res renders inside one second on
+  the single worker — not reachable at the owner's canvas sizes.
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-mh7yxx`) — QA rotation sweep (3), new angle — ASTAP exits 0 but leaves a *cut-short* `.wcs` sidecar: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8691 passed / 7 skipped on `a38ef3e4` (xdist `-n 4`, BLAS capped, 14m18s). No
