@@ -36,6 +36,10 @@ log = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 22
 
+#: SQLite's INTEGER range — an int outside it cannot be bound as a parameter.
+_SQLITE_INT_MAX = 2 ** 63 - 1
+_SQLITE_INT_MIN = -(2 ** 63)
+
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
 PRAGMA journal_mode = WAL;
@@ -1464,6 +1468,10 @@ class Project:
 
     def get_frame(self, frame_id: int) -> FrameRow | None:
         assert self._conn is not None
+        # An id SQLite cannot store names no row; binding it would raise
+        # ``OverflowError`` and surface as a 500 on the frames routes.
+        if not _SQLITE_INT_MIN <= int(frame_id) <= _SQLITE_INT_MAX:
+            return None
         row = self._conn.execute("SELECT * FROM frames WHERE id = ?", (frame_id,)).fetchone()
         return _row_to_frame(row) if row else None
 
@@ -1843,8 +1851,11 @@ class Project:
         assert self._conn is not None
         if sort not in _FRAME_COLUMNS:
             raise ValueError(f"not a frame column: {sort!r}")
-        offset = max(0, int(offset))
-        limit = max(0, int(limit))
+        # Clamped to SQLite's INTEGER range too: a larger value cannot be bound
+        # (``OverflowError``), and the clamp answers it the same way — every row
+        # for a huge ``limit``, none for a huge ``offset``.
+        offset = min(max(0, int(offset)), _SQLITE_INT_MAX)
+        limit = min(max(0, int(limit)), _SQLITE_INT_MAX)
         where = " WHERE accept = 1" if accepted_only else ""
         direction = "DESC" if descending else "ASC"
         # `<col> IS NULL` is 0 for a measured row and 1 for an unmeasured one, so

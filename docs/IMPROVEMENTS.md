@@ -3186,6 +3186,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.22 **A frame id or page window past SQLite's 64-bit integer range answers 404 / a clamped page instead of a 500 on the frames routes (`Project.get_frame`, `iter_frames_page`)** — Scout sweep (4) 2026-11-11, `claude/optimistic-cannon-kab7ux`.
 - ✅ v0.506.21 **A sub whose file time is in the future (a source clock running ahead of the app's) is ingested by the folder watcher after the ordinary quiet period — before, it never went stable until the app's clock caught up, and no batch fired** (`watcher.StabilityTracker.update`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.20 **The editor's Download PNG / Share / Print files no longer pile up in `output/` — a newer click of one button replaces the older file, and deleting or pruning the run removes them all** (`output.replace_older_editor_downloads`, `storage._delete_editor_downloads` in `purge_stack_run`)
 - ✅ v0.506.19 **An unedited trimmed canvas wider than the 8000 px Full-res cap keeps its true size — the canvas was shrunk to the cap *before* the trim, so a 9000 px canvas trimmed to 7200 px downloaded at 6400 px and the archive counted it full size** (`thumbnail.full_res_load_width`, `render_preview_png_full_res`, `pipeline.full_res_png_size`)
