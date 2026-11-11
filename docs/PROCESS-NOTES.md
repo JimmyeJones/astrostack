@@ -1,5 +1,36 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-geies9`) — QA rotation sweep (2), new angle — the star mask's canvas-wide 0.15 floor (`edit/starmask.star_mask`, `hi` = the 99.9th-pct top-hat of the *whole* picture) on an uneven mosaic: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8715 passed / 7 skipped on `061c139f` (xdist `-n 4`, BLAS capped, 14m37s). No open PRs. Inbox: the same
+  four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No `Diagnostic
+  result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors, Auto trim 7.9 %;
+  the Target page's notes agree — top-right panel 30 s behind a 1 min typical panel).
+- **Sweep (2).** No per-panel code since the last (2) (`x5qu3g`): v0.506.19–21 are the Full-res cap, editor-download
+  reclaim and the watcher's future mtime. Took the unswept item `x5qu3g` left: `star_mask` normalises the top-hat by
+  one whole-picture reference and floors it at 0.15 of that, so on a mosaic the one STF stretch (set by the typical
+  panel) leaves a thin panel's grain 2–3× louder in display space, and its noise can clear the floor that a uniform
+  field's self-normalising stretch keeps it under. Driven on synthetic 1600² linear canvases (sky 0.05, 900 Gaussian
+  stars σ 1.3 px, left half deep, right half thin with noise ×√ratio and a matching coverage plane) through the real
+  `auto_recipe(is_mosaic=True, coverage=…)` → `apply_recipe`, then `star_mask(size_px=4)` (the `stars.reduce` default
+  gate) and the two star ops at their defaults, measured on background pixels > 8 px from any star:
+  even canvas (1:1) mask > 0.1 on **0.6–1.4 %** of either half; **2:1 (the dogfood's own unevenness) 0.6 % deep /
+  1.3 % thin**, star reduction darkens the thin sky by **0.0023** of display range (0.0005 deep), `boost_nebula`'s lift
+  0.0189 thin vs 0.0198 deep; **4:1** mask > 0.1 on 11–78 % of the thin sky (mean weight 0.08–0.11 vs 0.004–0.005),
+  darkening **0.006–0.008** of a ~0.156 sky (≈ 1.5–2 of 255), lift 0.0175 vs 0.0201, thin-sky std 0.0743 → 0.0709.
+  At 9:1 the whole thin sky is masked (darkening 0.010–0.019). **Not filed:** neither op is in Auto (only the "Star
+  cluster" preset and a manual add); at the owner's realistic 2:1 the effect is under one 8-bit level; and at 4:1
+  it is smaller than the panel's own pre-existing mismatch in the same render (thin sky 0.016 brighter and 2.4×
+  grainier than deep after the shared stretch) and moves the thin panel *toward* the deep one. If a mosaic panel
+  ever needs a per-panel look, a coverage-relative floor (`ctx.frame_coverage`) is where to start — not before.
+- **Side observation, not filed:** in the same render the thin panel's *mean* display sky sits 0.004 (2:1) to 0.035
+  (9:1) above the deep panel's with equal linear sky — the stretch's curvature acting on louder noise. That is the
+  grain, not a level step a user could level away; recorded only so the next (2) does not mistake it for one.
+- **Not yet run in a sweep (2):** `tone.stretch`'s STF on a mosaic is measured over the whole canvas; whether
+  `background.final_gradient`'s per-panel leveling (`frame_coverage` bins) and the shared STF agree on a panel that
+  is thin *and* hazier was read, not driven.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-i0xwhr`) — QA rotation sweep (1), new angle — the Full-res PNG's STF tone against the stored preview on canvases wider than the 8000 px cap, after v0.506.19's finer load grid: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8715 passed / 7 skipped on `b6dd3518` (xdist `-n 4`, BLAS capped, 16m32s). No open PRs. Inbox: the
