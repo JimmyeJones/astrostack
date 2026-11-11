@@ -1,5 +1,26 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-5y9dxt`) — QA rotation sweep (3), new angle — a sub caught *mid-copy* by a manual scan, solved by a stub ASTAP, then finished: the plain truncated copy recovers CLEAN; a *pre-sized* (zero-filled) copy keeps a blank-frame QC — one bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8751 passed / 7 skipped on `71aad059` (xdist `-n 4`, BLAS capped, 17m31s). No open
+  PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+  No `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors,
+  Auto trim 7.9 %).
+- **Sweep (3), new angle.** Earlier (3) sweeps cut short a Moon & Sun *video* (10-21) and fed ASTAP a cut-short `.wcs`
+  (`mh7yxx`); none drove a *FITS sub* caught mid-copy through scan → QC → solve and then finished the copy. Rig:
+  `scan_and_organize` + `run_qc_and_solve(only_new_qc=True)` (the scan job's own call) twice, `copy_to_cache` off,
+  12 synthetic S30-tagged subs in `M_42_mosaic_sub/` (spaces in names), a Python stub ASTAP that logs its `-f` and
+  size, refuses unreadable or mostly-constant data, else writes `.wcs`/`.ini` beside its scratch copy.
+  **(a) Truncated copy (half the bytes):** pass 1 → `qc_error:` reshape, solve failed (sibling retry too); pass 2,
+  after the copy finished → refreshed (`n_frames_refreshed`), re-QC'd (36 stars), solved. CLEAN. **(b) Pre-sized
+  copy** (full length, zeros from byte 2,880 / 100,000, capture mtime restored at the end, as a Windows/SMB copy
+  does): pass 1 → `star_count` 0, solve failed; pass 2 → re-solved, but **not re-QC'd** — `star_count` 0 / `fwhm_px`
+  None stay. The `_same_capture` branch (same size, moved mtime, same header) reads it as a timestamp-only re-copy.
+  Filed 🟢 S in Bugs with a fix shape; whether the owner's copy path pre-sizes is unverified, said so in the entry.
+  **Side effects CLEAN in every run:** `incoming/` held only the 12 `.fit`, nothing beside them; the stub always got
+  a scratch path. Driver kept in the session scratchpad, not landed.
+- **Rotation: (3) done → next sweep is (4)** (the webapp routers).
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-4ynjos`) — QA rotation sweep (2), new angle — the grain measurement's 10 %-of-canvas floor (`coverage_leveling._GRAIN_MIN_SHARE`) against one under-shot panel on many-panel S30 mosaics: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8728 passed / 7 skipped on `21dd10f3` (xdist `-n 4`, BLAS capped, 16m15s). No open PRs.
