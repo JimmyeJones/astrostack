@@ -5,30 +5,31 @@
 > belongs in `docs/PROCESS-NOTES.md`, never here. The 2,559-line page this replaced is kept verbatim in
 > [`archive/FOCUS-to-2026-10-21.md`](archive/FOCUS-to-2026-10-21.md) — nothing was deleted.
 
-## Front of the queue (2026-11-10)
+## Front of the queue (2026-11-11)
 
-**No ungated bug is open** (the deepening-reel rebuild race shipped as v0.506.15). A Builder should dogfood
-(`--mosaic --editor`) and file what it finds. The `._*.fit` sidecar half of the Scout
+**One ungated bug is open: a sub whose file name is not valid UTF-8 aborts every scan** (🟡 S, Bugs, Scout
+2026-11-11 — skip it as one unreadable sub; keep one target's exception from stopping the rest). The `._*.fit` sidecar half of the Scout
 2026-11-03 entry shipped as v0.505.10; its `.recycle/` / `.Trash-*/` / visible `.zfs/` half (one skip) waits on the
 owner. The owner's ⭐ colour-pattern entry is on HOLD for his per-temperature numbers; the dark ring waits on a
 diagnostic (below).
 
-**Gated, do not start:** the un-located-panel entry (second in Bugs) waits on diagnostic `mosaic_panel_hints` v2
+**Gated, do not start:** the un-located-panel entry (Scout 2026-10-19 in Bugs) waits on diagnostic `mosaic_panel_hints` v2
 (v0.506.10), the dark ring on `sky_falloff` v3 (v0.506.16) and the #878 headline LEAD on `twin_target_overcount` v1 (v0.506.8); the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
 re-litigate a stand-down that carries numbers. **Issue inbox:** #878, #880, #903, #1015 — all previously acted-on
-and owner-gated, none updated since 2026-10-12 (re-checked 2026-11-11, Scout `optimistic-cannon-mw5sgl`). No `Diagnostic result:` issue has landed yet
+and owner-gated, none updated since 2026-10-12 (re-checked 2026-11-11, Scout `optimistic-cannon-usq0cn`). No `Diagnostic result:` issue has landed yet
 (the diagnostics shipped in v0.506.0 / v0.506.1 run after the owner's next update).
 
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (2), 2026-11-10
-→ next sweep is (3).** Each sweep must find a *new* angle — the angles already run are in the `Sweep (N)` entries
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (3), 2026-11-11
+→ next sweep is (4).** Each sweep must find a *new* angle — the angles already run are in the `Sweep (N)` entries
 of `docs/PROCESS-NOTES.md` (grep `sweep (1)`).
 
 ## Run log (newest first)
 
+*2026-11-11 (Scout, branch `claude/optimistic-cannon-usq0cn`) — **QA rotation sweep (3), new angle: the bytes ASTAP *prints* — one bug, Scout-fixed as v0.506.17** (`ASTAPSolver._run_astap` decoded ASTAP's console strictly; one non-UTF-8 byte after a good solve stored the frame unsolved with a decoder traceback and skipped the ladder; now `errors="replace"`) **and one filed reproduced: a non-UTF-8 sub file name aborts every scan** (SQLite refuses the surrogate in `Project.add_frame`; 🟡 S, Bugs). Inbox: the same four, owner-gated; no `Diagnostic result:` yet. Dogfood `--mosaic` CLEAN (trim 7.9 %). Suite 8693 passed / 7 skipped. **START HERE NEXT RUN:** Builder: the non-UTF-8 file-name scan abort (🟡 S, Bugs); Scout: sweep (4), and file `Diagnostic result:` issues when they land.*
 *2026-11-11 (Builder, branch `claude/focused-noether-dtzzop`) — **no app change: nothing ungated; dogfood `--mosaic --editor --restack --deep --calibration` CLEAN** (a combination no pass had run together: calibrated restack records dark + flat applied and the note withdraws; reel 3 → 6 subs, noise-delta ratio 1.642 pixel-exact; Auto trim 7.9 %; both editor drives re-render all 21 ops; deep frames table 301 → 601 of 1,200 rows). v0.506.15's reel lock re-read before its soak ends: sig written after the atomic replace, so an unlocked reader waits — sound. Suite 8691 passed / 7 skipped. **START HERE NEXT RUN:** Builder: nothing ungated until an owner gate or a diagnostic result arrives; Scout: sweep (3), and file `Diagnostic result:` issues when they land.*
 *2026-11-11 (Scout, branch `claude/optimistic-cannon-mw5sgl`) — **collision, no app change:** sweep (2) took the same `sky_falloff` angle as `fwsbuf` and wrote the same fix; dropped for `main`'s v0.506.16 (`one_panel` skips un-solved mosaic subs instead of trusting a hint). Extra measurements in PROCESS-NOTES: v2's bias depends on panel *order* (rotation-shot < 0.005, block-shot 3×3 0.975–0.982). Inbox: the same four, owner-gated; no `Diagnostic result:` yet. Dogfood `--mosaic` CLEAN. **START HERE NEXT RUN:** Builder: nothing ungated until an owner gate or a diagnostic result arrives; Scout: sweep (3) — push a `docs:` claim before starting a carry-forward item.*
 *2026-11-10 (Scout, branch `claude/optimistic-cannon-fwsbuf`) — **QA rotation sweep (2), new angle: the dark-ring gate number `sky_falloff` v2 groups pairs by target, but a mosaic target is several fields — one bug, Scout-fixed as v0.506.16** (v2's pairs crossed panels, so each panel's own part of the object read as vignetting: a vignette-free library two-thirds mosaics read 0.70–0.90 against the 0.97 bar; v3 samples a mosaic's fullest panel, `sky_falloff.one_panel`). Inbox: the same four, owner-gated; no `Diagnostic result:` yet. Dogfood `--mosaic` CLEAN (trim 7.9 %). Suite 8689 passed / 7 skipped. **START HERE NEXT RUN:** Builder: nothing ungated until an owner gate or a diagnostic result arrives; Scout: sweep (3), and file `Diagnostic result:` issues when they land.*
@@ -38,7 +39,6 @@ of `docs/PROCESS-NOTES.md` (grep `sweep (1)`).
 *2026-11-10 (Scout, branch `claude/optimistic-cannon-cw2u6h`) — **QA rotation sweep (4), new angle: overlapping requests on a GET that builds and caches a file — one bug filed reproduced** (`_build_or_get_deepening_reel`: 24 staggered GETs → 9 full renders, 3 bodies 200 but undecodable; fix is a per-reel lock + temp-then-`os.replace`). Diagnostics payload privacy and the locked JSON stores read clean. Inbox: the same four, owner-gated; no `Diagnostic result:` yet. Dogfood `--mosaic` CLEAN. **START HERE NEXT RUN:** Builder: the deepening-reel race (🟡 S, Bugs); Scout: sweep (1), and file `Diagnostic result:` issues when they land.*
 *2026-11-10 (Scout, branch `claude/optimistic-cannon-i30qi1`) — **QA rotation sweep (4), new angle: every image-returning GET route's cache headers against whether its URL changes when its picture does — one bug, Scout-fixed as v0.506.12** (`/api/targets/{safe}/thumbnail`, the Library/Life list/Wishlist/year-card picture at one bare URL, sent no `Cache-Control`, so a browser could keep showing the old picture for days after a new stack or a cover pin; now `no-cache`, as v0.210.7 did for the run preview). Inbox: the same four, owner-gated; no `Diagnostic result:` yet. Dogfood `--mosaic` CLEAN. Suite 8672 passed / 8 skipped (Qt-skip). **START HERE NEXT RUN:** Builder: nothing ungated until an owner gate or a diagnostic result arrives; Scout: sweep (1), and file `Diagnostic result:` issues when they land.*
 *2026-11-10 (Builder, branch `claude/focused-noether-zzbnof`) — **v0.506.11: the first-run "Your first image" card says "you're here" instead of linking a step to the page it sits on** (`firstImageSteps.stepIsHere`) — found by a `--empty` dogfood pass: on an empty Library "Open Library"/"Pick a target" were dead self-links, on an empty Gallery "Open a picture"/"Open your edit". Suite 8681 passed / 7 skipped. **START HERE NEXT RUN:** Builder: nothing ungated until an owner gate or a diagnostic result arrives; Scout: sweep (4), and file `Diagnostic result:` issues when they land.*
-*2026-11-10 (Scout, branch `claude/optimistic-cannon-mgl6hf`) — **QA rotation sweep (3), new angle: a `sys.addaudithook` tracer over every write-capable call (write-mode `open`/`os.open`, rename, remove, chmod, utime, mkdir, `fits.open(mode='update')`) naming a path under `incoming/`, through scan → QC + stub-ASTAP solve (serial and pool) → all five library diagnostics (direct and the boot job, `webapp.diagnostics`) → a mosaic stack, `copy_to_cache` off — CLEAN** (0 write attempts, 402 read-opens; positive controls fire). Inbox: the same four, owner-gated; no `Diagnostic result:` yet. Dogfood `--mosaic` CLEAN. Suite 8681 passed / 7 skipped. **START HERE NEXT RUN:** Builder: nothing ungated until an owner gate or a diagnostic result arrives; Scout: sweep (4), and file `Diagnostic result:` issues when they land.*
 
 ## Standing frontier
 

@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-usq0cn`) — QA rotation sweep (3), new angle — the bytes ASTAP *prints*: one bug, Scout-fixed (v0.506.17). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Environment.** `agent-setup.sh`'s `pip install` ran at ~280 KB/s and was killed at the 30-minute background cap
+  with nothing installed; a second run (`run_in_background`, 2 h timeout) finished, the pip cache carrying what the
+  first had downloaded. Launch setup with the long timeout from the start.
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. No open PRs at start. **Dogfood `--mosaic`:** exit 0, nothing overflowing,
+  no console errors, Auto trim 7.9 %; the Target page's notes agree (4 min of ~7 h, top-right panel 30 s behind); the
+  Dashboard's ASTAP note is the known no-ASTAP non-finding.
+- **Sweep (3), new angle.** Every earlier (3) sweep varied what ASTAP/ffmpeg write, whether they start, how they die,
+  what they are fed, or (11-10) every write-capable call under `incoming/`; none varied the *bytes on the console*.
+  Of the three subprocess call sites, ffprobe decodes with `"replace"` and ffmpeg's frame pipe is binary, but
+  `ASTAPSolver._run_astap` used `subprocess.run(text=True)` — a strict decode. A stub ASTAP that solves, writes both
+  sidecars and prints one `0xB0` byte (a Latin-1 "°" in a "Solution found" line): `solve_one` returned
+  `solved=False`, `error="UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb0 …"`, and the ladder's other two
+  rungs never ran (the exception is not an `ASTAPError`). Mechanism certain; whether the owner's ASTAP build ever
+  emits such a byte is unknown (low confidence in the trigger). Fixed with `encoding="utf-8", errors="replace"` —
+  small and obviously safe, since the console text is only read for messages. Side effects unchanged: the
+  `test_incoming_readonly_guard.py` layer-4 tests still pass. Suite 8693 passed / 7 skipped on `aa1c2ba2` (xdist `-n 4`, BLAS capped, 13m18s).
+- **Second finding, filed reproduced (🟡 S, Bugs):** a source frame whose *file name* is not valid UTF-8 (Python
+  holds it with surrogate escapes) reaches `Project.add_frame`, SQLite refuses the lone surrogate, and
+  `UnicodeEncodeError` escapes `scan_and_organize`'s per-unit loop: targets sorted after it never ingest and the
+  pipeline job fails before QC/solve, on every scan. Not Scout-fixed (one fix a run); the fix is S and ungated.
+- **Rotation: (3) done → next sweep is (4)** (the webapp routers).
 ## 2026-11-11 (Builder, branch `claude/focused-noether-dtzzop`) — no app change: nothing ungated; dogfood `--mosaic --editor --restack --deep --calibration` CLEAN.
 
 Suite 8691 passed / 7 skipped on `86726637` (xdist `-n 4`, BLAS capped, 15m59s). Bugs unchanged (every open entry gated on the owner or a diagnostic result); no open PRs. Dogfood chosen because `--restack`, `--deep` and `--calibration` had not run alongside `--mosaic --editor`: exit 0, nothing overflowing, no console errors. Calibrated restack: run 5 records dark + flat applied, the calibration note withdraws, the suggester is confident on both; reel 3 → 6 subs, noise-delta ratio 1.642 pixel-exact. Mosaic: Auto trim 7.9 %; panel map, `grain_uneven` and seams notes agree on the thin top-right panel (3 subs vs 6, ~30 s behind); next-best-move, readiness and framing verdict point the same way. Both editor drives re-render all 21 ops, Undo/Redo apply, taste chips as before (10 live, 2 at-limit), "Hold back highlights (0.05)" on the mosaic. Deep frames table: 301 of 1,200 rows, grows to 601 on scroll, first paint 1.3 s. Standing non-findings only (no ASTAP here; the single-field 3×3/18 h clause is the gated LEAD; `[phone] /life-list [Still to shoot]` 14,513 px by design). Trap: a dogfood run with these flags takes longer than 10 minutes — a Bash `timeout` of 600000 killed it mid editor-drive (`page.waitForTimeout: Target page … has been closed`), which reads like an editor crash and is not one; give it the background maximum. Also re-read v0.506.15 (`_build_or_get_deepening_reel` lock) inside its soak: the sig is written only after `os.replace`, so an unlocked `_hit()` during a build sees the old sig and waits on the lock — nothing to file.

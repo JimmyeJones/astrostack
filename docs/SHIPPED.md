@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-usq0cn`)
+
+### v0.506.17 — a plate solve whose ASTAP console output is not UTF-8 is still a solve
+
+**Why.** QA rotation sweep (3), new angle: what ASTAP *prints*. Every earlier (3) sweep varied what the binary writes,
+how it starts or dies, or what it is fed; none varied the bytes on its stdout/stderr. `ASTAPSolver._run_astap`
+captured them with `text=True`, a *strict* decode in the locale's encoding (UTF-8 in the image). One byte that is not
+UTF-8 — a Latin-1 degree sign in a "Solution found … +41° …" line, or a frame name echoed back in a legacy encoding —
+raised `UnicodeDecodeError` out of `subprocess.run` *after* ASTAP had solved and written both sidecars. That is not an
+`ASTAPError`, so it also skipped the ladder's other rungs, and `solve_one` stored the frame as unsolved with
+`UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb0 …` as its reason. Reproduced with a stub ASTAP that solves
+and prints one `0xB0` byte. Whether the owner's ASTAP build ever emits such a byte is unknown (confidence in the
+mechanism: certain; in the trigger on his install: low) — but the console text is read only for messages, so a strict
+decode bought nothing.
+
+**What changed.** `subprocess.run(..., text=True, encoding="utf-8", errors="replace")`: a bad byte becomes U+FFFD in the
+log text and the solve result stands. The ffprobe path already decoded with `"replace"`; ffmpeg's frame pipe is binary.
+
+**Tests.** +2 in `tests/test_astap_output_encoding.py` (a real stub binary through the real `solve_one`): a solving
+stub with a non-UTF-8 byte is `solved` with its WCS and centre; a failing one keeps ASTAP's own words and the frame's
+name as its reason. Both fail before the fix.
+
 ## 2026-11-10 (Scout, branch `claude/optimistic-cannon-fwsbuf`)
 
 ### v0.506.16 — diagnostic `sky_falloff` v3 samples a mosaic on one panel
