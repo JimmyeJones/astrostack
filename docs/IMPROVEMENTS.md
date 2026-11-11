@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- `measure_coverage_grain` per-panel grain floor on many-panel mosaics (`_GRAIN_MIN_SHARE`) — Builder, branch `claude/focused-noether-2r12my`, 2026-11-11.
 
 ---
 
