@@ -17,6 +17,21 @@ from typing import Any
 
 DEFAULT_CAPACITY = 3000
 
+
+def _printable(text: str) -> str:
+    """``text`` with surrogate escapes (undecodable bytes from a file name)
+    shown as U+FFFD, so the record still encodes as UTF-8 JSON."""
+    try:
+        text.encode("utf-8")
+        return text
+    except UnicodeEncodeError:
+        pass
+    try:
+        raw = text.encode("utf-8", "surrogateescape")
+    except UnicodeEncodeError:
+        raw = text.encode("utf-8", "replace")
+    return raw.decode("utf-8", "replace")
+
 _LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
 
 
@@ -48,6 +63,10 @@ class RingBufferLogHandler(logging.Handler):
             message = record.getMessage()
             if record.exc_info:
                 message += "\n" + _EXC_FORMATTER.formatException(record.exc_info)
+            # A path whose name is not valid UTF-8 (a sub copied from a
+            # legacy-encoding share) carries surrogate escapes; one stored as-is
+            # made every /api/logs response fail to encode until it aged out.
+            message = _printable(message)
             entry = {
                 "ts": datetime.fromtimestamp(record.created, UTC)
                 .strftime("%Y-%m-%dT%H:%M:%SZ"),
