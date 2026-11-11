@@ -1,10 +1,12 @@
 # Process notes & QA sweep records
 
-## 2026-11-11 (Scout, branch `claude/optimistic-cannon-mh7yxx`) — QA rotation sweep (3), new angle — ASTAP exits 0 but leaves a *cut-short* `.wcs` sidecar: CLEAN. Inbox unchanged. Dogfood `--mosaic` DOGFOOD_RESULT.
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-mh7yxx`) — QA rotation sweep (3), new angle — ASTAP exits 0 but leaves a *cut-short* `.wcs` sidecar: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8691 passed / 7 skipped on `a38ef3e4` (xdist `-n 4`, BLAS capped, 14m18s). No
   open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
-  owed. No `Diagnostic result:` issue yet.
+  owed. No `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (EXIT 0, nothing overflowing, no console
+  errors, Auto trim 7.9 %; only the standing non-findings). Trap: a container restart mid-dogfood reads
+  `page.waitForTimeout: Target page … has been closed` — the kill, not the editor; rerun it.
 - **Sweep (3), new angle.** The 10-30 sweep fed a successful ASTAP a non-finite `.ini`; none fed it a `.wcs` that
   stops part-way (a sidecar written into a full scratch `/tmp`, or a binary killed between its writes after the exit
   code). `wcs_text_is_usable` is only "has a celestial centre": cutting an ASTAP-ordered header card by card shows it
