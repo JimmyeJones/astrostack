@@ -126,6 +126,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   with its numbers and lift the hold. If the cold ranges collapse there, look at dew or frost on the
   optics before building (1).
 
+- **🟡 (Scout 2026-11-11, QA rotation sweep (3), reproduced) — one sub in `incoming/` whose *file name* is not valid
+  UTF-8 aborts every scan: targets after it never ingest, and nothing is QC'd, solved or stacked that pass.**
+  *(Pillar: "just works" autonomy, PRIORITY 2. Severity: total stall of walk-away ingest, repeating on every scan
+  until the file is renamed — which the app must never do (§10). Confidence: mechanism **reproduced**; likelihood
+  on his install **unknown** — a ZFS dataset with `utf8only=on` refuses such names at creation, but a share or copy
+  that wrote them in a legacy encoding (an old SMB/NFS client, `rsync`/`scp` from a Latin-1 system, a FAT stick)
+  can leave one. Size **S**.)* Python holds such a name with surrogate escapes (`os.fsdecode`). `ingest_files`
+  passes it as `FrameRow.source_path` to `Project.add_frame`, and SQLite refuses to encode a lone surrogate:
+  `UnicodeEncodeError: … surrogates not allowed` propagates out of `_ingest_into_target` and out of
+  `scan_and_organize`'s per-unit loop, so `webapp.pipeline._pipeline_body` fails at the scan step. Repro (scratch,
+  synthetic S30 subs, `copy_to_cache` off): `incoming/{A_1,M_42,Z_9}/`, plus `M_42/Light_M42_caf\xe9.fit` →
+  the scan raises; `A_1` (2) and `M_42` (3) are in, `Z_9` never is. **Fix shape:** treat it as one unreadable sub,
+  never a scan failure — skip it in `ingest_files` (count it in `TargetScanResult.n_errors` with a plain-language
+  log line: "this file's name is not valid text; rename it on your computer"), and keep the per-unit loop from
+  letting one target's exception stop the rest. Test: the repro tree scans all three targets, reports one error,
+  and `incoming/` is byte-identical afterwards. Do **not** store the name with `surrogateescape` bytes in a way
+  that later reaches the API/JSON (a lone surrogate may also break a UTF-8-encoded JSON response — unverified).
+
 - **🟡 (Scout 2026-11-03 + 11-07, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/`, `.Trash-*/` or `.zfs/` folder
   a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
   *(Pillar: trust — PRIORITY 2–3; size **S**; severity moderate *if* his share has a recycle bin or sees a desktop

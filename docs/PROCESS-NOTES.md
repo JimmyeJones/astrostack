@@ -1,5 +1,30 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-usq0cn`) — QA rotation sweep (3), new angle — the bytes ASTAP *prints*: one bug, Scout-fixed (v0.506.17). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Environment.** `agent-setup.sh`'s `pip install` ran at ~280 KB/s and was killed at the 30-minute background cap
+  with nothing installed; a second run (`run_in_background`, 2 h timeout) finished, the pip cache carrying what the
+  first had downloaded. Launch setup with the long timeout from the start.
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. No open PRs at start. **Dogfood `--mosaic`:** exit 0, nothing overflowing,
+  no console errors, Auto trim 7.9 %; the Target page's notes agree (4 min of ~7 h, top-right panel 30 s behind); the
+  Dashboard's ASTAP note is the known no-ASTAP non-finding.
+- **Sweep (3), new angle.** Every earlier (3) sweep varied what ASTAP/ffmpeg write, whether they start, how they die,
+  what they are fed, or (11-10) every write-capable call under `incoming/`; none varied the *bytes on the console*.
+  Of the three subprocess call sites, ffprobe decodes with `"replace"` and ffmpeg's frame pipe is binary, but
+  `ASTAPSolver._run_astap` used `subprocess.run(text=True)` — a strict decode. A stub ASTAP that solves, writes both
+  sidecars and prints one `0xB0` byte (a Latin-1 "°" in a "Solution found" line): `solve_one` returned
+  `solved=False`, `error="UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb0 …"`, and the ladder's other two
+  rungs never ran (the exception is not an `ASTAPError`). Mechanism certain; whether the owner's ASTAP build ever
+  emits such a byte is unknown (low confidence in the trigger). Fixed with `encoding="utf-8", errors="replace"` —
+  small and obviously safe, since the console text is only read for messages. Side effects unchanged: the
+  `test_incoming_readonly_guard.py` layer-4 tests still pass. Suite 8693 passed / 7 skipped on `aa1c2ba2` (xdist `-n 4`, BLAS capped, 13m18s).
+- **Second finding, filed reproduced (🟡 S, Bugs):** a source frame whose *file name* is not valid UTF-8 (Python
+  holds it with surrogate escapes) reaches `Project.add_frame`, SQLite refuses the lone surrogate, and
+  `UnicodeEncodeError` escapes `scan_and_organize`'s per-unit loop: targets sorted after it never ingest and the
+  pipeline job fails before QC/solve, on every scan. Not Scout-fixed (one fix a run); the fix is S and ungated.
+- **Rotation: (3) done → next sweep is (4)** (the webapp routers).
+
 ## 2026-11-10 (Scout, branch `claude/optimistic-cannon-fwsbuf`) — QA rotation sweep (2), new angle — the dark-ring gate diagnostic `sky_falloff` v2's "same target" pairing on a mosaic: one bug, Scout-fixed (v0.506.16). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8684 passed / 7 skipped on `d0b27ddf` (xdist `-n 4`, BLAS capped, 16m18s). The `.venv` trap recorded by
