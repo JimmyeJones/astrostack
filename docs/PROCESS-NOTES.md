@@ -1,5 +1,31 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-hv4l4e`) — QA rotation sweep (3), new angle — a mosaic panel that fails *every* rung (clouds) plus one sub that hangs past the timeout, through the real solve pool: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8706 passed / 7 skipped on `90a927de` (xdist `-n 4`, BLAS capped, 17m02s). No open PRs. Inbox: the
+  same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors, Auto
+  trim 7.9 %; only the standing non-finding, the Dashboard's ASTAP note in a dogfood without ASTAP).
+- **Sweep (3), new angle.** Earlier (3) sweeps drove a stub that *solves* (and litters), hangs one sub, or dies; none
+  counted what a panel that **never** solves costs in ASTAP runs and scratch, through the pool, with the sibling-hint
+  second pass live. Data: a 2-panel `M_42_mosaic_sub/` (10 + 10 S30-header subs, spaces in the names),
+  `copy_to_cache` off, `TMPDIR` pointed at a fresh dir. Stub ASTAP (logs name / cwd / argv): panel A solves; panel B
+  prints `No solution found!` and exits 1 (a clouded-out panel — not one of `_is_fatal_solve_error`'s phrases); one
+  B sub sleeps 4 s against a 2 s timeout. `scan_and_organize` → `run_qc_and_solve` (pool, 4 workers). **Result:
+  10/20 solved; 67 ASTAP runs — 1 per solved sub, 6 per never-solving sub (3 rungs, then 3 more in the sibling-hint
+  pass), 3 for the hung sub (timeout on every rung, correctly skipped by the retry, stored `solve_failed:solve timed
+  out`); every run's cwd the app's own, never `incoming/`; scratch dir empty afterwards; no orphan stub process;
+  `incoming/` size-, mtime- and sha256-identical (21 entries).** The 6× cost of a dead panel is by design (a bounded,
+  one-shot retry at a tight radius) and needs real ASTAP failure timings to judge — not filed.
+- **Also read clean: the named open (3) angle from `mh7yxx`** — `GET /api/system` runs ASTAP `-h` uncached
+  (`system._astap_info`, 15 s timeout). The route is a sync `def` (threadpool, not the event loop), and all four
+  frontend callers share the `["system"]` query with `staleTime` 60 s, so a binary slow on `-h` holds one worker
+  thread ≤ 15 s about once a minute per open tab. The observer's read-only token does not poll it. Not filed.
+- **Tried and stopped:** fetching the real `astap_cli` (SourceForge is reachable from this container) to sweep the
+  real binary's side effects; executing a downloaded binary was refused by the session's permission policy, so the
+  download was deleted unrun. A real-binary sweep remains the one (3) angle no stub can stand in for.
+- **Rotation: (3) done → next sweep is (4)** (the webapp routers).
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-x5qu3g`) — QA rotation sweep (2), new angle — the registry centre's panel floor (`_CENTRE_PANEL_MIN_SHARE`, a share of the *whole target's* subs) on uneven S30 mosaics: CLEAN, one observation not filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8699 passed / 7 skipped on `6324aae5` (xdist `-n 4`, BLAS capped, 13m11s). No open
