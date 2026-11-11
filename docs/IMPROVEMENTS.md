@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- `measure_coverage_grain` per-panel grain floor on many-panel mosaics (`_GRAIN_MIN_SHARE`) — Builder, branch `claude/focused-noether-2r12my`, 2026-11-11.
+*No live claims.*
 
 ---
 
@@ -195,38 +195,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   **⏸ Waiting on diagnostic `mosaic_panel_hints` v2** (v0.506.10, `seestack/diag/mosaic_hints.py`; the observer
   files it as `Diagnostic result: mosaic_panel_hints v2`). Its `verdicts` answer the gate (`per_panel` vs
   `mosaic_centre`), and `mosaics_with_an_unlocated_only_hint_group` is the bug's occurrence on his library.
-
-- **🟡 (Scout 2026-11-11, QA rotation sweep (2)) — on a 3×3-or-larger mosaic an under-shot panel never gets a grain
-  verdict, so the History/Gallery chip and the health card tell the owner "you shouldn't see seams between them"
-  over a panel 1.6–2.5× grainier than the rest.** *(Pillar: trust / friendliness, PRIORITY 3, editor-adjacent.
-  Severity medium: an over-claim on exactly the panel the owner would go back for, on the grid the app's own
-  framing note recommends ("About a 3×3 mosaic covers all of it"); nothing is lost — the Target page's panel map
-  still shows each panel's depth. Confidence: **reproduced** at S30 scale. Size **S–M**.)* `measure_coverage_grain`
-  (`seestack/bg/coverage_leveling.py`) only compares a thin region that covers `_GRAIN_MIN_SHARE` = **10 % of the
-  whole canvas** — both on the level path and on the `_grain_from_depth_bands` fallback. That bar is a share of
-  the *target*, but the thing it gates is *one panel*: a panel body is ~1/N of an N-panel canvas minus its
-  overlaps, so the bar drops every single panel once N ≥ 9 and decides 3×3 by *which* panel is thin.
-  **Reproduced** through the real function on S30-shaped canvases (1080×1920 panels, 12 % overlap, small dither,
-  σ ∝ 1/√depth, stars; one panel thin, the rest 30 subs; scratch rig, synthetic): **2×2** every case answered
-  (1.40 / 1.55 / 1.88 / 2.27 at 15 / 12 / 8 / 5 subs, share 20.7 %); **3×3 (3000×5318)** thin *corner* answered
-  (share 10.8 %), thin *centre* (8.0–8.3 %) **None at 12, 8 and even 5 subs** (predicted 1.58× / 1.94× / 2.45×);
-  **4×3 (3950×5318)** **None in all eight cases** (thin share 6.2–8.4 %). `grain_verdict(None)` → `PanelSeamsBadge`
-  "Panels even … you shouldn't see seams between them" and the `seams_flat` note say the same, wherever
-  `seam_verdict` is `flat`. The bar's own comment is right about what it keeps out — overlap strips are *deeper*
-  (never below the mode/bulk, so never candidates) and a ragged fringe is a sliver — neither of which needs a
-  whole-canvas share. **Fix shape:** take the floor from the panel, not the canvas — e.g. `min(_GRAIN_MIN_SHARE,
-  ½ × one frame's footprint share)` (the frame footprint is already known to the stacker; `frame_field` /
-  `mosaic_panel_hints` have it), or a fixed count of full-res pixels scaled by stride like `_GRAIN_MIN_SKY_PIXELS`;
-  keep 10 % as the ceiling so every canvas answered today is answered identically. The ragged-rim guard
-  (`has_ragged_border`) still routes a rim to the trim wording. Regression test: a 3×3 tiled canvas (`tests/test_coverage_trim._tiled_mosaic`'s shape) with the
-  *centre* panel at 8 of 30 subs → `grain_verdict(measure_coverage_grain(...).ratio) == "uneven"` (fails today:
-  `None`), plus the existing `test_coverage_grain.py` cases unchanged. **Side observation, not filed:** on the
-  same 3×3 the thin *corner* at 5 subs reads **1.63×** against a predicted 2.45 — the canvas-wide object threshold
-  (`_level_context`, 2σ of a deep-dominated canvas, dilated 4 px) eats ~99 % of a very grainy panel's sky and the
-  σ of what survives is the clipped core. It still reads "uneven", so the verdict is right; only the "N×
-  grainier" figure understates. At reduced scale the same starvation leaves a sky sample under
-  `_GRAIN_MIN_SKY_PIXELS` and the level path goes silent at 8/30 (2×2, 270×480 panels) — not reached at S30
-  panel size, so not filed.
 
 - **🟢 (Scout 2026-11-11, QA rotation sweep (3)) — a sub caught mid-copy by a writer that *pre-sizes* the file
   (full length up front, zero-filled tail — how a Windows/SMB copy lands on a share) keeps the QC it was given
@@ -3218,6 +3186,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.25 **On a 3×3-or-larger mosaic an under-shot panel now gets a grain verdict (`measure_coverage_grain` second pass with a panel-sized floor, `_GRAIN_MIN_PANEL_PIXELS` + solid-core test `_core_pixels`), so the chip and health card no longer say "you shouldn't see seams" over it** — Scout 2026-11-11 sweep (2) entry; every canvas answered before is answered identically. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.24 **The editor's Print menu is sized off the picture the export will render — its crop / resize / rotate replayed on the canvas size — so on a mosaic Auto trims by itself the pre-selected size is no longer refused as "would print soft"** (`print_sizes` `recipe` param, `geometry.edited_shape`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.23 **A full container temp dir is named as one setup problem — "plate-solving ran out of temporary space" — instead of every sub reading as "couldn't be located" and the summary telling the owner to check his subs for trails or fog** (`ASTAPSolver._solve_once`, `ASTAPScratchError`, `SOLVE_SETUP_SCRATCH_FULL`, `run_qc_and_solve` warning). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.22 **A frame id or page window past SQLite's 64-bit integer range answers 404 / a clamped page instead of a 500 on the frames routes (`Project.get_frame`, `iter_frames_page`)** — Scout sweep (4) 2026-11-11, `claude/optimistic-cannon-kab7ux`.
