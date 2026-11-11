@@ -61,8 +61,15 @@ def test_a_log_line_naming_a_non_utf8_file_does_not_break_the_logs_page(client):
     buffer — taking the Logs page and the observer's read with it."""
     import os
 
+    from webapp.logbuffer import get_log_buffer
+
     bad = os.fsdecode(b"/data/incoming/M_42/Light_caf\xe9.fit")
-    logging.getLogger("seestack.io.ingest").warning("skipping %s qwzzy", bad)
+    # Straight into the app's buffer, not through the root logger: pytest's own
+    # log capture cannot ship a surrogate between xdist workers either.
+    get_log_buffer().handle(logging.makeLogRecord({
+        "name": "seestack.io.ingest", "levelno": logging.WARNING,
+        "levelname": "WARNING", "msg": "skipping %s qwzzy", "args": (bad,),
+    }))
     r = client.get("/api/logs", params={"level": "WARNING"})
     assert r.status_code == 200
     msgs = [e["message"] for e in r.json()["logs"]]
