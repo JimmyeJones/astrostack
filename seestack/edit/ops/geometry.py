@@ -211,6 +211,59 @@ def geometry_pixel_steps(recipe, shape: tuple[int, int],
     return steps
 
 
+def rotated_shape(h: int, w: int, params: dict) -> tuple[int, int] | None:
+    """The ``(out_h, out_w)`` :func:`_rotate` produces from an ``h × w`` image, or
+    ``None`` when the op leaves the image as it is.
+
+    ``expand`` off keeps the frame; on, it grows to the rotated rectangle's
+    bounding box by the very formula ``scipy.ndimage.rotate(reshape=True)`` uses
+    (``ptp`` of the rotated corners, ``+ 0.5`` then truncated), so a caller that
+    only needs the *size* of an edited picture never has to resample it.
+    """
+    angle = float(params.get("angle", 0.0))
+    if abs(angle) < 1e-3 or h < 3 or w < 3:
+        return None
+    if not bool(params.get("expand", True)):
+        return h, w
+    rad = np.deg2rad(angle)
+    c, s = np.cos(rad), np.sin(rad)
+    rot = np.array([[c, s], [-s, c]])
+    corners = rot @ np.array([[0, 0, h, h], [0, w, 0, w]], dtype=float)
+    out_h, out_w = (np.ptp(corners, axis=1) + 0.5).astype(int)
+    return int(out_h), int(out_w)
+
+
+def edited_shape(recipe, shape: tuple[int, int]) -> tuple[int, int]:
+    """The ``(h, w)`` a full-resolution render of ``recipe`` comes out at, from
+    the source ``shape`` alone — no pixels touched.
+
+    Replays the recipe's *enabled* geometry ops in order through the same
+    :func:`crop_bounds` / :func:`resize_shape` / :func:`rotated_shape` the ops
+    themselves use, so anything that has to promise something about the
+    exported picture's pixels (the editor's print-size menu, which must offer
+    only sizes the export will then accept) reads one answer with it. Every
+    other op leaves the size alone.
+    """
+    h, w = int(shape[0]), int(shape[1])
+    for op in recipe.ops:
+        if not op.enabled or op.id not in GEOMETRY_OP_IDS:
+            continue
+        if op.id == "geometry.crop":
+            box = crop_bounds(h, w, op.params)
+            if box is not None:
+                x0, x1, y0, y1 = box
+                h, w = y1 - y0, x1 - x0
+        elif op.id == "geometry.resize":
+            out = resize_shape(h, w, op.params)
+            if out is not None:
+                h, w = out
+        else:
+            out = rotated_shape(h, w, op.params)
+            if out is not None:
+                h, w = out
+    return h, w
+
+
 def apply_geometry_to_map(m: np.ndarray, recipe, ctx: EditContext) -> np.ndarray:
     """Apply a recipe's *enabled geometry ops* (crop/rotate/resize, in recipe
     order) to a 2-D single-channel map — e.g. the frame-coverage map — so an

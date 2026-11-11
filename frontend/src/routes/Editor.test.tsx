@@ -276,6 +276,39 @@ describe("EditorView", () => {
     expect(screen.getByDisplayValue("A4 · 240 DPI")).toBeInTheDocument();
   });
 
+  it("sizes the print menu off the cropped picture, sending only the geometry ops", async () => {
+    // The export prints the *rendered* pixels, so a menu sized off the stored
+    // uncropped canvas offered — and pre-selected — a size the export then
+    // refused as "would print soft" whenever Auto had trimmed a mosaic border.
+    mockEditorQueries();
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+        { uid: "c1", id: "geometry.crop", enabled: true,
+          params: { x0: 0.055, y0: 0, x1: 1, y1: 1 } },
+      ],
+      base_run_id: 3,
+    });
+    const spy = vi.spyOn(client.api, "printSizes").mockResolvedValue({
+      sizes: [{ name: "A4", dpi: 210, label: "A4 · 210 DPI", width_in: 11.69, height_in: 8.27 }],
+      advice: "Best print size for this picture: up to A4 at 210 DPI.",
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    await waitFor(() => expect(spy.mock.calls.some(([, , r]) =>
+      r?.ops.some((o) => o.id === "geometry.crop"))).toBe(true));
+    const sent = spy.mock.calls.find(([, , r]) =>
+      r?.ops.some((o) => o.id === "geometry.crop"))![2]!;
+    // Only what changes the picture's size travels — a tone tweak never refetches.
+    expect(sent.ops.map((o) => o.id)).toEqual(["geometry.crop"]);
+    expect(await screen.findByDisplayValue("A4 · 210 DPI")).toBeInTheDocument();
+  });
+
   it("hides the print offer for a picture too small to print sharply", async () => {
     mockEditorQueries();
     vi.spyOn(client.api, "printSizes").mockResolvedValue({

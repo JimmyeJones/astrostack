@@ -3488,6 +3488,34 @@ def test_print_sizes_keeps_its_general_wording_when_the_depth_is_unknowable(
     assert "pays off when you have plenty of subs" in text
 
 
+def test_print_sizes_sizes_the_recipe_s_crop_and_survives_a_hostile_one(
+        client, solved_library):
+    """Sent the recipe, the menu sizes the picture its crop leaves; a geometry
+    param that cannot be replayed falls back to the stored canvas, never a 500."""
+    import base64
+    import json
+
+    def enc(rec):
+        return base64.urlsafe_b64encode(json.dumps(rec).encode()).decode()
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="sized", h=2000, w=3000)
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/print-sizes"
+    assert client.get(url).json()["sizes"][0]["name"] == "A3"
+    half = {"ops": [{"id": "geometry.crop", "enabled": True,
+                     "params": {"x0": 0.25, "y0": 0.25, "x1": 0.75, "y1": 0.75}}]}
+    from seestack.printexport import print_options
+    # The 1500×1000 the crop leaves, not the 3000×2000 canvas.
+    want = print_options(1500, 1000)[0].name
+    assert want != "A3"
+    assert client.get(url, params={"recipe": enc(half)}).json()["sizes"][0]["name"] == want
+    for hostile in ({"scale": 1e308}, {"scale": "nan"}):
+        rec = {"ops": [{"id": "geometry.resize", "enabled": True, "params": hostile}]}
+        r = client.get(url, params={"recipe": enc(rec)})
+        assert r.status_code == 200, r.text
+    assert client.get(url, params={"recipe": "%%%"}).status_code == 400
+
+
 def test_print_sizes_404s_for_a_run_that_does_not_exist(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r = client.get(f"/api/targets/{safe}/stack-runs/99999/editor/print-sizes")

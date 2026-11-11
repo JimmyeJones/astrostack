@@ -3199,15 +3199,22 @@ class PrintRequest(PngRequest):
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/print-sizes")
-def print_sizes(safe: str, run_id: int, request: Request) -> dict:
+def print_sizes(safe: str, run_id: int, request: Request,
+                recipe: str | None = None) -> dict:
     """Which standard print sizes this picture can fill **sharply**, largest
     first, plus one plain-language line recommending the biggest.
 
     Sized from the run's own canvas, so it costs nothing (no render, no FITS
-    read) and the menu can offer only sizes that will actually look good. A
-    recipe that *crops* makes this a little optimistic — the export itself
-    re-checks against the real rendered pixels and refuses with a clear message
-    rather than printing something soft.
+    read) and the menu can offer only sizes that will actually look good.
+
+    ``recipe`` (optional, base64url JSON like the preview's) is the edit about
+    to be printed: its crop / resize / rotate are replayed on the canvas *size*
+    (:func:`seestack.edit.ops.geometry.edited_shape`, no pixels) so the menu is
+    sized off the picture the export will actually render. Without it the
+    stored uncropped canvas was sized instead, and on a mosaic Auto trims by
+    itself that made the menu's own first choice one the export then refused as
+    "would print soft". Omitted, the canvas is sized as before; the export
+    still re-checks against the real rendered pixels either way.
 
     ``bigger`` (optional, ``None`` when there's nothing to reach for) is the
     motivating half: the next size up and what it would take — named as *pixels*,
@@ -3245,6 +3252,18 @@ def print_sizes(safe: str, run_id: int, request: Request) -> dict:
     if run is None:
         raise HTTPException(status_code=404, detail="No such run")
     canvas_w, canvas_h = int(run.canvas_w or 0), int(run.canvas_h or 0)
+    if recipe and canvas_w > 0 and canvas_h > 0:
+        from seestack.edit.ops.geometry import edited_shape
+
+        rec = _decode_recipe_query(request, safe, run_id, recipe)
+        try:
+            out_h, out_w = edited_shape(rec, (canvas_h, canvas_w))
+        except (TypeError, ValueError, OverflowError):
+            # A hand-edited geometry param that will not parse: size the stored
+            # canvas as before; the export's own re-check is still the net.
+            out_h = out_w = 0
+        if out_h > 0 and out_w > 0:
+            canvas_h, canvas_w = out_h, out_w
     options = print_options(canvas_w, canvas_h)
     bigger = bigger_print(
         canvas_w, canvas_h,

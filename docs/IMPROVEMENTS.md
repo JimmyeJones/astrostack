@@ -196,25 +196,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   files it as `Diagnostic result: mosaic_panel_hints v2`). Its `verdicts` answer the gate (`per_panel` vs
   `mosaic_centre`), and `mosaics_with_an_unlocated_only_hint_group` is the bug's occurrence on his library.
 
-- **🟡 (Scout 2026-11-11, QA rotation sweep (1)) — on an Auto-edited mosaic, the editor's default Print size is one
-  the export then refuses: "A3 would have to be enlarged … would print soft", for the size the same panel
-  recommends.** *(Pillar: editor / friendliness, PRIORITY 1–3. Severity medium: the beginner's one-click path errors,
-  and the menu and the refusal name two different "best" sizes on one screen; the workaround is to pick the next
-  size down. Confidence: **reproduced**. Size **S**.)* `GET …/editor/print-sizes` sizes off the run's stored
-  *uncropped* canvas (`run.canvas_w/h`, docstring: "a little optimistic"), and `Editor.tsx` always sends
-  `chosenPrintSize = printableSizes[0]` — the largest. `submit_editor_print` sizes off the *rendered* pixels, so
-  Auto's own mosaic border trim (`_trim_rect_for_run` → `geometry.crop`) drops any canvas whose limiting side sits
-  within the trim of a paper threshold. The v0.438.5 `print_refusal` work treats this as the *user's* crop; here
-  the user cropped nothing. **Reproduced** through the real routes (`POST …/editor/auto` → `print-sizes` →
-  `POST …/editor/print` with `size_name = sizes[0]`) on two mosaic-flagged runs with a ragged left border: 2600 × 1850
-  (Auto crop x0 = 0.055) — menu *"up to A3 at 157 DPI"*, job **error** *"A3 would have to be enlarged … up to A4 at
-  210 DPI"*; 1560 × 1270 (x0 = 0.064) — menu 10×8 in at 156 DPI, job **error**, *"up to 7×5 in"*. Every paper
-  threshold (600/750/1200/1241/1754 px short side, 900/1050/1500/1754/2481 long, at 150 DPI) has such a band, a
-  few % wide, and the owner's ~3.5k px mosaics straddle the A4/A3 ones. **Fix shape:** let `print-sizes` take the
-  recipe's `geometry.crop` (or `crop=x0,y0,x1,y1`) and size off the cropped canvas (`crop_bounds` on
-  `canvas_w/h`), with the frontend key including it; keep the export's re-check as the net. Regression test: a
-  mosaic run with a trim, Auto recipe, `print-sizes` with that crop → the first size prints (job `done`).
-
 - **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
   v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
   (`/api/library/summary` + the share recap) count a sub registered in two targets (#878) twice, in exactly
@@ -3182,6 +3163,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.24 **The editor's Print menu is sized off the picture the export will render — its crop / resize / rotate replayed on the canvas size — so on a mosaic Auto trims by itself the pre-selected size is no longer refused as "would print soft"** (`print_sizes` `recipe` param, `geometry.edited_shape`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.23 **A full container temp dir is named as one setup problem — "plate-solving ran out of temporary space" — instead of every sub reading as "couldn't be located" and the summary telling the owner to check his subs for trails or fog** (`ASTAPSolver._solve_once`, `ASTAPScratchError`, `SOLVE_SETUP_SCRATCH_FULL`, `run_qc_and_solve` warning). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.22 **A frame id or page window past SQLite's 64-bit integer range answers 404 / a clamped page instead of a 500 on the frames routes (`Project.get_frame`, `iter_frames_page`)** — Scout sweep (4) 2026-11-11, `claude/optimistic-cannon-kab7ux`.
 - ✅ v0.506.21 **A sub whose file time is in the future (a source clock running ahead of the app's) is ingested by the folder watcher after the ordinary quiet period — before, it never went stable until the app's clock caught up, and no batch fired** (`watcher.StabilityTracker.update`). Full entry in [`SHIPPED.md`](SHIPPED.md).

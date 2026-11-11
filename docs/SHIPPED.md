@@ -1,5 +1,43 @@
 # Shipped — the record
 
+## 2026-11-11 (Builder, branch `claude/focused-noether-tg89tj`)
+
+### v0.506.24 — the editor's Print menu sizes the cropped picture, so its default is one the export prints
+
+**What.** `GET …/editor/print-sizes` takes the optional base64url `recipe` the preview takes and replays its
+enabled crop / resize / rotate on the canvas *size* (`seestack.edit.ops.geometry.edited_shape` /
+`rotated_shape` — the ops' own `crop_bounds` / `resize_shape` and scipy's `reshape=True` formula, no pixels).
+`Editor.tsx` sends only its enabled geometry ops (keyed on them; a tone tweak never refetches; previous menu kept
+while it re-sizes), and a size picked before a tighter crop falls back to the biggest still offered. Omitted, the
+endpoint answers exactly as before; `submit_editor_print`'s re-check stays as the net. A geometry param that will
+not replay falls back to the stored canvas (never a 500); a garbled encoding is 400 like the preview's.
+
+**Tests.** `test_print_menu_after_auto_trims_a_mosaic_offers_a_size_the_export_prints` (real `/editor/auto` on a
+1080 × 780 ragged mosaic: menu 6×4 in, print `done`) and the Editor test that the crop is sent both fail before;
+`tests/test_edit_geometry_shape.py` pins `edited_shape` against the real ops (20 cases); a hostile/garbled recipe
+case. Suite 8751 passed / 7 skipped; tsc, vitest, vite build green.
+
+**The filed entry, verbatim:**
+
+- **🟡 (Scout 2026-11-11, QA rotation sweep (1)) — on an Auto-edited mosaic, the editor's default Print size is one
+  the export then refuses: "A3 would have to be enlarged … would print soft", for the size the same panel
+  recommends.** *(Pillar: editor / friendliness, PRIORITY 1–3. Severity medium: the beginner's one-click path errors,
+  and the menu and the refusal name two different "best" sizes on one screen; the workaround is to pick the next
+  size down. Confidence: **reproduced**. Size **S**.)* `GET …/editor/print-sizes` sizes off the run's stored
+  *uncropped* canvas (`run.canvas_w/h`, docstring: "a little optimistic"), and `Editor.tsx` always sends
+  `chosenPrintSize = printableSizes[0]` — the largest. `submit_editor_print` sizes off the *rendered* pixels, so
+  Auto's own mosaic border trim (`_trim_rect_for_run` → `geometry.crop`) drops any canvas whose limiting side sits
+  within the trim of a paper threshold. The v0.438.5 `print_refusal` work treats this as the *user's* crop; here
+  the user cropped nothing. **Reproduced** through the real routes (`POST …/editor/auto` → `print-sizes` →
+  `POST …/editor/print` with `size_name = sizes[0]`) on two mosaic-flagged runs with a ragged left border: 2600 × 1850
+  (Auto crop x0 = 0.055) — menu *"up to A3 at 157 DPI"*, job **error** *"A3 would have to be enlarged … up to A4 at
+  210 DPI"*; 1560 × 1270 (x0 = 0.064) — menu 10×8 in at 156 DPI, job **error**, *"up to 7×5 in"*. Every paper
+  threshold (600/750/1200/1241/1754 px short side, 900/1050/1500/1754/2481 long, at 150 DPI) has such a band, a
+  few % wide, and the owner's ~3.5k px mosaics straddle the A4/A3 ones. **Fix shape:** let `print-sizes` take the
+  recipe's `geometry.crop` (or `crop=x0,y0,x1,y1`) and size off the cropped canvas (`crop_bounds` on
+  `canvas_w/h`), with the frontend key including it; keep the export's re-check as the net. Regression test: a
+  mosaic run with a trim, Auto recipe, `print-sizes` with that crop → the first size prints (job `done`).
+
 ## 2026-11-11 (Builder, branch `claude/focused-noether-po8hte`)
 
 ### v0.506.23 — a full container temp dir is a setup problem, not subs that "couldn't be located"
