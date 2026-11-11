@@ -1,5 +1,19 @@
 # Shipped — the record
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-kab7ux`)
+
+### v0.506.22 — a frame id or page window past SQLite's integer range is "no such frame", not a 500
+
+**Why.** The Scout's sweep (4) fed hostile numbers to every GET route (302 requests): everything was clamped or
+refused except the frames routes, where an id or `offset`/`limit` above 2⁶³−1 reached `sqlite3` and raised
+`OverflowError` — four 500s (`GET /frames`, `GET`/`PATCH /frames/{id}`, `/frames/{id}/preview`). No screen sends
+such a number; fixed for robustness because it is two clamps.
+
+**What changed.** `seestack.io.project.Project.get_frame` returns `None` for an id outside SQLite's INTEGER range
+(so the routes' existing 404 answers it); `Project.iter_frames_page` clamps `offset`/`limit` to that range (a huge
+`limit` returns every row, a huge `offset` none). Test: `tests/webapp/test_frames_out_of_range_ids.py` (fails 5/5
+before).
+
 ## 2026-11-11 (Builder, branch `claude/focused-noether-mpprlu`)
 
 ### v0.506.21 — a future-dated sub is ingested by the folder watcher
