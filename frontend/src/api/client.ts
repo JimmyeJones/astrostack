@@ -4874,9 +4874,12 @@ export const api = {
     `/api/targets/${safe}/stack-runs/${runId}/editor/share/${jobId}`,
   /** Which standard paper sizes this picture can print *sharply*, largest first,
    *  plus one plain-language recommendation. Cheap (sized from the run's canvas,
-   *  no render), so the menu can offer only sizes that will look good. */
-  printSizes: (safe: string, runId: number) =>
-    req<PrintSizes>(`/api/targets/${safe}/stack-runs/${runId}/editor/print-sizes`),
+   *  no render), so the menu can offer only sizes that will look good. Pass the
+   *  recipe (its geometry ops are enough) to size the *cropped* picture — what
+   *  the print export will actually render. */
+  printSizes: (safe: string, runId: number, recipe?: Recipe) =>
+    req<PrintSizes>(`/api/targets/${safe}/stack-runs/${runId}/editor/print-sizes`
+      + (recipe ? `?recipe=${encodeRecipe(recipe)}` : "")),
   /** Render a print-ready, DPI-tagged JPEG fitted to `sizeName` (omit it for the
    *  largest size this picture can fill sharply). */
   exportPrint: (safe: string, runId: number, recipe: Recipe,

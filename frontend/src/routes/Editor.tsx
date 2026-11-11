@@ -1121,9 +1121,20 @@ export function EditorView() {
   // (cheap, no render), self-hides every size this picture can't fill sharply,
   // and hides the whole control when none qualifies — a beginner is never
   // offered a print that would come back soft.
+  // Sized off the picture the export will render, not the stored canvas: only
+  // the enabled crop / rotate / resize change that, so only they key the query
+  // (a tone tweak never refetches). Without them Auto's own mosaic border trim
+  // made the menu's first choice a size the export refused as "would print soft".
+  const printGeometry = useMemo<Recipe>(() => ({
+    ops: dRecipe.ops.filter((o) => o.enabled && reshapesFrame(o.id)),
+  }), [dRecipe.ops]);
+  const printGeometryKey = JSON.stringify(printGeometry.ops);
   const printSizes = useQuery({
-    queryKey: ["print-sizes", safe, rid],
-    queryFn: () => api.printSizes(safe, rid).catch(() => null),
+    queryKey: ["print-sizes", safe, rid, printGeometryKey],
+    queryFn: () => api.printSizes(safe, rid, printGeometry).catch(() => null),
+    // Keep the menu on screen while a new crop re-sizes it, rather than hiding
+    // the whole Print control for a round trip.
+    placeholderData: keepPreviousData,
     enabled: Number.isFinite(rid),
     staleTime: 60_000,
     retry: false,
@@ -1132,7 +1143,10 @@ export function EditorView() {
   // Default to the biggest print this picture can make — the whole point is that
   // the user picks a size, never a DPI.
   const [printSize, setPrintSize] = useState<string | null>(null);
-  const chosenPrintSize = printSize ?? printableSizes[0]?.name ?? null;
+  // A size picked before a tighter crop may no longer be on the menu; fall back
+  // to the biggest one that is rather than sending a size the export refuses.
+  const chosenPrintSize = (printSize && printableSizes.some((s) => s.name === printSize)
+    ? printSize : null) ?? printableSizes[0]?.name ?? null;
   const downloadPrint = useMutation({
     mutationFn: async () => {
       setPrintProgress("Preparing…");

@@ -662,3 +662,54 @@ def test_full_res_size_404_without_a_fits(client, solved_library):
     run_id = _add_run(solved_library, safe, w=100, h=80, with_fits=False)
     r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png/size")
     assert r.status_code == 404
+
+
+def test_print_menu_after_auto_trims_a_mosaic_offers_a_size_the_export_prints(
+        client, solved_library):
+    """The editor's Print menu must offer — and lead with — a size the print
+    export then accepts, on a mosaic whose ragged border Auto trims by itself.
+
+    ``print-sizes`` used to be sized off the stored *uncropped* canvas while the
+    export sizes the *rendered* pixels, so a canvas just over a paper threshold
+    (here 7×5 in at 150 DPI, 1050 × 750 px) was offered 7×5 in, pre-selected,
+    and then refused as "would print soft" — for a crop the user never made.
+    Sent the recipe, the menu now replays its crop on the canvas size."""
+    import base64
+    import json
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 1080, 780
+    run_id, _ = _add_mosaic_run(solved_library, safe, w=w, h=h)
+    base = f"/api/targets/{safe}/stack-runs/{run_id}/editor"
+    recipe = client.post(f"{base}/auto").json()
+    crop = next(o for o in recipe["ops"] if o["id"] == "geometry.crop")
+    cw, ch = _rect_px((crop["params"]["x0"], crop["params"]["y0"],
+                       crop["params"]["x1"], crop["params"]["y1"]), w, h)
+    # The case this pins: the trim takes the picture under 7×5's threshold.
+    assert cw < 1050 or ch < 750, (cw, ch)
+
+    uncropped = client.get(f"{base}/print-sizes").json()
+    assert uncropped["sizes"][0]["name"] == "7×5 in"   # unchanged without one
+
+    enc = base64.urlsafe_b64encode(json.dumps(recipe).encode()).decode()
+    sized = client.get(f"{base}/print-sizes", params={"recipe": enc}).json()
+    first = sized["sizes"][0]["name"]
+    assert first == "6×4 in", sized
+    assert "6×4 in" in sized["advice"]
+
+    r = client.post(f"{base}/print", json={"recipe": recipe, "size_name": first})
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job
+    assert job["result"]["size_name"] == first
+
+
+def _wait_job(client, job_id, timeout=120.0):
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        j = client.get(f"/api/jobs/{job_id}").json()
+        if j["state"] in ("done", "error", "cancelled", "interrupted"):
+            return j
+        time.sleep(0.2)
+    raise AssertionError("job did not finish in time")
