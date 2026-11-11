@@ -74,4 +74,13 @@ describe("UnsolvedHelp", () => {
     // beginner has one place to act, not two competing ones.
     expect(screen.getByText(/orange note above/)).toBeInTheDocument();
   });
+
+  it("names the full temporary folder when that is the blocker", async () => {
+    renderHelp({ kind: "scratch", frames: 12 });
+    open();
+
+    expect(await screen.findByText(/temporary folder is full/)).toBeInTheDocument();
+    expect(screen.queryByText(/usually\s+harmless/)).toBeNull();
+    expect(screen.queryByText(/star database/)).toBeNull();
+  });
 });

@@ -1022,6 +1022,8 @@ export function TargetView() {
                 ? "Plate-solving isn't working — ASTAP can't be started"
                 : solveSetup.kind === "astap"
                 ? "Plate-solving isn't set up — ASTAP wasn't found"
+                : solveSetup.kind === "scratch"
+                ? "Plate-solving ran out of temporary space"
                 : "Plate-solving needs a star database"}>
               <Text size="sm">
                 {solveSetup.kind === "astap" && solveSetup.cannot_run
@@ -1036,6 +1038,13 @@ export function TargetView() {
                     + "sky coordinates before they can be stacked, so this blocks the whole "
                     + "target. If an ASTAP path is set in Settings, check it (Settings says "
                     + "what's wrong with it); otherwise install ASTAP. Then re-run solving."
+                  : solveSetup.kind === "scratch"
+                  ? `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
+                    + "plate-solved because the app's temporary folder is full, so there was "
+                    + "nowhere to put the working copy the solver uses. Your subs are fine — this "
+                    + "is about space inside the app's container, not your library (the app's log "
+                    + "names the folder). Free some space there, or restart the app, then re-run "
+                    + "solving."
                   : `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
                     + "plate-solved because ASTAP couldn't find a star database to match against. "
                     + "Download an ASTAP star database (e.g. the D50/H17/H18 catalog) into ASTAP's "

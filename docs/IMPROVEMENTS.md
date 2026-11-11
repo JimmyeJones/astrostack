@@ -196,29 +196,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   files it as `Diagnostic result: mosaic_panel_hints v2`). Its `verdicts` answer the gate (`per_panel` vs
   `mosaic_centre`), and `mosaics_with_an_unlocated_only_hint_group` is the bug's occurrence on his library.
 
-- **🟢 (Scout 2026-11-11, QA rotation sweep (3)) — a full container temp dir turns every plate solve into "couldn't
-  be located in the sky", and the summary tells a beginner to check his subs for trails or fog.** *(Pillar:
-  "just works" / friendliness, PRIORITY 2–3. Severity low: rare trigger, self-heals once space is back, but the
-  advice is wrong and nothing points at the real cause. Confidence: **reproduced**. Size **S**.)*
-  `ASTAPSolver._solve_once` copies each sub into an `astrostack-solve-*` dir under `tempfile.gettempdir()` — the
-  container's own writable layer, a **different filesystem** from the mounted `data_root`. **Reproduced:** a 2-panel
-  S30-shaped `M_42_mosaic_sub/` (12 × 4.1 MB subs, `copy_to_cache` off, spaces in the names), `TMPDIR` on a 3 MB
-  tmpfs, stub ASTAP, `scan_and_organize` → `run_qc_and_solve` (pool, 4 workers): **12/12** stored
-  `solve_failed:OSError: [Errno 28] No space left on device: '<temp path>…` (the 120-char cut drops the frame name);
-  the job ended `solve_ok: 0` with every DB write succeeding, so `jobs.classify_job_error`'s `disk_full` never fires;
-  no log line (`scanner.run_qc_and_solve` logs only a failed *DB write*), so `/api/logs` and the observer see
-  nothing; `rejection_summary.bucket_for` → `solve_failed`, verdict *"…mostly ones that couldn't be located in the
-  sky … check your subs aren't trailed or fogged"*; and the free-space surfaces (`system.py`, `stats.py`,
-  `storage.py`) measure `data_root` only, so Storage shows plenty of room. Side effects clean (`incoming/`
-  sha256/mtime-identical, no scratch left). The 2026-10-20 sweep (PROCESS-NOTES, `zen-curie-6t1j5s`) stood this down
-  on the premise that "a disk that full fails the job's own DB/cache writes too" — this run shows it does not when
-  only the temp dir is full. **Fix shape:** in `_solve_once`, turn an `OSError` from the scratch step (ENOSPC/EDQUOT/
-  EROFS/EACCES) into a canonical setup reason (e.g. `solve scratch full`) recognised by
-  `classify_solve_setup_error`, stop the pass the way `ASTAPCannotRunError` does, log one warning naming the temp
-  dir and its free space, and give it a plain banner; optionally add the temp dir's free space to `/api/system`.
-  Regression test: point `TMPDIR` at a full location (or patch `shutil.copy2` to raise ENOSPC) and assert the
-  canonical reason and that no `solve_failed` verdict blames the subs.
-
 - **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
   v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
   (`/api/library/summary` + the share recap) count a sub registered in two targets (#878) twice, in exactly
@@ -3186,6 +3163,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.23 **A full container temp dir is named as one setup problem — "plate-solving ran out of temporary space" — instead of every sub reading as "couldn't be located" and the summary telling the owner to check his subs for trails or fog** (`ASTAPSolver._solve_once`, `ASTAPScratchError`, `SOLVE_SETUP_SCRATCH_FULL`, `run_qc_and_solve` warning). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.22 **A frame id or page window past SQLite's 64-bit integer range answers 404 / a clamped page instead of a 500 on the frames routes (`Project.get_frame`, `iter_frames_page`)** — Scout sweep (4) 2026-11-11, `claude/optimistic-cannon-kab7ux`.
 - ✅ v0.506.21 **A sub whose file time is in the future (a source clock running ahead of the app's) is ingested by the folder watcher after the ordinary quiet period — before, it never went stable until the app's clock caught up, and no batch fired** (`watcher.StabilityTracker.update`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.20 **The editor's Download PNG / Share / Print files no longer pile up in `output/` — a newer click of one button replaces the older file, and deleting or pruning the run removes them all** (`output.replace_older_editor_downloads`, `storage._delete_editor_downloads` in `purge_stack_run`)
