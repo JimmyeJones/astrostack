@@ -746,3 +746,91 @@ def _row(path, *, ingested_at=None):
 
     return FrameRow(source_path=str(path), source_mtime=1_600_000_000.0,
                     ingested_at=ingested_at, wcs_json="CTYPE1")
+
+
+def _write_presized(path: Path, real: bytes) -> None:
+    """``real`` as a pre-sizing writer leaves it mid-copy: the full length is
+    there and the header is in place, but the data section is still zeros."""
+    from astropy.io import fits
+
+    with fits.open(path) as hdul:
+        data_offset = len(hdul[0].header.tostring())
+    path.write_bytes(real[:data_offset] + b"\0" * (len(real) - data_offset))
+
+
+def _register_presized_then_finish(tmp_path, *, copy_to_cache, **row):
+    src = tmp_path / "raws"
+    src.mkdir()
+    frame_file = src / "a.fit"
+    write_seestar_fits(frame_file, seed=3)
+    real = frame_file.read_bytes()
+    capture_mtime = frame_file.stat().st_mtime
+    _write_presized(frame_file, real)
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    first = list(ingest_files(proj, cache, [frame_file],
+                              copy_to_cache=copy_to_cache))
+    frame_id = first[0].frame_id
+    assert frame_id is not None
+    # What QC records for the zero-filled data, and a solve that worked off the
+    # header (unsolved subs are re-offered every pass, so it recovers anyway).
+    proj.update_frame(frame_id, star_count=0, fwhm_px=None,
+                      wcs_json='{"CRVAL1": 10.0}', ra_center_deg=10.0, **row)
+    # The copy finishes: same size, real bytes, the capture time put back.
+    frame_file.write_bytes(real)
+    os.utime(frame_file, (capture_mtime, capture_mtime))
+    return proj, cache, frame_file, frame_id, real
+
+
+def test_a_presized_mid_copy_sub_is_re_qcd_once_the_copy_finishes(tmp_path):
+    """Scout 2026-11-11, sweep (3): a sub a scan caught mid-copy from a writer
+    that pre-sizes the file was QC'd as a blank frame (``star_count`` 0), and
+    once the copy finished the size was unchanged, the header matched and only
+    the mtime had moved — so ``_same_capture`` read it as a timestamp-only
+    re-copy, left the blank QC in place, and nothing ever re-QC'd it."""
+    proj, cache, frame_file, frame_id, _ = _register_presized_then_finish(
+        tmp_path, copy_to_cache=False)
+    try:
+        second = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        # fail-before: refreshed False and star_count still 0
+        assert second[0].refreshed is True
+        assert second[0].refreshed_frame_id == frame_id
+        row = proj.get_frame(frame_id)
+        assert row.star_count is None          # re-offered to build_qc_arglist
+        assert row.accept is True
+        # The solution came from the header, which never changed — it stays.
+        assert row.wcs_json == '{"CRVAL1": 10.0}' and row.ra_center_deg == 10.0
+        assert row.source_mtime == pytest.approx(frame_file.stat().st_mtime)
+
+        # Once only: the new mtime is recorded, so the next scan is a no-op.
+        third = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert third[0].refreshed is False
+    finally:
+        proj.close()
+
+
+def test_a_presized_mid_copy_sub_refreshes_its_stage1_copy(tmp_path):
+    """With ``copy_to_cache`` on, the Stage-1 copy was taken from the zero-filled
+    file at its final size, so the size-only staleness check can't see it —
+    the re-QC must read a re-copied cache, not the zeros."""
+    proj, cache, frame_file, frame_id, real = _register_presized_then_finish(
+        tmp_path, copy_to_cache=True)
+    try:
+        second = list(ingest_files(proj, cache, [frame_file], copy_to_cache=True))
+        assert second[0].refreshed is True
+        cached = Path(proj.get_frame(frame_id).cached_path)
+        assert cached.read_bytes() == real
+    finally:
+        proj.close()
+
+
+def test_a_users_own_verdict_on_a_blank_looking_sub_is_left_alone(tmp_path):
+    proj, cache, frame_file, frame_id, _ = _register_presized_then_finish(
+        tmp_path, copy_to_cache=False, accept=True, user_override=True)
+    try:
+        second = list(ingest_files(proj, cache, [frame_file], copy_to_cache=False))
+        assert second[0].refreshed is False
+        assert proj.get_frame(frame_id).star_count == 0
+    finally:
+        proj.close()
