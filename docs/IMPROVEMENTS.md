@@ -196,6 +196,37 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   files it as `Diagnostic result: mosaic_panel_hints v2`). Its `verdicts` answer the gate (`per_panel` vs
   `mosaic_centre`), and `mosaics_with_an_unlocated_only_hint_group` is the bug's occurrence on his library.
 
+- **🟡 (Scout 2026-11-11, QA rotation sweep (2)) — on a 3×3-or-larger mosaic an under-shot panel never gets a grain
+  verdict, so the History/Gallery chip and the health card tell the owner "you shouldn't see seams between them"
+  over a panel 1.6–2.5× grainier than the rest.** *(Pillar: trust / friendliness, PRIORITY 3, editor-adjacent.
+  Severity medium: an over-claim on exactly the panel the owner would go back for, on the grid the app's own
+  framing note recommends ("About a 3×3 mosaic covers all of it"); nothing is lost — the Target page's panel map
+  still shows each panel's depth. Confidence: **reproduced** at S30 scale. Size **S–M**.)* `measure_coverage_grain`
+  (`seestack/bg/coverage_leveling.py`) only compares a thin region that covers `_GRAIN_MIN_SHARE` = **10 % of the
+  whole canvas** — both on the level path and on the `_grain_from_depth_bands` fallback. That bar is a share of
+  the *target*, but the thing it gates is *one panel*: a panel body is ~1/N of an N-panel canvas minus its
+  overlaps, so the bar drops every single panel once N ≥ 9 and decides 3×3 by *which* panel is thin.
+  **Reproduced** through the real function on S30-shaped canvases (1080×1920 panels, 12 % overlap, small dither,
+  σ ∝ 1/√depth, stars; one panel thin, the rest 30 subs; scratch rig, synthetic): **2×2** every case answered
+  (1.40 / 1.55 / 1.88 / 2.27 at 15 / 12 / 8 / 5 subs, share 20.7 %); **3×3 (3000×5318)** thin *corner* answered
+  (share 10.8 %), thin *centre* (8.0–8.3 %) **None at 12, 8 and even 5 subs** (predicted 1.58× / 1.94× / 2.45×);
+  **4×3 (3950×5318)** **None in all eight cases** (thin share 6.2–8.4 %). `grain_verdict(None)` → `PanelSeamsBadge`
+  "Panels even … you shouldn't see seams between them" and the `seams_flat` note say the same, wherever
+  `seam_verdict` is `flat`. The bar's own comment is right about what it keeps out — overlap strips are *deeper*
+  (never below the mode/bulk, so never candidates) and a ragged fringe is a sliver — neither of which needs a
+  whole-canvas share. **Fix shape:** take the floor from the panel, not the canvas — e.g. `min(_GRAIN_MIN_SHARE,
+  ½ × one frame's footprint share)` (the frame footprint is already known to the stacker; `frame_field` /
+  `mosaic_panel_hints` have it), or a fixed count of full-res pixels scaled by stride like `_GRAIN_MIN_SKY_PIXELS`;
+  keep 10 % as the ceiling so every canvas answered today is answered identically. The ragged-rim guard
+  (`has_ragged_border`) still routes a rim to the trim wording. Regression test: a 3×3 tiled canvas (`tests/test_coverage_trim._tiled_mosaic`'s shape) with the
+  *centre* panel at 8 of 30 subs → `grain_verdict(measure_coverage_grain(...).ratio) == "uneven"` (fails today:
+  `None`), plus the existing `test_coverage_grain.py` cases unchanged. **Side observation, not filed:** on the
+  same 3×3 the thin *corner* at 5 subs reads **1.63×** against a predicted 2.45 — the canvas-wide object threshold
+  (`_level_context`, 2σ of a deep-dominated canvas, dilated 4 px) eats ~99 % of a very grainy panel's sky and the
+  σ of what survives is the clipped core. It still reads "uneven", so the verdict is right; only the "N×
+  grainier" figure understates. At reduced scale the same starvation leaves a sky sample under
+  `_GRAIN_MIN_SKY_PIXELS` and the level path goes silent at 8/30 (2×2, 270×480 panels) — not reached at S30
+  panel size, so not filed.
 - **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
   v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
   (`/api/library/summary` + the share recap) count a sub registered in two targets (#878) twice, in exactly

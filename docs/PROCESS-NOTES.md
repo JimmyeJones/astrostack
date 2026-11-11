@@ -1,5 +1,33 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-4ynjos`) — QA rotation sweep (2), new angle — the grain measurement's 10 %-of-canvas floor (`coverage_leveling._GRAIN_MIN_SHARE`) against one under-shot panel on many-panel S30 mosaics: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8728 passed / 7 skipped on `21dd10f3` (xdist `-n 4`, BLAS capped, 16m15s). No open PRs.
+  Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors,
+  Auto trim 7.9 %). v0.506.24 (Print menu sized off the crop) merged mid-run; this branch was rebased onto it.
+- **Sweep (2).** No per-panel code since the last (2) (`geies9`). Took a whole-canvas share that gates a per-panel
+  verdict: `measure_coverage_grain` compares a thin region only when it covers `_GRAIN_MIN_SHARE` (10 %) of the
+  covered canvas, on both the level path and the `_grain_from_depth_bands` fallback. Driven through the real
+  function on S30-shaped canvases (1080×1920 panels, 12 % overlap, dither σ 0.6 % of a panel, σ ∝ 1/√depth, 900
+  stars a panel; one panel at 15/12/8/5 subs, the rest 30; thin corner and thin centre; scratch rig):
+  **2×2 (2050×3629)** all 8 answered, 1.39–2.34× over 20.7 %; **3×3 (3000×5318)** thin corner answered at 12/8/5
+  (1.56 / 1.84 / 1.63, share 10.8 %), thin **centre** (8.0–8.3 %) **None at 12, 8 and 5 subs**; **4×3
+  (3950×5318)** **None in all 8** (6.2–8.4 %). 15/30 is None at 3×3+ because the thin band is <½ bulk only on
+  the dither fringe — correct, 1.41× sits at the band's own edge. Filed in Bugs (🟡 S–M, ungated) with the fix
+  shape (a per-panel floor, 10 % kept as the ceiling).
+- **Side observation, not filed:** the canvas-wide object threshold in `_level_context` (2σ of a deep-dominated
+  canvas, dilated 4 px) flags most of a very grainy panel as "object": at reduced scale (270×480 panels, 2×2
+  tiled) a thin level's sky sample falls 100k → 18k / 4k / 1.8k / 0.35k px at 25 / 15 / 12 / 8 subs of 30, so 8/30
+  drops under `_GRAIN_MIN_SKY_PIXELS` and goes silent, 5/30 starves below `effective_min` and is *rescued*
+  (answers 2.42), 3/30 is refused by the structure guard (no `sigma_allowance` on the level path, unlike the band
+  path). At S30 panel size the sample stays over 500 and every case answers, so not a finding at the owner's
+  scale — but the clipped core it keeps under-reads a very thin panel (3×3 corner, 5 subs: 1.63 against 2.45
+  predicted). Recorded in the entry so a fixer of the floor sees it.
+- **Not yet run in a sweep (2):** `tone.stretch`'s whole-canvas STF against `background.final_gradient`'s per-panel
+  leveling on a panel thin *and* hazier (still read, not driven).
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-facsy5`) — QA rotation sweep (1), new angle — the editor's *Print* menu (sized off the stored canvas) against the print the export renders, after Auto's own mosaic trim: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8720 passed / 7 skipped on `18e28a3e` (xdist `-n 4`, BLAS capped, 14m53s). No open PRs. Inbox: the
