@@ -2,6 +2,46 @@
 
 ## 2026-11-11 (Builder, branch `claude/focused-noether-2r12my`)
 
+### v0.506.27 — a pre-sized sub caught mid-copy is re-QC'd once the copy finishes
+
+**What.** In `ingest_files`' same-size / moved-mtime / same-header branch (`_same_capture`, "a re-copy that didn't
+preserve timestamps"), a row whose QC measured a **blank** frame (`star_count == 0`, accepted, no `user_override`)
+now gets `reset_frame_qc` and `refreshed = True`, so the scan job re-QCs the target and drops the frame's stale
+thumbnails. The plate solution is kept (it came from the unchanged header). With `copy_to_cache` on, the Stage-1
+copy — taken from the zero-filled file at its final size, so invisible to the size-only `_cache_stale` — is
+force-re-copied. The new mtime is recorded as before, so a genuinely blank sub re-copied by a NAS re-sync costs one
+QC, not one per scan. Every other path is unchanged. Not covered: a blank-looking sub that opt-in auto-grade had
+already rejected before the copy finished (it is no longer accepted, so it is left as it was).
+
+**Tests.** `tests/test_ingest.py`: `test_a_presized_mid_copy_sub_is_re_qcd_once_the_copy_finishes` and
+`test_a_presized_mid_copy_sub_refreshes_its_stage1_copy` fail before; a user's own verdict on a blank-looking sub
+is left alone. No schema, config, default, on-disk or API-shape change; `incoming/` is only read.
+
+**The filed entry, verbatim:**
+
+- **🟢 (Scout 2026-11-11, QA rotation sweep (3)) — a sub caught mid-copy by a writer that *pre-sizes* the file
+  (full length up front, zero-filled tail — how a Windows/SMB copy lands on a share) keeps the QC it was given
+  as a blank frame (`star_count` 0, no FWHM) for ever after the copy finishes.** *(Pillar: autonomy / trust,
+  PRIORITY 2. Severity low: one sub per scan that catches a copy in flight; the picture is unhurt by default —
+  the solve recovers and the stack reads the finished file — but opt-in auto-grade scores `star_count` 0 as
+  maximally bad (`grading._Z_MAX`), opt-in quality weighting sinks it to `min_weight`, and the Frames table and
+  grade suggestions call a good sub cloudy. Confidence: **reproduced** with a stub ASTAP; that the owner's copy
+  path pre-sizes is **unverified**. Size **S**.)* **Reproduced** through `scan_and_organize` +
+  `run_qc_and_solve(only_new_qc=True)` (the scan job's own call), `copy_to_cache` off, 12 subs in
+  `M_42_mosaic_sub/`, one written as header + zeros at full size (tail from byte 2,880 and from byte 100,000),
+  then completed with the capture mtime put back: pass 1 QC'd it `star_count` 0 and the solve failed; pass 2
+  re-solved it (unsolved subs are re-offered every pass) but re-QC'd **nothing** — the row still reads
+  `star_count` 0, `fwhm_px` None. Why: the finished file has the *same size* and a moved mtime, so
+  `ingest_files` takes the `_same_capture` branch (header identical → "a re-copy that didn't preserve
+  timestamps"), leaves QC alone and only advances the fingerprint, and `build_qc_arglist(only_new=True)` skips
+  any row with a `star_count`. The plain *truncated* mid-copy sub (short file) recovers fully — size changes, so
+  `reset_frame_qc` runs — and `incoming/` was untouched in every run. **Fix shape:** in that same-size branch,
+  when the row's QC says it measured a blank frame (`star_count == 0`, accepted, no `user_override`), call
+  `reset_frame_qc` (keep the solution) and set `refreshed` so the scan job re-QCs the target; nothing else on
+  that path changes, so a NAS re-sync of healthy subs still costs nothing. Regression test in
+  `tests/test_ingest*.py`: register a full-size zero-tail sub, QC it, write the real bytes with the old mtime
+  moved, re-ingest → `refreshed` and `star_count is None` (fails today).
+
 ### v0.506.26 — an under-shot panel of a many-panel mosaic gets a grain verdict
 
 **What.** `measure_coverage_grain` (`seestack/bg/coverage_leveling.py`) now runs its level-then-band comparison

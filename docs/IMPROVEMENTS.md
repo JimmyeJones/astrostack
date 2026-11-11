@@ -196,29 +196,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   files it as `Diagnostic result: mosaic_panel_hints v2`). Its `verdicts` answer the gate (`per_panel` vs
   `mosaic_centre`), and `mosaics_with_an_unlocated_only_hint_group` is the bug's occurrence on his library.
 
-- **🟢 (Scout 2026-11-11, QA rotation sweep (3)) — a sub caught mid-copy by a writer that *pre-sizes* the file
-  (full length up front, zero-filled tail — how a Windows/SMB copy lands on a share) keeps the QC it was given
-  as a blank frame (`star_count` 0, no FWHM) for ever after the copy finishes.** *(Pillar: autonomy / trust,
-  PRIORITY 2. Severity low: one sub per scan that catches a copy in flight; the picture is unhurt by default —
-  the solve recovers and the stack reads the finished file — but opt-in auto-grade scores `star_count` 0 as
-  maximally bad (`grading._Z_MAX`), opt-in quality weighting sinks it to `min_weight`, and the Frames table and
-  grade suggestions call a good sub cloudy. Confidence: **reproduced** with a stub ASTAP; that the owner's copy
-  path pre-sizes is **unverified**. Size **S**.)* **Reproduced** through `scan_and_organize` +
-  `run_qc_and_solve(only_new_qc=True)` (the scan job's own call), `copy_to_cache` off, 12 subs in
-  `M_42_mosaic_sub/`, one written as header + zeros at full size (tail from byte 2,880 and from byte 100,000),
-  then completed with the capture mtime put back: pass 1 QC'd it `star_count` 0 and the solve failed; pass 2
-  re-solved it (unsolved subs are re-offered every pass) but re-QC'd **nothing** — the row still reads
-  `star_count` 0, `fwhm_px` None. Why: the finished file has the *same size* and a moved mtime, so
-  `ingest_files` takes the `_same_capture` branch (header identical → "a re-copy that didn't preserve
-  timestamps"), leaves QC alone and only advances the fingerprint, and `build_qc_arglist(only_new=True)` skips
-  any row with a `star_count`. The plain *truncated* mid-copy sub (short file) recovers fully — size changes, so
-  `reset_frame_qc` runs — and `incoming/` was untouched in every run. **Fix shape:** in that same-size branch,
-  when the row's QC says it measured a blank frame (`star_count == 0`, accepted, no `user_override`), call
-  `reset_frame_qc` (keep the solution) and set `refreshed` so the scan job re-QCs the target; nothing else on
-  that path changes, so a NAS re-sync of healthy subs still costs nothing. Regression test in
-  `tests/test_ingest*.py`: register a full-size zero-tail sub, QC it, write the real bytes with the old mtime
-  moved, re-ingest → `refreshed` and `star_count is None` (fails today).
-
 - **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
   v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
   (`/api/library/summary` + the share recap) count a sub registered in two targets (#878) twice, in exactly
@@ -3186,6 +3163,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.27 **A sub a scan caught mid-copy from a pre-sizing writer (full length, zero tail) is re-QC'd once the copy finishes instead of keeping its blank-frame `star_count` 0 for ever (`ingest_files` same-capture branch → `reset_frame_qc`, Stage-1 copy force-refreshed)** — Scout 2026-11-11 sweep (3) entry. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.26 **On a 3×3-or-larger mosaic an under-shot panel now gets a grain verdict (`measure_coverage_grain` second pass with a panel-sized floor, `_GRAIN_MIN_PANEL_PIXELS` + solid-core test `_core_pixels`), so the chip and health card no longer say "you shouldn't see seams" over it** — Scout 2026-11-11 sweep (2) entry; every canvas answered before is answered identically. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.25 **An API GET that names no route answers 404 JSON instead of the SPA shell with 200** — the frontend's `req` choked on `res.json()` ("Unexpected token '<'") and the read-only observer could not tell a missing endpoint from a success (`main._mount_spa` `spa` catch-all) — Scout sweep (4) 2026-11-11, `claude/optimistic-cannon-crb7x5`.
 - ✅ v0.506.24 **The editor's Print menu is sized off the picture the export will render — its crop / resize / rotate replayed on the canvas size — so on a mosaic Auto trims by itself the pre-selected size is no longer refused as "would print soft"** (`print_sizes` `recipe` param, `geometry.edited_shape`). Full entry in [`SHIPPED.md`](SHIPPED.md).
