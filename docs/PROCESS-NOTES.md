@@ -1,5 +1,31 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-mh7yxx`) — QA rotation sweep (3), new angle — ASTAP exits 0 but leaves a *cut-short* `.wcs` sidecar: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8691 passed / 7 skipped on `a38ef3e4` (xdist `-n 4`, BLAS capped, 14m18s). No
+  open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (EXIT 0, nothing overflowing, no console
+  errors, Auto trim 7.9 %; only the standing non-findings). Trap: a container restart mid-dogfood reads
+  `page.waitForTimeout: Target page … has been closed` — the kill, not the editor; rerun it.
+- **Sweep (3), new angle.** The 10-30 sweep fed a successful ASTAP a non-finite `.ini`; none fed it a `.wcs` that
+  stops part-way (a sidecar written into a full scratch `/tmp`, or a binary killed between its writes after the exit
+  code). `wcs_text_is_usable` is only "has a celestial centre": cutting an ASTAP-ordered header card by card shows it
+  passes a header that stops after `CTYPE2` (centre read as RA 0 / Dec 0 at 1°/px) and every cut after `CDELT1` or
+  `CD1_1` with one axis at 3600″/px. End to end — a stub ASTAP that writes a good sidecar for every sub but one,
+  through `scan_and_organize` (`copy_to_cache` off) → `solve_one` → `apply_solve_result_to_db` → `run_stack`, at 4,
+  6 and 12 subs, cut after `CTYPE2`, `CDELT1`, `CD1_1` and `CD2_1`: **the CTYPE-only cut is refused on save**
+  (`solve_failed:unreadable plate solution` — CRVAL is absent, so the wrapper's centre comes out None), and every
+  wrong-scale cut is stored as solved but **dropped by the stack** — the footprint guard below 10 subs, the
+  plate-scale guard (`worst +35950 %`) at 12 — then excluded and flagged rejected with a named reason; the stack uses
+  the rest. Nothing written beside the raw sub. Not filed: a cut inside one 4 KiB page needs a sidecar write to
+  succeed partially, which a full disk does not do to a ~2 KiB file (it gets 0 bytes, already the "unreadable"
+  path); the stack guards are the net if it ever happens.
+- **Parallel Scout, no collision of substance.** `usq0cn` ran sweep (3) in the same window (ASTAP's console
+  *bytes*, v0.506.17, plus the non-UTF-8 file-name Bugs entry) and merged first; the two angles do not overlap — this
+  one read the `.wcs` sidecar's *content*. Both entries kept; the rotation now points at (4).
+- **Next (3) angle not yet run:** `GET /api/system` runs ASTAP `-h` uncached on every call (`_astap_info`), in the app's own
+  cwd — how often the pages call it, and a binary slow to answer `-h` (15 s timeout) against the request thread pool.
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-usq0cn`) — QA rotation sweep (3), new angle — the bytes ASTAP *prints*: one bug, Scout-fixed (v0.506.17). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Environment.** `agent-setup.sh`'s `pip install` ran at ~280 KB/s and was killed at the 30-minute background cap
