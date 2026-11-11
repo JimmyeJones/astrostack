@@ -969,3 +969,104 @@ def test_a_single_field_run_is_healed_for_free_without_opening_a_file(tmp_path):
         assert row.grain_ratio is None
     finally:
         proj.close()
+
+
+# --------------------------------------------------------------------------
+# many-panel mosaics: the bar is one panel, not a tenth of the target
+# --------------------------------------------------------------------------
+
+def _s30_tiled_mosaic(nx, ny, depths, *, step=2, overlap=0.12, seed=3):
+    """An ``nx``x``ny`` mosaic of Seestar-sized panels (1080x1920 subs), read at
+    ``step`` the way :func:`backfill_coverage_grain` reads a master — so the
+    test pays for a quarter of the pixels and exercises the stride scaling too.
+
+    Panels are tiled with ``overlap`` and their depths add where they overlap;
+    each pixel's noise is scaled by ``1/√depth`` and the sky is one constant, so
+    the only thing for the measurement to find is the grain step.
+    """
+    pw, ph = 1080 // step, 1920 // step
+    w = int(round(pw * (nx - (nx - 1) * overlap)))
+    h = int(round(ph * (ny - (ny - 1) * overlap)))
+    cov = np.zeros((h, w), dtype=np.float32)
+    for j in range(ny):
+        for i in range(nx):
+            x0 = int(round(i * pw * (1 - overlap)))
+            y0 = int(round(j * ph * (1 - overlap)))
+            cov[y0:y0 + ph, x0:x0 + pw] += depths[j * nx + i]
+    rng = np.random.default_rng(seed)
+    sigma = np.where(cov > 0, 6.0 / np.sqrt(np.maximum(cov, 1.0)),
+                     0.0).astype(np.float32)
+    rgb = np.empty((h, w, 3), dtype=np.float32)
+    for c in range(3):
+        rgb[..., c] = rng.standard_normal((h, w), dtype=np.float32) * sigma
+    for y, x in zip(rng.integers(4, h - 4, h * w // 4000),
+                    rng.integers(4, w - 4, h * w // 4000), strict=True):
+        rgb[y - 1:y + 2, x - 1:x + 2, :] += 400.0
+    rgb[cov <= 0] = np.nan
+    return rgb, cov
+
+
+@pytest.mark.parametrize("nx, ny, thin_panel", [
+    (3, 3, 4),      # the centre of a 3x3 — the grid the framing note recommends
+    (4, 3, 5),      # an inner panel of a 4x3
+])
+def test_an_under_shot_panel_of_a_many_panel_mosaic_is_named(nx, ny, thin_panel):
+    """Scout 2026-11-11, sweep (2), reproduced at S30 scale: the thin region had
+    to cover a tenth of the *whole canvas*, and one panel's body on a 3x3 or
+    larger is less than that — so a panel at 8 of 30 subs (predicted 1.94x
+    grainier) measured ``None`` and the chip and health card said "Panels even
+    … you shouldn't see seams" over it."""
+    depths = [30] * (nx * ny)
+    depths[thin_panel] = 8
+    rgb, cov = _s30_tiled_mosaic(nx, ny, depths)
+    # The precondition, asserted rather than assumed: the thin panel really is
+    # under the canvas-share bar, so only the panel floor can answer it.
+    thin_share = float((cov == 8).sum()) / float((cov > 0).sum())
+    assert thin_share < _GRAIN_MIN_SHARE
+
+    grain = measure_coverage_grain(rgb, cov, proxy_scale=2.0)
+    assert grain is not None
+    assert (grain.thin_frames, grain.deep_frames) == (8, 30)
+    assert grain.thin_share == pytest.approx(thin_share, abs=0.005)
+    assert grain_verdict(grain.ratio) == "uneven"
+    assert grain.ratio <= math.sqrt(30 / 8) + 0.05
+
+
+def test_an_evenly_shot_many_panel_mosaic_still_says_nothing():
+    rgb, cov = _s30_tiled_mosaic(3, 3, [30] * 9)
+    assert measure_coverage_grain(rgb, cov, proxy_scale=2.0) is None
+
+
+def test_a_panel_sized_but_rim_shaped_thin_region_is_not_named():
+    """The share never needed a shape test — nothing a tenth of a canvas wide is
+    a sliver — but a panel-sized *pixel count* does: a narrow rim all round a
+    big mosaic adds up to more than the panel floor while being nowhere wider
+    than a dither. Naming it "a panel to go back to" would contradict the trim
+    the ragged-border note offers for it, so the panel floor also asks for a
+    solid core."""
+    rgb, cov = _s30_tiled_mosaic(3, 3, [30] * 9)
+    rim = 20                       # 40 full-resolution pixels, at step 2
+    edge = np.zeros(cov.shape, dtype=bool)
+    edge[:rim, :] = edge[-rim:, :] = edge[:, :rim] = edge[:, -rim:] = True
+    edge &= cov > 0
+    cov[edge] = 8
+    rng = np.random.default_rng(9)
+    for c in range(3):
+        rgb[..., c][edge] = rng.normal(0.0, 6.0 / math.sqrt(8),
+                                       int(edge.sum())).astype(np.float32)
+    # The preconditions: the rim clears the panel floor by count (scaled for
+    # the stride) and sits under the canvas share — so only the core test can
+    # be what keeps it out.
+    n_rim = int(edge.sum())
+    assert n_rim * 4 >= coverage_leveling._GRAIN_MIN_PANEL_PIXELS
+    assert n_rim < _GRAIN_MIN_SHARE * int((cov > 0).sum())
+    assert measure_coverage_grain(rgb, cov, proxy_scale=2.0) is None
+
+
+def test_core_pixels_keeps_a_body_and_drops_a_rim():
+    body = np.zeros((400, 400), dtype=bool)
+    body[100:300, 100:300] = True
+    assert coverage_leveling._core_pixels(body, 32) >= 100 * 100
+    ring = np.zeros((400, 400), dtype=bool)
+    ring[:20, :] = ring[-20:, :] = ring[:, :20] = ring[:, -20:] = True
+    assert coverage_leveling._core_pixels(ring, 32) == 0
