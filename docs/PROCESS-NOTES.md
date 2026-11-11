@@ -1,5 +1,32 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-mw5sgl`) — **collision**: sweep (2) took the same angle as `fwsbuf` (`sky_falloff` v2's per-target pairing on a mosaic) and wrote the same fix in parallel; dropped in favour of `main`'s v0.506.16. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **What collided.** Both runs started from `d0b27ddf`/`17d4e0d3`, both read FOCUS's "next sweep is (2)" and the last
+  (2)'s carry-forward ("`sky_falloff` on a mosaic sub"), and both landed on it — the carry-forward named one item, so
+  two Scouts an hour apart could not choose differently. This run's version (`largest_panel`) was finished, tested
+  (8689 passed / 7 skipped) and pushed before the fetch showed #1432 merged. **Discarded, not merged:** `main`'s
+  `one_panel` is the better rule — it drops a mosaic's un-solved subs, where this run fell back to the pointing hint,
+  and whether a hint is the panel's or the mosaic's centre is precisely what `mosaic_panel_hints` has not measured yet.
+  **Process lesson:** a carry-forward that names a single item is a claim nobody wrote down; a Scout taking it should
+  push a `docs:` claim first (§11's "freshly filed entry is the hot one" applies to carry-forwards too).
+- **Measurements that add to `fwsbuf`'s (kept for whoever reads the `sky_falloff` v3 result).** Different synthetic
+  model (extended object across the whole grid plus an off-centre knot, 3 ADU noise, sky ×1–3, truth corner 0.90 ⇒
+  edge ≈ 0.95), through `measure_frame` + `summarise` with v2's sampling: the bias depends on **panel order** more
+  than on mosaic share. Panels shot in rotation (sub *k* on panel *k mod P*): < 0.005 error even at 60 mosaics to 5
+  fields, and < 0.001 with 0–30 mosaics among 50 fields. Panels shot one at a time: 3×3 with real 10 % fall-off read
+  0.975–0.982 (over the 0.97 stand-down bar), a vignette-free 2×2 0.975–0.995. `fwsbuf`'s larger mixed-library
+  figures used a different object model; the two agree on the direction and that v2 could cross the bar. An
+  end-to-end `run` over 25 block-shot 3×3 mosaics read v2 0.972 → per-panel 0.932 (single field 0.947): the residual
+  is the robust medians' nonlinearity under a non-uniform object, which every single field with a big nebula shares
+  and which errs toward *more* vignetting, i.e. away from a false stand-down.
+- **Candidates read and set aside for the next (2):** `newsubs.new_light_since_picture` (membership counts, no
+  threshold), `continueTonight.pickContinueTonight` and `libraryProgress.rankLibraryProgress` (both pass
+  `field_fulls`), `library.find_same_object_target_groups` (mosaic centres are panel-extent midpoints since
+  v0.501.10), `edit/noise.suggest_denoise_strength` (one global strength by design — the op has no per-panel knob).
+- **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors; the known ASTAP note only).
+- **Rotation: unchanged — (2) was done by `fwsbuf`; next sweep is (3).**
+
 ## 2026-11-10 (Scout, branch `claude/optimistic-cannon-fwsbuf`) — QA rotation sweep (2), new angle — the dark-ring gate diagnostic `sky_falloff` v2's "same target" pairing on a mosaic: one bug, Scout-fixed (v0.506.16). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8684 passed / 7 skipped on `d0b27ddf` (xdist `-n 4`, BLAS capped, 16m18s). The `.venv` trap recorded by
