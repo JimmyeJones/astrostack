@@ -445,3 +445,72 @@ def test_no_reduced_note_when_every_picture_is_true_size(client, solved_library)
     built = _build(client)
     assert built["job"]["result"]["n_reduced"] == 0
     assert "_reduced_size.txt" not in _archive(client, built["job_id"]).namelist()
+
+
+def _turned_master(path: Path, *, w: int, h: int, rot_deg: float) -> None:
+    """A master FITS whose WCS is turned ``rot_deg`` from North-up, so its
+    "North up" render rotates by an angle that is not a right angle."""
+    import math
+
+    hdu = fits.PrimaryHDU(
+        data=(np.random.default_rng(3).random((3, h, w), dtype=np.float32) * 200.0))
+    hd = hdu.header
+    hd["CTYPE1"], hd["CTYPE2"] = "RA---TAN", "DEC--TAN"
+    hd["CRVAL1"], hd["CRVAL2"] = 83.8, 22.0
+    hd["CRPIX1"], hd["CRPIX2"] = w / 2 + 0.5, h / 2 + 0.5
+    scale = 3.0e-4
+    c, s = math.cos(math.radians(rot_deg)), math.sin(math.radians(rot_deg))
+    hd["CD1_1"], hd["CD1_2"] = -scale * c, scale * s
+    hd["CD2_1"], hd["CD2_2"] = scale * s, scale * c
+    hdu.writeto(path, overwrite=True)
+
+
+def test_a_turned_picture_read_shrunk_is_reduced_even_under_the_cap(tmp_path):
+    """Scout 2026-11-11: a canvas wider than the cap is area-averaged to the cap
+    **at load** and only then turned North-up with ``expand``. A turn that is not
+    a right angle brings the shrunk picture's long edge back *under* the cap, so
+    the archive's "the file's long edge reached the cap" fallback (the true size
+    of a turned picture is not predicted) counted a picture a third smaller than
+    its true size as full size, and left it out of ``_reduced_size.txt``. The cap
+    is scaled down to 800 here; the code path is the one an 8000 px mosaic
+    takes."""
+    from seestack.render.thumbnail import stack_north_up_deg
+    from webapp import picturesarchive
+    from webapp.preview_orient import baked_north_up_deg
+
+    cap = 800
+    fits_path = tmp_path / "wide.fits"
+    _turned_master(fits_path, w=1200, h=300, rot_deg=40.0)
+    angle = stack_north_up_deg(fits_path)
+    assert angle is not None and min(abs(angle) % 90, 90 - abs(angle) % 90) > 10
+
+    def _run(fp: Path, w: int, h: int) -> StackRunRow:
+        return StackRunRow(
+            id=1, timestamp_utc="2026-05-01T00:00:00Z", output_basename="m",
+            fits_path=str(fp), tiff_path=None, preview_path=None,
+            n_frames_used=5, canvas_h=h, canvas_w=w, coverage_min=1,
+            coverage_max=5, options_json=json.dumps({}),
+            preview_north_up_deg=float(angle))
+
+    narrow_path = tmp_path / "narrow.fits"
+    _turned_master(narrow_path, w=500, h=300, rot_deg=40.0)
+    turned, narrow = _run(fits_path, 1200, 300), _run(narrow_path, 500, 300)
+    assert baked_north_up_deg(turned) == float(angle)
+
+    settings = type("S", (), {"data_root": str(tmp_path),
+                              "auto_crop_border": False})()
+    picks = [picturesarchive.PicturePick(name="wide.png", run=turned),
+             picturesarchive.PicturePick(name="narrow.png", run=narrow)]
+    report = picturesarchive.build_full_size_archive(
+        settings, picks, max_long_edge=cap)
+
+    zf = zipfile.ZipFile(picturesarchive.archive_path(settings))
+    with Image.open(io.BytesIO(zf.read("wide.png"))) as im:
+        # Turned after the load shrank it: under the cap, yet not true size.
+        assert max(im.size) < cap
+    assert report.n_reduced == 1
+    assert report.n_full_res == 1
+    note = zf.read("_reduced_size.txt").decode()
+    assert "wide.png" in note
+    # A canvas under the cap is read at native size; turned, it is true size.
+    assert "narrow.png" not in note

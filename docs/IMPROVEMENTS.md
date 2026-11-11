@@ -196,28 +196,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   files it as `Diagnostic result: mosaic_panel_hints v2`). Its `verdicts` answer the gate (`per_panel` vs
   `mosaic_centre`), and `mosaics_with_an_unlocated_only_hint_group` is the bug's occurrence on his library.
 
-- **🟢 (Scout 2026-11-11, QA rotation sweep (1)) — the full-size archive counts a North-up-turned picture as
-  "full size" when it went in shrunk, on a canvas over the 8000 px cap turned by an angle that is not a right
-  angle.** *(Pillar: trust, PRIORITY 3. Severity low: needs a canvas wider than `_FULL_RES_PNG_MAX_LONG_EDGE`
-  — a drizzled 3×3-or-larger mosaic, above the owner's largest today — *and* a saved "North up" whose angle is
-  not near 0/90/180/270°. The picture is fine; only the archive's promise and its `_reduced_size.txt` are
-  wrong, the class v0.506.14 fixed for unturned canvases. Confidence: **reproduced**. Size **S**.)* In
-  `picturesarchive.build_full_size_archive`, `_true_size` is `None` for a baked turn (`full_res_png_size`
-  refuses to predict it), so the fallback reports "reduced" only when `max(got) >= cap`. But
-  `render_preview_png_full_res` shrinks a canvas wider than the cap **at load** (`full_res_load_width`), and
-  only then rotates with `expand=True` (`orient.rotate_image_north_up`), so a non-right-angle turn brings the
-  long edge back *under* the cap. **Reproduced** on the real renderer with a synthetic master carrying a
-  rotated CD matrix and the cap scaled down to 800 (same code path): 1200 × 300 at a 140° turn → a native
-  render of 1114 × 1002, the capped one **742 × 668** (a third smaller), long edge under 800 → counted
-  `n_full_res`, absent from the note. 850 × 200 at 140°: true size 780 × 700 is *under* the cap, yet the file
-  comes out 734 × 660 because the load grid is chosen off the unturned canvas. The 0°/91.5°/square controls
-  were all reported correctly. **Fix shape:** in the archive's unknown-size branch also count a member as
-  reduced when `full_res_load_width(canvas_w, …)` is below `canvas_w` — exactly when the load decimates (a *tall*
-  canvas is not decimated at load, and a turn can legitimately bring it under the cap at true size);
-  optionally let `full_res_load_width` size the load off the turned bounding box so the second case keeps its
-  true size. Regression test beside `test_a_picture_shrunk_to_the_cap_is_named_not_counted_as_full_size`
-  in `tests/webapp/test_pictures_archive.py`, with a 40° CD matrix and a baked turn (fails today).
-
 - **🟡 (Scout 2026-11-11, QA rotation sweep (2)) — on an uneven mosaic the "~N more clear nights" estimate
   multiplies the per-part shortfall by the *past* split ratio (`depth_fulls`), not by the sky new time is spread
   over, so a grown 2×2→3×3 is told ~21 nights where shooting its current framing at the same pace takes ~5.**
@@ -3207,6 +3185,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.28 **The full-size archive counts a North-up-turned picture whose master was read shrunk as reduced, even when a turn that is not a right angle lands its long edge back under the 8000 px cap** (`pipeline.full_res_load_decimates` in `build_full_size_archive`'s unknown-size branch) — Scout 2026-11-11 sweep (1) entry. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.27 **A sub a scan caught mid-copy from a pre-sizing writer (full length, zero tail) is re-QC'd once the copy finishes instead of keeping its blank-frame `star_count` 0 for ever (`ingest_files` same-capture branch → `reset_frame_qc`, Stage-1 copy force-refreshed)** — Scout 2026-11-11 sweep (3) entry. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.26 **On a 3×3-or-larger mosaic an under-shot panel now gets a grain verdict (`measure_coverage_grain` second pass with a panel-sized floor, `_GRAIN_MIN_PANEL_PIXELS` + solid-core test `_core_pixels`), so the chip and health card no longer say "you shouldn't see seams" over it** — Scout 2026-11-11 sweep (2) entry; every canvas answered before is answered identically. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.25 **An API GET that names no route answers 404 JSON instead of the SPA shell with 200** — the frontend's `req` choked on `res.json()` ("Unexpected token '<'") and the read-only observer could not tell a missing endpoint from a success (`main._mount_spa` `spa` catch-all) — Scout sweep (4) 2026-11-11, `claude/optimistic-cannon-crb7x5`.
