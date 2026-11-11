@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-vrbblx`) — QA rotation sweep (4), new angle — what the observer's read-only token can make its seven allowlisted GETs *write* or *disclose*: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8712 passed / 7 skipped on `5a34c1bd` (xdist `-n 4`, BLAS capped, 17m18s). No open PRs. Inbox: the
+  same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors, Auto
+  trim 7.9 %; only the standing non-finding, the Dashboard's ASTAP note in a dogfood without ASTAP).
+- **Sweep (4), angle not run before** (grep `readonly`/`read-only token` in this file: the 2026-10-31 run checked the
+  gate's *path matching* only; the 2026-11-04 GET-snapshot crawl ran without a token and without site data). The
+  token is the one credential whose answers leave the box — the observer files what it reads into this public repo —
+  so asked of each path in `webapp.main._READONLY_GET_PATHS`, with every query parameter it takes (`logs`
+  `since`/`level`/`limit` incl. a negative `since`; `stats` `recent_limit` huge and negative; `jobs` `limit=2000`):
+  does it write anything, and does it carry the owner's site? Data: 4 S30-header subs with a made-up, distinctive
+  `SITELAT`/`SITELONG` and the same values in `Settings.site_lat`/`site_lon`, a real `POST /api/scan` and stack,
+  then password + token minted and every call made as `Bearer <token>` with a byte/mtime snapshot around each.
+- **Result.** All seven 200; `/api/settings` and `/api/jobs/{id}` 403 with the token's refusal text. **No file
+  written** except `state/jobs.sqlite-wal`/`-shm` on two calls — SQLite's WAL reader index, not data. **The
+  coordinates appear in no answer** (searched for the made-up test values at several precisions). Paths appear only in job results/details
+  (`output_dir`, `root`, "Scanning …/incoming"), container-relative on the real install (`/data/...`) — fine under
+  AGENTS.md's privacy rule. `GET /api/diagnostics` read before any result exists lists the five pending
+  `(name, version)` pairs with their questions, no data. Nothing filed.
+- **Curation:** none needed — no closed entry in Bugs, no live claim; `IMPROVEMENTS.md` unchanged.
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-hv4l4e`) — QA rotation sweep (3), new angle — a mosaic panel that fails *every* rung (clouds) plus one sub that hangs past the timeout, through the real solve pool: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8706 passed / 7 skipped on `90a927de` (xdist `-n 4`, BLAS capped, 17m02s). No open PRs. Inbox: the
