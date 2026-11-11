@@ -196,6 +196,28 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   files it as `Diagnostic result: mosaic_panel_hints v2`). Its `verdicts` answer the gate (`per_panel` vs
   `mosaic_centre`), and `mosaics_with_an_unlocated_only_hint_group` is the bug's occurrence on his library.
 
+- **🟢 (Scout 2026-11-11, QA rotation sweep (1)) — the full-size archive counts a North-up-turned picture as
+  "full size" when it went in shrunk, on a canvas over the 8000 px cap turned by an angle that is not a right
+  angle.** *(Pillar: trust, PRIORITY 3. Severity low: needs a canvas wider than `_FULL_RES_PNG_MAX_LONG_EDGE`
+  — a drizzled 3×3-or-larger mosaic, above the owner's largest today — *and* a saved "North up" whose angle is
+  not near 0/90/180/270°. The picture is fine; only the archive's promise and its `_reduced_size.txt` are
+  wrong, the class v0.506.14 fixed for unturned canvases. Confidence: **reproduced**. Size **S**.)* In
+  `picturesarchive.build_full_size_archive`, `_true_size` is `None` for a baked turn (`full_res_png_size`
+  refuses to predict it), so the fallback reports "reduced" only when `max(got) >= cap`. But
+  `render_preview_png_full_res` shrinks a canvas wider than the cap **at load** (`full_res_load_width`), and
+  only then rotates with `expand=True` (`orient.rotate_image_north_up`), so a non-right-angle turn brings the
+  long edge back *under* the cap. **Reproduced** on the real renderer with a synthetic master carrying a
+  rotated CD matrix and the cap scaled down to 800 (same code path): 1200 × 300 at a 140° turn → a native
+  render of 1114 × 1002, the capped one **742 × 668** (a third smaller), long edge under 800 → counted
+  `n_full_res`, absent from the note. 850 × 200 at 140°: true size 780 × 700 is *under* the cap, yet the file
+  comes out 734 × 660 because the load grid is chosen off the unturned canvas. The 0°/91.5°/square controls
+  were all reported correctly. **Fix shape:** in the archive's unknown-size branch also count a member as
+  reduced when `full_res_load_width(canvas_w, …)` is below `canvas_w` — exactly when the load decimates (a *tall*
+  canvas is not decimated at load, and a turn can legitimately bring it under the cap at true size);
+  optionally let `full_res_load_width` size the load off the turned bounding box so the second case keeps its
+  true size. Regression test beside `test_a_picture_shrunk_to_the_cap_is_named_not_counted_as_full_size`
+  in `tests/webapp/test_pictures_archive.py`, with a 40° CD matrix and a baked turn (fails today).
+
 - **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
   v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
   (`/api/library/summary` + the share recap) count a sub registered in two targets (#878) twice, in exactly
