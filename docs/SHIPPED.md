@@ -19,7 +19,7 @@ reject summary's verdict told a beginner to check his subs for trails or fog. No
   `/api/logs`) and adds `solve_scratch_full` to its summary.
 - `reject-summary.solve_setup_problem` gains `kind: "scratch"` (additive), and the Target page shows an orange
   "Plate-solving ran out of temporary space" banner; the "not located yet" explainer names it too.
-- `rejection_summary.bucket_for` puts any *setup* solve failure in "not located yet", never "couldn't be matched
+- `rejection_summary.bucket_for` puts the scratch-full reason in "not located yet", never "couldn't be matched
   to the star field", so the verdict no longer blames the subs.
 
 **Tests.** `tests/test_solve_scratch_full.py` (6 of 7 fail before; the unreadable-source guard passes either way by
