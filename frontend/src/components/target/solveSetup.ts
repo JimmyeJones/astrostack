@@ -19,7 +19,7 @@
  * problem, so the UI simply shows nothing (today's behaviour). */
 // `cannotRun` (server: `cannot_run`) marks the "astap" kind whose binary is there
 // but won't start — a different one-time fix from "install it".
-// `scratch` (server-only, v0.506.23): the temp dir the solve copies each sub
+// `scratch` (v0.506.23): the temp dir the solve copies each sub
 // into is full, so ASTAP never ran — the subs are fine and the fix is space.
 export type SolveSetup = {
   kind: "astap" | "database" | "scratch";
