@@ -196,28 +196,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   files it as `Diagnostic result: mosaic_panel_hints v2`). Its `verdicts` answer the gate (`per_panel` vs
   `mosaic_centre`), and `mosaics_with_an_unlocated_only_hint_group` is the bug's occurrence on his library.
 
-- **🟡 (Scout 2026-11-11, QA rotation sweep (2)) — on an uneven mosaic the "~N more clear nights" estimate
-  multiplies the per-part shortfall by the *past* split ratio (`depth_fulls`), not by the sky new time is spread
-  over, so a grown 2×2→3×3 is told ~21 nights where shooting its current framing at the same pace takes ~5.**
-  *(Pillar: autonomy / trust — the walk-away planning answer, PRIORITY 2. Severity moderate: the owner's own
-  shape (a mosaic grown over nights), ~4× too many nights on three surfaces, pointing a beginner away from a
-  target that is close. Confidence: **reproduced**. Size **S**, frontend only.)* v0.502.40 rightly scaled the
-  per-type goal by `typicalPartFulls(fieldFulls, depthFulls)` so the readiness *fraction* reads the median pixel
-  (`T/D` of `g`). But every nights-to-go figure then divides `goalHours − hours = (g − T/D)·D` by the pace —
-  i.e. assumes each future hour splits as unevenly as the past did. A future hour on the current framing is
-  spread over `F` (the area `fieldFulls`), which is exactly what the planner's own `nightplan._panel_noise_gain`
-  assumes ("another hour spread over a canvas of F fields reaches each patch as h/F"). **Reproduced** with the
-  real `integrationReadiness` + `clearNightsFromPace` (esbuild, scratch) on the v0.502.40 grown shape (F 7.59,
-  D 31.5, cluster 1.5 h, pace 2 h/night): T = 7 / 9 / 12 h → **21 / 20 / 18 nights** and "7.0 h of ~47.3 h",
-  against `(g − T/D)·F / pace` = **5 / 5 / 5**. Even-3×3 control (D 9): 4 vs 3. Same gap on all three callers:
-  `routes/Target.tsx:884` + `:1988` (Target page card), `libraryProgress.ts:83` (Dashboard "Target progress"),
-  `readiness.ts:400` (`readinessRowBadge`, Tonight). **Fix shape:** expose `remainingHours` from
-  `integrationReadiness` = `max(0, baseGoal − hours/goalScale) × cleanFieldFulls` on a measured mosaic (equal to
-  `goalHours − hours` whenever `goalScale == cleanFieldFulls`, so single-field, unmeasured, user-goal and older
-  backends are byte-for-byte unchanged) and route the three callers through it; optionally phrase the verdict's
-  "of ~47 h" per part. Vitest beside the v0.502.40 grown-shape cases in `readiness.test.ts` /
-  `libraryProgress.test.ts` (fail today).
-
 - **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
   v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
   (`/api/library/summary` + the share recap) count a sub registered in two targets (#878) twice, in exactly
@@ -3185,6 +3163,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.30 **The "~N more clear nights" estimates (Target page card + next-session card, Dashboard "Target progress", Tonight row badge) price an uneven mosaic's remaining time over the sky new time covers — a grown 2×2→3×3 read ~21 nights where its current framing at the same pace takes ~5** (`IntegrationReadiness.remainingHours`, `readinessRowBadge`, `rankLibraryProgress`) — Scout 2026-11-11 sweep (2) entry. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.29 **The no-Qt test fallback (`docs/AGENT-ENVIRONMENT.md`, `scripts/agent-setup.sh`) ignores `tests/test_library_dialog_summary.py`, which imports PySide6 when tests are collected** — Scout 2026-11-11
 - ✅ v0.506.28 **The full-size archive counts a North-up-turned picture whose master was read shrunk as reduced, even when a turn that is not a right angle lands its long edge back under the 8000 px cap** (`pipeline.full_res_load_decimates` in `build_full_size_archive`'s unknown-size branch) — Scout 2026-11-11 sweep (1) entry. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.27 **A sub a scan caught mid-copy from a pre-sizing writer (full length, zero tail) is re-QC'd once the copy finishes instead of keeping its blank-frame `star_count` 0 for ever (`ingest_files` same-capture branch → `reset_frame_qc`, Stage-1 copy force-refreshed)** — Scout 2026-11-11 sweep (3) entry. Full entry in [`SHIPPED.md`](SHIPPED.md).

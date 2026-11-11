@@ -882,7 +882,7 @@ export function TargetView() {
     () =>
       readiness
         ? estimateClearNights(
-            (readiness.goalHours - readiness.hours) * 3600,
+            readiness.remainingHours * 3600,
             nights.data,
           )
         : null,
@@ -1985,7 +1985,7 @@ export function TargetView() {
               {readiness ? (
                 <NextSessionCard
                   safe={safe}
-                  gapSeconds={Math.max(0, (readiness.goalHours - readiness.hours) * 3600)}
+                  gapSeconds={readiness.remainingHours * 3600}
                   subExposureSeconds={
                     target.data && target.data.n_frames_accepted > 0
                       ? target.data.total_exposure_s / target.data.n_frames_accepted

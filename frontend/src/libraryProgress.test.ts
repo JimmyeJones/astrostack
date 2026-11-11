@@ -113,6 +113,12 @@ describe("rankLibraryProgress", () => {
     const [r] = rankLibraryProgress([row({ ...grown, depth_fulls: 31.5 })]);
     expect(r.readiness.level).toBe("starting");
     expect(r.readiness.goalHours).toBeCloseTo(47.25, 5);
+    // How long it takes at 2 h a clear night: the current framing spreads each
+    // hour over 7.59 fields, so (1.5 - 7/31.5) x 7.59 = 9.7 h -> 5 nights.
+    // Fails before: 47.25 - 7 = 40.25 h read 21 nights.
+    const [paced] = rankLibraryProgress([
+      row({ ...grown, depth_fulls: 31.5, recent_pace_s: 2 * 3600 })]);
+    expect(paced.nightsToGo).toBe(5);
   });
 });
 

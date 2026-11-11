@@ -6,6 +6,7 @@ import {
   readinessRowHint,
   noiseReductionHint,
 } from "./readiness";
+import { clearNightsFromPace } from "./components/clearNights";
 
 const H = 3600;
 
@@ -210,6 +211,39 @@ describe("integrationReadiness", () => {
       expect(r?.fieldFulls).toBeCloseTo(GROWN_FF, 9);
     });
 
+    // The forward half of the same shape: the gap the "~N more clear nights"
+    // figures divide by the pace. `goalHours - hours` is (g - T/D)*D, which
+    // re-splits every future hour as unevenly as the past ones; an hour on the
+    // current framing spreads over the 7.59 fields of sky
+    // (nightplan._panel_noise_gain), so the gap is (g - T/D)*F.
+    it("prices a grown mosaic's remaining time over the sky new time covers", () => {
+      const GROWN_FF = 7.587962962962963;
+      const r = integrationReadiness(
+        7 * H, "cluster", null, GROWN_FF, null, null, 31.5);
+      // Fails before: the gap was 47.25 - 7 = 40.25 h, ~21 nights at 2 h.
+      expect(r?.remainingHours).toBeCloseTo((1.5 - 7 / 31.5) * GROWN_FF, 6);
+      expect(clearNightsFromPace(r!.remainingHours * H, 2 * H)?.nights).toBe(5);
+      // Even 3x3 (median depth == area): the plain subtraction, unchanged.
+      const even = integrationReadiness(7 * H, "cluster", null, 9, null, null, 9);
+      expect(even?.remainingHours).toBeCloseTo(13.5 - 7, 9);
+    });
+
+    it("keeps remainingHours = goalHours - hours wherever nothing was measured", () => {
+      const cases = [
+        integrationReadiness(1.8 * H, "galaxy"),
+        integrationReadiness(6 * H, "galaxy", null, 4),
+        integrationReadiness(6 * H, "galaxy", null, 4, null, null, null),
+        integrationReadiness(6 * H, "galaxy", 12, 4, null, null, 31.5),
+      ];
+      for (const r of cases) {
+        expect(r!.remainingHours).toBe(r!.goalHours - r!.hours);
+      }
+      // Never negative once the goal is met.
+      expect(integrationReadiness(60 * H, "cluster", null, 7.59, null, null, 31.5)
+        ?.remainingHours).toBe(0);
+      expect(integrationReadiness(9 * H, "galaxy")?.remainingHours).toBe(0);
+    });
+
     it("ignores a measured depth on a single field, a user goal, and junk", () => {
       const single = integrationReadiness(1.8 * H, "galaxy");
       for (const df of [null, undefined, 31.5, 0.5, NaN]) {
@@ -405,6 +439,10 @@ describe("readinessRowHint", () => {
       .toBeNull();
     expect(readinessRowBadge(9 * H, "cluster", null, null, GROWN_FF, null, null, 31.5))
       .toBeNull();
+    // At 4 h a clear night the current framing is ~3 nights away — (1.5 - 9/31.5)
+    // x 7.59 = 9.2 h. Fails before: 38.25 h read 10 nights, past the badge's cap.
+    expect(readinessRowBadge(9 * H, "cluster", null, 4 * H, GROWN_FF, null, null, 31.5))
+      .toMatchObject({ label: "~3 more nights", color: "teal" });
   });
 });
 
