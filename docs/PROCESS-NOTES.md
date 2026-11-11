@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-iaj7ik`) — QA rotation sweep (1), the lead three (1) sweeps left "read, not driven" — the full-size archive's member for a North-up-turned canvas over the cap: one bug, filed reproduced. Share-JPEG nameplate on strip mosaics: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8763 passed / 7 skipped on `4bf0ff35` (xdist `-n 4`, BLAS capped, 17m02s). No open
+  PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+  No `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors,
+  Auto trim 7.9 %).
+- **Sweep (1), lead A — the Share JPEG's 2048 px cap against the nameplate on strip mosaics** (`write_share_jpeg` →
+  `draw_nameplate`, font `0.021 × width`, floor 11, shrink to 8). A long full caption (target, 13 h (4500x10s),
+  a 4-night span, the gear) on S30 portrait panels at 12 % overlap, 1×1 through 3×2 and 1×3 / 4×1 strips: it fits
+  every one (tightest 1×3, 417 × 2048: 370 of 405 px at 11 px); it would only clip on a 1×5 vertical strip
+  (≈ 270 px wide). Width-only font sizing makes a portrait share's caption small next to a landscape one's — a
+  design choice, not filed. CLEAN.
+- **Sweep (1), lead B — the archive member for a North-up-baked canvas over the cap.** Driven on the real
+  `render_preview_png_full_res(north_up=True)` with synthetic masters carrying a rotated CD matrix and the cap
+  scaled to 800 (same branch as 8000). `render_preview_png_full_res` decimates a canvas wider than the cap *at
+  load*, then `rotate_image_north_up` turns it with `expand=True`; `_true_size` is `None` for a baked turn, so the
+  archive's fallback `max(got) >= cap` misses a non-right-angle turn: 1200 × 300 @ 140° → native 1114 × 1002,
+  archived **742 × 668**, counted full size; 850 × 200 @ 140° → true 780 × 700 (under the cap) still archived at
+  734 × 660. Controls (180°, 91.5° snapped, a square canvas) reported correctly. Filed 🟢 S in Bugs with the fix
+  shape. Not at the owner's scale today (his largest canvas is under the cap); scratch driver not landed.
+- **Not yet run in a sweep (1):** the saved-recipe branch (`render_run_recipe_fullres_png`) of the same turn
+  (read: same order, decimate then rotate — expect the same miss); the keepsake matte's caption on a 1×3 strip.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-crb7x5`) — QA rotation sweep (4), new angle — GETs under `/api` that name *no* route, against the built SPA's catch-all, and every frontend `/api` path against the server's route table: one bug, Scout-fixed (v0.506.25). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8758 passed / 7 skipped with the fix on `1ca7f834` (xdist `-n 4`, BLAS capped, 16m11s). No open PRs. Inbox: the
