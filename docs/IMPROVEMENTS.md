@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- Editor Download PNG / Share / Print files never reclaimed (`purge_stack_run`, Bugs, Scout 2026-11-11) — branch `claude/focused-noether-e1jr71`.
+*No live claims.*
 
 ---
 
@@ -125,24 +125,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   its single field, or centres within 5°, are one sky — v1 read a nebula they share as r 0.99 / ratio 15). When the issue arrives, replace this line
   with its numbers and lift the hold. If the cold ranges collapse there, look at dew or frost on the
   optics before building (1).
-
-- **🟡 (Scout 2026-11-11, QA rotation sweep (4), reproduced) — every editor "Download PNG", "Share" and "Print"
-  leaves a timestamped file in the target's `output/` that nothing ever deletes — not the run's Delete, not
-  "Prune old stacks".** *(Pillar: "just works" on a NAS, PRIORITY 2–3. Severity: silent disk growth, ~**43 MB per
-  mosaic PNG click** (measured: `write_full_res_png` of a 4200×6400 stretched sky), counted in the Storage page's
-  `output_bytes` with no button that reclaims it short of deleting the target. Confidence: **reproduced**. Size
-  **S**.)* `pipeline.submit_editor_png` / `submit_editor_share` / `submit_editor_print` write
-  `<basename>_edit_<ts>.png`, `_share_<ts>.jpg`, `_print_<size>_<ts>.jpg` into `output/` — one new file per click,
-  only so `GET …/editor/png|share|print/{job_id}` can hand it over once. None is in
-  `seestack.stack.output.RUN_ARTEFACT_SUFFIXES` (their names carry a timestamp), so
-  `routers/storage.purge_stack_run` skips them. Repro (`tests/webapp` fixture, `_make_run` 800×1000 + a second
-  run): two `export-png` + one `share` → `DELETE /api/targets/{safe}/stack-runs/{rid}` 200 → all three files still
-  on disk beside the other run's FITS. **Fix shape (Builder's call):** keep the downloads where a run's delete can
-  find them — e.g. reclaim `<stem>_edit_*.png` / `_share_*.jpg` / `_print_*.jpg` in `purge_stack_run` (match the
-  exact `<stem>_<kind>_` prefix, honour `keep_paths`), and keep only the newest of each kind per run so repeat
-  clicks don't pile up (an older job's download GET then 404s — check the editor words that plainly). Not
-  `incoming/`; nothing the owner made is lost — these are copies he already downloaded. Test: the repro, plus a
-  second export of the same kind replacing the first.
 
 - **🟡 (Scout 2026-11-03 + 11-07, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/`, `.Trash-*/` or `.zfs/` folder
   a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
@@ -3193,6 +3175,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.20 **The editor's Download PNG / Share / Print files no longer pile up in `output/` — a newer click of one button replaces the older file, and deleting or pruning the run removes them all** (`output.replace_older_editor_downloads`, `storage._delete_editor_downloads` in `purge_stack_run`)
 - ✅ v0.506.19 **An unedited trimmed canvas wider than the 8000 px Full-res cap keeps its true size — the canvas was shrunk to the cap *before* the trim, so a 9000 px canvas trimmed to 7200 px downloaded at 6400 px and the archive counted it full size** (`thumbnail.full_res_load_width`, `render_preview_png_full_res`, `pipeline.full_res_png_size`)
 - ✅ v0.506.18 **A sub whose file name is not valid UTF-8 is one unreadable sub, never a failed scan — before, SQLite refused it in `Project.add_frame` and every target after it never ingested** (`ingest.name_is_valid_text`, `scan_and_organize` per-unit isolation, `RingBufferLogHandler` sanitises). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.17 **A plate solve whose ASTAP console output carries a non-UTF-8 byte is still a solve — a strict decode raised after a good solve and stored a decoder traceback as the reject reason** (`ASTAPSolver._run_astap`, `errors="replace"`). Full entry in [`SHIPPED.md`](SHIPPED.md).
