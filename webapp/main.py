@@ -436,6 +436,16 @@ def _mount_spa(app: FastAPI) -> None:
         # read arbitrary files (e.g. ``/%2e%2e/%2e%2e/etc/passwd``). A path that
         # escapes the root falls through to the SPA shell, same as any unknown
         # client route.
+        #
+        # Except under ``/api``: every API route is already matched above, so a
+        # GET reaching here under ``/api`` names no route (a typo, a version
+        # skew, a POST-only path). Answering it with the shell said "200, here
+        # is HTML" — the frontend's ``req`` then failed on ``res.json()`` with
+        # "Unexpected token '<'" instead of a 404, and a read-only client (the
+        # observer) could not tell "this install has no such endpoint" from a
+        # success. No client route lives under ``/api``.
+        if full_path == "api" or full_path.startswith("api/"):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
         candidate = (STATIC_DIR / full_path).resolve()
         if (
             full_path

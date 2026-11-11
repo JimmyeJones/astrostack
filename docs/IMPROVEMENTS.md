@@ -3186,7 +3186,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
-- ✅ v0.506.25 **On a 3×3-or-larger mosaic an under-shot panel now gets a grain verdict (`measure_coverage_grain` second pass with a panel-sized floor, `_GRAIN_MIN_PANEL_PIXELS` + solid-core test `_core_pixels`), so the chip and health card no longer say "you shouldn't see seams" over it** — Scout 2026-11-11 sweep (2) entry; every canvas answered before is answered identically. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- ✅ v0.506.26 **On a 3×3-or-larger mosaic an under-shot panel now gets a grain verdict (`measure_coverage_grain` second pass with a panel-sized floor, `_GRAIN_MIN_PANEL_PIXELS` + solid-core test `_core_pixels`), so the chip and health card no longer say "you shouldn't see seams" over it** — Scout 2026-11-11 sweep (2) entry; every canvas answered before is answered identically. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- ✅ v0.506.25 **An API GET that names no route answers 404 JSON instead of the SPA shell with 200** — the frontend's `req` choked on `res.json()` ("Unexpected token '<'") and the read-only observer could not tell a missing endpoint from a success (`main._mount_spa` `spa` catch-all) — Scout sweep (4) 2026-11-11, `claude/optimistic-cannon-crb7x5`.
 - ✅ v0.506.24 **The editor's Print menu is sized off the picture the export will render — its crop / resize / rotate replayed on the canvas size — so on a mosaic Auto trims by itself the pre-selected size is no longer refused as "would print soft"** (`print_sizes` `recipe` param, `geometry.edited_shape`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.23 **A full container temp dir is named as one setup problem — "plate-solving ran out of temporary space" — instead of every sub reading as "couldn't be located" and the summary telling the owner to check his subs for trails or fog** (`ASTAPSolver._solve_once`, `ASTAPScratchError`, `SOLVE_SETUP_SCRATCH_FULL`, `run_qc_and_solve` warning). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.22 **A frame id or page window past SQLite's 64-bit integer range answers 404 / a clamped page instead of a 500 on the frames routes (`Project.get_frame`, `iter_frames_page`)** — Scout sweep (4) 2026-11-11, `claude/optimistic-cannon-kab7ux`.
@@ -4600,5 +4601,3 @@ _Newest first. One line each: what + commit/PR. Entries that had grown to paragr
 - **Outlier-safe drizzle** — new opt-in `drizzle_reject`: two-pass κ-σ
 
 - **Editable notes/label on History cards** — the long-standing `notes` column
-
-- **Mono single-frame edge test** — verified the mono stack path on a
