@@ -1,5 +1,30 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-50wcqa`) — QA rotation sweep (2), new angle — the *forward* projection on an uneven mosaic: the "~N more clear nights" estimate. One bug filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8756 passed / 7 skipped on `9fdc0e7a` (xdist `-n 4`, BLAS capped, 16m36s) plus
+  **1 collection error that is the environment, not `main`**: `tests/test_library_dialog_summary.py` (added v0.506.0)
+  imports `seestack.gui.library_dialog` → `PySide6.QtGui`, which needs `libEGL`; the documented no-Qt fallback did not
+  list it. Added to the fallback in `docs/AGENT-ENVIRONMENT.md` and `scripts/agent-setup.sh`'s hint. No open PRs.
+  Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors).
+- **Sweep (2), the angle.** Every earlier (2) asked whether a *present-tense* number (a depth, a grain, a share) was
+  per-panel. This one asks the same of a *forecast*: v0.502.40 scales the readiness goal by `depth_fulls`
+  (`n_used ÷ median depth`), so the fraction `T/D ÷ g` is honest — but the nights-to-go chip then divides
+  `goalHours − hours = (g − T/D)·D` by the pace, which spends future time the way past time was split. Driven with
+  the real `integrationReadiness` + `clearNightsFromPace` (esbuild bundle in the scratchpad, not landed) on the
+  v0.502.40 grown 2×2→3×3 (F 7.59, D 31.5, cluster 1.5 h, 2 h/night): 21 / 20 / 18 nights at 7 / 9 / 12 h against
+  5 / 5 / 5 for `(g − T/D)·F`; even 3×3 (D 9) 4 vs 3. `nightplan._panel_noise_gain` already uses `F` for the future
+  hour, so the two surfaces disagree. Filed 🟡 S in Bugs. The 2026-10-28 (2) had read this chip and noted only that
+  its goal is scaled — not the direction of the projection.
+- **Read and holds (CLEAN):** `_auto_stack_panel_depth` / `typical_panel_depth` (frame-weighted median), the
+  readability hold's `panels_missing`/`panels_thinned`, `bulk_select` and `grade_frames` per-panel populations,
+  `transparency_trend`'s panel rescale, `rejection_sample_depths` (peak + median), `portfolio._entry_coverage`
+  (peak capped), `coverage_trim` (D1's five instalments). `suggest_denoise_strength` takes one canvas-wide σ on an
+  uneven mosaic — one global op by design, not filed. `_auto_stack_degraded_heal` stays whole-target (2026-10-28
+  reasoning still holds).
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-iaj7ik`) — QA rotation sweep (1), the lead three (1) sweeps left "read, not driven" — the full-size archive's member for a North-up-turned canvas over the cap: one bug, filed reproduced. Share-JPEG nameplate on strip mosaics: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8763 passed / 7 skipped on `4bf0ff35` (xdist `-n 4`, BLAS capped, 17m02s). No open
