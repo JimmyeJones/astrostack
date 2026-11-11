@@ -431,7 +431,13 @@ class ASTAPSolver:
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
+                # ASTAP's console text is only read for messages, and is not
+                # guaranteed to be UTF-8 (a Latin-1 "°", a frame name echoed in
+                # a legacy encoding). A strict decode raised *after* a good
+                # solve, skipping the ladder and losing the result.
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=self.timeout_s,
                 check=False,
             )
