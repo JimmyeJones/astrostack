@@ -315,6 +315,11 @@ class _LevelContext:
     # Floor on the sky sample a *grain* σ may be taken from, already scaled for
     # the read's stride — see :data:`_GRAIN_MIN_SKY_PIXELS`.
     grain_sky_min: int
+    # The panel-sized floor a thin grain region may clear instead of the
+    # canvas share, and the radius its core is tested at — both already scaled
+    # for the read's stride. See :data:`_GRAIN_MIN_PANEL_PIXELS`.
+    grain_panel_min: int
+    grain_core_px: int
     # How many valid pixels each coverage level holds, and how many there are in
     # total — i.e. what *share of the picture* a level is. Free here (the level
     # histogram is already taken to build ``big_levels``) and the scale-free
@@ -365,6 +370,10 @@ def _level_context(
     # exactly backwards — see :data:`_GRAIN_MIN_SKY_PIXELS`.
     grain_sky_min = max(_MIN_STRIDED_PIXELS,
                         int(round(_GRAIN_MIN_SKY_PIXELS / (step * step))))
+    # ...and the panel-sized floor on a thin grain region, likewise.
+    grain_panel_min = max(_MIN_STRIDED_PIXELS,
+                          int(round(_GRAIN_MIN_PANEL_PIXELS / (step * step))))
+    grain_core_px = max(1, int(round(_GRAIN_PANEL_CORE_PX / step)))
 
     # Bin by the true per-pixel frame count when the caller provides it (quality
     # weighting fuzzes the weighted-sum ``coverage``); otherwise fall back to the
@@ -472,6 +481,8 @@ def _level_context(
         max_level_sigma=_RESCUE_MAX_SIGMA_RATIO * sky_sigma,
         effective_min=effective_min,
         grain_sky_min=grain_sky_min,
+        grain_panel_min=grain_panel_min,
+        grain_core_px=grain_core_px,
         region_counts={int(lv): int(n)
                        for lv, n in zip(levels, region_counts)},
         n_valid=int(valid_pix.sum()),
@@ -747,6 +758,31 @@ def measure_seam_residual(
 # would fire on every mosaic ever shot while naming nothing anyone can act on.
 _GRAIN_MIN_SHARE = 0.10
 
+# ...but a tenth of the *target* is not a tenth of a *panel*, and a panel is what
+# the bar gates. One panel's body is about 1/N of an N-panel canvas once its
+# overlaps are taken out, so on a 3x3 the bar decided by *which* panel was thin
+# (a corner body cleared it at 10.8 %, the centre one sat at 8 %) and from 4x3 up
+# it dropped every panel there was — a centre panel at 5 of 30 subs, predicted
+# 2.45x grainier, read "Panels even … you shouldn't see seams" (Scout
+# 2026-11-11, sweep (2), measured at S30 scale). So a thin region **also**
+# qualifies when it is panel-sized in its own right: a quarter of one Seestar
+# sub's 1080x1920 footprint, in **full-resolution** pixels (scaled by the read's
+# stride exactly as :data:`_GRAIN_MIN_SKY_PIXELS` is, so a strided heal and a
+# fresh stack agree). The share stays as the ceiling: a region that clears it
+# today still does, by the same arithmetic.
+_GRAIN_MIN_PANEL_PIXELS = (1080 * 1920) // 4
+
+# The share never needed a shape test, because nothing a tenth of a canvas wide
+# is a sliver. A panel-sized *pixel count* does: a long ragged rim around a big
+# mosaic can add up to half a million pixels while being nowhere more than a
+# dither wide, and naming that "a panel to go back to" is the opposite of the
+# trim the ragged-border note offers. So a region admitted by the panel floor
+# alone must keep a solid **core** — at least half the floor still standing once
+# it is shrunk by this many full-resolution pixels on every side. An under-shot
+# panel body (~800x1600 px on a 12 %-overlap S30 mosaic) keeps most of itself; a
+# rim narrower than twice this keeps nothing.
+_GRAIN_PANEL_CORE_PX = 64
+
 # ...and its sky sample needs at least this many **full-resolution** pixels for
 # a σ to be a measurement rather than a mood. Deliberately far above
 # ``_MIN_STRIDED_PIXELS`` (which is a floor on *levelling* a region, where a
@@ -850,6 +886,45 @@ class CoverageGrain:
     ratio: float         # thin σ / deep σ, median over the three channels
 
 
+def _core_pixels(mask: np.ndarray, radius: int) -> int:
+    """Roughly how many of ``mask``'s pixels lie at least ``radius`` pixels
+    inside it (the canvas edge counts as outside).
+
+    Taken on a block-reduced copy — a block counts only when *every* pixel in it
+    is set, so the answer can only understate — because a 64-pass erosion of a
+    16-megapixel mask would cost more than the rest of the measurement together.
+    """
+    from scipy.ndimage import binary_erosion
+
+    block = max(1, radius // 4)
+    h, w = mask.shape
+    hh, ww = h // block, w // block
+    if hh == 0 or ww == 0:
+        return 0
+    coarse = mask[:hh * block, :ww * block].reshape(
+        hh, block, ww, block).all(axis=(1, 3))
+    core = binary_erosion(coarse, iterations=max(1, math.ceil(radius / block)),
+                          border_value=0)
+    return int(core.sum()) * block * block
+
+
+def _thin_region_is_substantial(ctx: _LevelContext, mask: np.ndarray,
+                                n: int, total: int, panel_floor: bool) -> bool:
+    """Whether a thin region is big enough to name — a tenth of the canvas, as
+    it always was, or (``panel_floor``) a panel-sized body with a solid core.
+
+    The single bar both halves of :func:`measure_coverage_grain` hold a *thin*
+    region to (the deep reference keeps the plain share: it has to be the depth
+    most of the picture is at). See :data:`_GRAIN_MIN_PANEL_PIXELS` and
+    :data:`_GRAIN_PANEL_CORE_PX`.
+    """
+    if n >= _GRAIN_MIN_SHARE * total:
+        return True
+    if not panel_floor or n < ctx.grain_panel_min:
+        return False
+    return _core_pixels(mask, ctx.grain_core_px) >= ctx.grain_panel_min // 2
+
+
 def _grain_sigmas(
     ctx: _LevelContext,
     img: np.ndarray,
@@ -883,6 +958,7 @@ def _grain_from_depth_bands(
     img: np.ndarray,
     object_sigma: float,
     dilate_object_mask_px: int,
+    panel_floor: bool = False,
 ) -> CoverageGrain | None:
     """The same grain comparison, taken between *bands* of depth.
 
@@ -915,7 +991,12 @@ def _grain_from_depth_bands(
     # Both bands carry the same substantiality bar a single level has to clear: a
     # sliver of thin fringe is not worth naming, and a reference taken from a
     # sliver is not a measurement of "the depth most of the picture is at".
-    if n_thin < _GRAIN_MIN_SHARE * total or n_deep < _GRAIN_MIN_SHARE * total:
+    # The thin band may instead be one panel's worth of solid body — on a
+    # many-panel mosaic a single under-shot panel is well under a tenth of the
+    # canvas (see :data:`_GRAIN_MIN_PANEL_PIXELS`).
+    if (n_deep < _GRAIN_MIN_SHARE * total
+            or not _thin_region_is_substantial(ctx, thin_mask, n_thin, total,
+                                            panel_floor)):
         return None
     # The depths a user can act on: each band's own median, which is the figure
     # "N subs where most of it has M" is actually true of, rather than either
@@ -991,7 +1072,30 @@ def measure_coverage_grain(
         dilate_object_mask_px, proxy_scale)
     if ctx is None or len(ctx.big_levels) < 2:
         return None
+    # Asked first exactly as it always was — a tenth of the canvas — so every
+    # canvas answered before the panel floor existed is answered identically,
+    # by the same code, with the same numbers. Only a canvas that pass is silent
+    # about is asked again with a thin region allowed to be one panel's solid
+    # body instead: the many-panel mosaic the share bar could not see
+    # (:data:`_GRAIN_MIN_PANEL_PIXELS`).
+    found = _grain_pass(ctx, img, object_sigma, dilate_object_mask_px,
+                        panel_floor=False)
+    if found is None:
+        found = _grain_pass(ctx, img, object_sigma, dilate_object_mask_px,
+                            panel_floor=True)
+    return found
 
+
+def _grain_pass(
+    ctx: _LevelContext,
+    img: np.ndarray,
+    object_sigma: float,
+    dilate_object_mask_px: int,
+    *,
+    panel_floor: bool,
+) -> CoverageGrain | None:
+    """One pass of :func:`measure_coverage_grain` — levels, then bands — with
+    the thin region held to the canvas share, or also to the panel floor."""
     total = int(ctx.valid_pix.sum())
     if total <= 0:
         return None
@@ -1001,10 +1105,18 @@ def measure_coverage_grain(
     # ragged fringe drags down, and not the peak, which is one mosaic corner.
     deep_level = max(counts, key=lambda level: (counts[level], level))
     # ...and a candidate has to be measurably *shallower* than it, not merely a
-    # different integer — see :data:`_GRAIN_MAX_THIN_FRAC`.
+    # different integer — see :data:`_GRAIN_MAX_THIN_FRAC` — and substantial:
+    # a tenth of the canvas, or on the second pass one panel's solid body (see
+    # :data:`_GRAIN_MIN_PANEL_PIXELS`). The cheap count tests run first, so the
+    # core is only ever measured for a panel-sized level.
     candidates = [level for level in counts
                   if level <= _GRAIN_MAX_THIN_FRAC * deep_level
-                  and counts[level] >= _GRAIN_MIN_SHARE * total]
+                  and (counts[level] >= _GRAIN_MIN_SHARE * total
+                       or (panel_floor
+                           and counts[level] >= ctx.grain_panel_min
+                           and _thin_region_is_substantial(
+                               ctx, (ctx.cov_int == level) & ctx.valid_pix,
+                               counts[level], total, panel_floor)))]
     if not candidates:
         # No plateau to compare: a mosaic dithered across several nights has a
         # coverage map that *ramps* rather than steps, so no single depth is a
@@ -1014,7 +1126,7 @@ def measure_coverage_grain(
         # or two apart arrives here too, and for the same reason: nothing the
         # level comparison could say about it would be about depth.
         return _grain_from_depth_bands(ctx, img, object_sigma,
-                                       dilate_object_mask_px)
+                                       dilate_object_mask_px, panel_floor)
 
     def _sigmas(level: int) -> list[float] | None:
         return _grain_sigmas(ctx, img, (ctx.cov_int == level) & ctx.valid_pix,
