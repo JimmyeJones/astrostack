@@ -57,9 +57,12 @@ from pathlib import Path
 from seestack.core.cache import CacheManager
 from seestack.io.fits_loader import load_header
 from seestack.io.ingest import (
+    NAME_NOT_TEXT_ERROR,
     find_fits_files,
     ingest_files,
     is_fits_candidate,
+    name_is_valid_text,
+    printable_name,
 )
 from seestack.io.library import UNSORTED_TARGET_NAME, Library
 from seestack.io.project import Project, is_seestar_output_filename
@@ -1435,15 +1438,31 @@ def scan_and_organize(
         )
 
     total = len(units)
+    # One target's failure must not stop the rest: before this, a single sub
+    # SQLite could not store aborted the loop, so every target after it — in
+    # sorted order, every night's new folder — never ingested on any scan. The
+    # first failure is still raised once every other target has had its turn,
+    # so a real fault (a full disk, a locked registry) still fails the scan
+    # step loudly instead of passing for a quiet one.
+    first_failure: BaseException | None = None
     for i, (target_name, files) in enumerate(units):
         if progress is not None:
             progress("Organizing", i, total)
-        tsr = _ingest_into_target(library, target_name, files,
-                                  copy_to_cache=copy_to_cache,
-                                  reject_output_base=output_bases.get(target_name))
+        try:
+            tsr = _ingest_into_target(library, target_name, files,
+                                      copy_to_cache=copy_to_cache,
+                                      reject_output_base=output_bases.get(target_name))
+        except Exception as exc:  # noqa: BLE001 — re-raised after the loop
+            log.exception("Could not organise target %r; carrying on with the "
+                          "others.", printable_name(target_name))
+            if first_failure is None:
+                first_failure = exc
+            continue
         result.targets.append(tsr)
     if progress is not None:
         progress("Organizing", total, total)
+    if first_failure is not None:
+        raise first_failure
 
     return result
 
@@ -1518,7 +1537,11 @@ def _ingest_into_target(
     no frames in it, which then sat on the Library wall as "0/0 frames" and was
     counted on the Dashboard, for as long as the folder stayed broken.
     """
-    if library.find_target(target_name) is None:
+    # A folder whose *name* is not valid text cannot be a registry row (SQLite
+    # refuses it, even to look it up), and every file under it has the same bad
+    # path — so it goes straight to the hold-back, which reports its files as
+    # unreadable instead of failing the scan.
+    if not name_is_valid_text(target_name) or library.find_target(target_name) is None:
         held = _hold_back_unreadable_new_target(target_name, files)
         if held is not None:
             return held
@@ -1542,9 +1565,11 @@ def _ingest_into_target(
             elif res.error is not None:
                 tsr.n_errors += 1
                 bad = Path(res.source_path)
+                # printable_name: a name that is not valid text must still
+                # survive the job summary's JSON (a no-op on any other name).
                 if len(tsr.unreadable_examples) < UNREADABLE_EXAMPLES_PER_TARGET:
-                    tsr.unreadable_examples.append(bad.name)
-                parent = str(bad.parent)
+                    tsr.unreadable_examples.append(printable_name(bad.name))
+                parent = printable_name(bad.parent)
                 tsr.unreadable_dirs[parent] = tsr.unreadable_dirs.get(parent, 0) + 1
             else:
                 tsr.n_frames_added += 1
@@ -1583,21 +1608,27 @@ def _hold_back_unreadable_new_target(
     target appears the first time one of them is whole.
     """
     tsr = TargetScanResult(
-        target_name=target_name, safe_name="", n_frames_found=len(files),
+        target_name=printable_name(target_name), safe_name="",
+        n_frames_found=len(files),
     )
     for src in files:
         src = Path(src)
         try:
+            # A name that is not valid text can never become a frame row
+            # (:func:`ingest_files` reports it as unreadable), so it must not
+            # vouch for the target either.
+            if not name_is_valid_text(src):
+                raise ValueError(NAME_NOT_TEXT_ERROR)
             if src.stat().st_size == 0:
                 tsr.n_skipped_existing += 1
                 continue
             load_header(src)
         except Exception as exc:  # noqa: BLE001 — astropy raises a zoo of exceptions
-            log.warning("could not read header for %s: %s", src, exc)
+            log.warning("could not read header for %s: %s", printable_name(src), exc)
             tsr.n_errors += 1
             if len(tsr.unreadable_examples) < UNREADABLE_EXAMPLES_PER_TARGET:
-                tsr.unreadable_examples.append(src.name)
-            parent = str(src.parent)
+                tsr.unreadable_examples.append(printable_name(src.name))
+            parent = printable_name(src.parent)
             tsr.unreadable_dirs[parent] = tsr.unreadable_dirs.get(parent, 0) + 1
             continue
         return None
@@ -1605,7 +1636,7 @@ def _hold_back_unreadable_new_target(
         "Not creating target %r yet — none of its %d file(s) can be read (%d "
         "unreadable, %d still copying). Nothing was changed on disk; it is "
         "re-tried on every scan.",
-        target_name, len(files), tsr.n_errors, tsr.n_skipped_existing,
+        tsr.target_name, len(files), tsr.n_errors, tsr.n_skipped_existing,
     )
     return tsr
 

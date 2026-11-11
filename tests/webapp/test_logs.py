@@ -52,3 +52,27 @@ def test_a_failure_with_a_traceback_reaches_the_log(client):
     # And the traceback came with it — the reason the record is worth keeping.
     assert "Traceback (most recent call last)" in hit
     assert "No accepted frames are plate-solved yet" in hit
+
+
+def test_a_log_line_naming_a_non_utf8_file_does_not_break_the_logs_page(client):
+    """A sub copied from a legacy-encoding share has a name Python holds with
+    surrogate escapes; one log line quoting it, stored as-is, made every
+    ``/api/logs`` response fail to encode as UTF-8 until it aged out of the
+    buffer — taking the Logs page and the observer's read with it."""
+    import os
+
+    from webapp.logbuffer import get_log_buffer
+
+    bad = os.fsdecode(b"/data/incoming/M_42/Light_caf\xe9.fit")
+    # Straight into the app's buffer, not through the root logger: pytest's own
+    # log capture cannot ship a surrogate between xdist workers either.
+    get_log_buffer().handle(logging.makeLogRecord({
+        "name": "seestack.io.ingest", "levelno": logging.WARNING,
+        "levelname": "WARNING", "msg": "skipping %s qwzzy", "args": (bad,),
+    }))
+    r = client.get("/api/logs", params={"level": "WARNING"})
+    assert r.status_code == 200
+    msgs = [e["message"] for e in r.json()["logs"]]
+    hit = next((m for m in msgs if "qwzzy" in m), None)
+    assert hit is not None
+    assert "Light_caf�.fit" in hit

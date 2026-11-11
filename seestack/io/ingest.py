@@ -55,6 +55,42 @@ def is_appledouble_sidecar(path: str | Path) -> bool:
     return os.path.basename(str(path)).startswith(APPLEDOUBLE_PREFIX)
 
 
+#: The error an unreadable-*name* sub is reported with. Plain words, because it
+#: reaches the Jobs page's "couldn't read" note as the reason.
+NAME_NOT_TEXT_ERROR = (
+    "this file's name is not valid text (it was written in an old character "
+    "encoding); rename it on your computer and it will be picked up"
+)
+
+
+def name_is_valid_text(path: str | Path) -> bool:
+    """False if ``path`` holds bytes that are not valid UTF-8.
+
+    Python keeps such a name with surrogate escapes (``os.fsdecode``): it can
+    still open the file, but SQLite refuses to store the string and a UTF-8 JSON
+    response cannot carry it. A share or copy that wrote names in a legacy
+    encoding (an old SMB client, ``rsync`` from a Latin-1 system, a FAT stick)
+    leaves exactly these — and before this check one of them aborted the whole
+    scan in :meth:`Project.add_frame`, so no target after it ever ingested.
+    """
+    try:
+        str(path).encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def printable_name(text: str | Path) -> str:
+    """``text`` with any undecodable bytes shown as U+FFFD, safe to log, store
+    or send as JSON. A no-op on a valid name."""
+    text = str(text)
+    try:
+        raw = text.encode("utf-8", "surrogateescape")
+    except UnicodeEncodeError:
+        raw = text.encode("utf-8", "replace")
+    return raw.decode("utf-8", "replace")
+
+
 def is_fits_candidate(path: Path) -> bool:
     """A file name every walker of ``incoming/`` treats as a sub: a FITS suffix
     and not a macOS sidecar. Name-only (see :func:`is_appledouble_sidecar`)."""
@@ -338,6 +374,16 @@ def ingest_files(
     for src in sources:
         src = Path(src)
         s_str = str(src)
+        if not name_is_valid_text(s_str):
+            # One unreadable sub, never a failed scan: the frame row could not be
+            # stored anyway (SQLite refuses the surrogate), and raising here
+            # stopped every target after this one. The file is only read, never
+            # renamed — renaming it is the user's job (AGENTS.md §10).
+            log.warning("skipping %s — %s", printable_name(s_str),
+                        NAME_NOT_TEXT_ERROR)
+            yield IngestResult(source_path=src, frame_id=None, cached_path=None,
+                               skipped=False, error=NAME_NOT_TEXT_ERROR)
+            continue
         key = _dedup_key(src)
         prior = existing.get(key)
         if prior is not None:
