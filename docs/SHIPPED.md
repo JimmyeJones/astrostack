@@ -1,5 +1,47 @@
 # Shipped — the record
 
+## 2026-11-11 (Builder, branch `claude/focused-noether-eq5w42`)
+
+### v0.506.28 — the full-size archive counts a turned picture read shrunk as reduced
+
+**What.** `build_full_size_archive`'s unknown-size branch (a baked North-up turn, where `full_res_png_size`
+declines to predict) now also counts a member as reduced when the new `pipeline.full_res_load_decimates` says
+the renderer read the master shrunk: the same `full_res_load_width` the render uses, off the FITS header's
+`NAXIS1` and the unedited trim, and `False` on the saved-recipe path (`render_run_recipe_fullres_png` reads at
+native size and caps only at the end, where the old "long edge reached the cap" rule is already exact). A tall
+canvas is not decimated at load, so a turn that legitimately brings it under the cap still counts as full size.
+Not done: the entry's optional second half (sizing the load off the turned bounding box so a canvas whose
+turned true size fits under the cap keeps it) — it changes the render and loads more pixels on a
+memory-capped host; such a picture is now honestly listed as shrunk instead.
+
+**Tests.** `tests/webapp/test_pictures_archive.py::test_a_turned_picture_read_shrunk_is_reduced_even_under_the_cap`
+(1200 × 300 master with a 40° CD matrix, cap scaled to 800, plus a 500 × 300 turned control counted full size)
+fails before. No schema, config, default, on-disk or API-shape change.
+
+**The filed entry, verbatim:**
+
+- **🟢 (Scout 2026-11-11, QA rotation sweep (1)) — the full-size archive counts a North-up-turned picture as
+  "full size" when it went in shrunk, on a canvas over the 8000 px cap turned by an angle that is not a right
+  angle.** *(Pillar: trust, PRIORITY 3. Severity low: needs a canvas wider than `_FULL_RES_PNG_MAX_LONG_EDGE`
+  — a drizzled 3×3-or-larger mosaic, above the owner's largest today — *and* a saved "North up" whose angle is
+  not near 0/90/180/270°. The picture is fine; only the archive's promise and its `_reduced_size.txt` are
+  wrong, the class v0.506.14 fixed for unturned canvases. Confidence: **reproduced**. Size **S**.)* In
+  `picturesarchive.build_full_size_archive`, `_true_size` is `None` for a baked turn (`full_res_png_size`
+  refuses to predict it), so the fallback reports "reduced" only when `max(got) >= cap`. But
+  `render_preview_png_full_res` shrinks a canvas wider than the cap **at load** (`full_res_load_width`), and
+  only then rotates with `expand=True` (`orient.rotate_image_north_up`), so a non-right-angle turn brings the
+  long edge back *under* the cap. **Reproduced** on the real renderer with a synthetic master carrying a
+  rotated CD matrix and the cap scaled down to 800 (same code path): 1200 × 300 at a 140° turn → a native
+  render of 1114 × 1002, the capped one **742 × 668** (a third smaller), long edge under 800 → counted
+  `n_full_res`, absent from the note. 850 × 200 at 140°: true size 780 × 700 is *under* the cap, yet the file
+  comes out 734 × 660 because the load grid is chosen off the unturned canvas. The 0°/91.5°/square controls
+  were all reported correctly. **Fix shape:** in the archive's unknown-size branch also count a member as
+  reduced when `full_res_load_width(canvas_w, …)` is below `canvas_w` — exactly when the load decimates (a *tall*
+  canvas is not decimated at load, and a turn can legitimately bring it under the cap at true size);
+  optionally let `full_res_load_width` size the load off the turned bounding box so the second case keeps its
+  true size. Regression test beside `test_a_picture_shrunk_to_the_cap_is_named_not_counted_as_full_size`
+  in `tests/webapp/test_pictures_archive.py`, with a 40° CD matrix and a baked turn (fails today).
+
 ## 2026-11-11 (Builder, branch `claude/focused-noether-2r12my`)
 
 ### v0.506.27 — a pre-sized sub caught mid-copy is re-QC'd once the copy finishes

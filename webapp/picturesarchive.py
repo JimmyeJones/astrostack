@@ -304,7 +304,7 @@ def build_full_size_archive(
     a half-built backup that looked complete would be worse than none.
     """
     from seestack.wallpaper import png_size
-    from webapp.pipeline import cached_run_full_res_png
+    from webapp.pipeline import cached_run_full_res_png, full_res_load_decimates
     from webapp.routers.stack import _FULL_RES_PNG_MAX_LONG_EDGE
 
     cap = _FULL_RES_PNG_MAX_LONG_EDGE if max_long_edge is None else max_long_edge
@@ -345,10 +345,15 @@ def build_full_size_archive(
                     # A canvas wider than the cap went in shrunk to it. The
                     # true size is predicted without a render where it can be;
                     # where it can't (a North-up turn), a file that came out at
-                    # exactly the cap is the cap's doing.
+                    # exactly the cap is the cap's doing — and so is one whose
+                    # master was read shrunk, which a turn that is not a right
+                    # angle brings back *under* the cap (Scout 2026-11-11).
                     true = _true_size(pick, trim_border)
                     if (max(true) > cap if true is not None
-                            else got is not None and max(got) >= cap):
+                            else (got is not None and max(got) >= cap)
+                            or full_res_load_decimates(
+                                pick.run, pick.recipe_json, max_long_edge=cap,
+                                trim_border=trim_border)):
                         report.n_reduced += 1
                         reduced.append(_reduced_line(pick.name, true, got, cap))
                     else:

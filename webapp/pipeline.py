@@ -2897,6 +2897,45 @@ def render_run_full_res_png(
         crop=unedited_border_trim(run) if trim_border else None)
 
 
+def full_res_load_decimates(
+    run, recipe_json: str | None, *,  # noqa: ANN001 — a StackRunRow, detached from the DB
+    max_long_edge: int = 8000, trim_border: bool = False,
+) -> bool:
+    """Whether :func:`render_run_full_res_png` reads the master **shrunk** — i.e.
+    the file it hands over is smaller than the run's true picture because of the
+    long-edge cap, whatever size the file then comes out at.
+
+    The archive needs this where :func:`full_res_png_size` cannot predict the
+    true size (a North-up turn): it used to judge by the file alone ("long edge
+    at the cap"), but a canvas wider than the cap is area-averaged at **load**
+    (``full_res_load_width``) and only then turned with ``expand``, so a turn
+    that is not a right angle lands the shrunk picture back *under* the cap and
+    it was counted as full size (Scout 2026-11-11). Mirrors the renderer's own
+    choice of path: a saved recipe (``render_run_recipe_fullres_png``) reads the
+    master at native size and caps only at the end, so it never decimates at
+    load; a finished display-space edit ignores the trim. Reads one FITS header
+    and the coverage trim; never the pixels. Unreadable → ``False`` (the caller
+    still has the file's own size to go on)."""
+    if recipe_json:
+        with contextlib.suppress(json.JSONDecodeError):
+            if isinstance(json.loads(recipe_json), dict):
+                return False
+    if not run.fits_path:
+        return False
+    from seestack.render.thumbnail import _fits_canvas_width, full_res_load_width
+    from seestack.stack.output import fits_is_display_space
+
+    try:
+        canvas_w = _fits_canvas_width(run.fits_path)
+        rect = unedited_border_trim(run) if trim_border else None
+        load_w = full_res_load_width(
+            canvas_w, rect, max_long_edge,
+            display_space=rect is not None and fits_is_display_space(run.fits_path))
+    except Exception:  # noqa: BLE001 — an unreadable header promises nothing
+        return False
+    return canvas_w > load_w
+
+
 def unedited_border_trim(run) -> tuple[float, float, float, float] | None:  # noqa: ANN001
     """The fractional border trim a picture with **no saved recipe** gets on
     download — exactly the rule the editor's Auto applies
