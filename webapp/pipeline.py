@@ -3563,7 +3563,10 @@ def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int
         from datetime import datetime, timezone
 
         from seestack.io.project import Project
-        from seestack.stack.output import write_full_res_png
+        from seestack.stack.output import (
+            replace_older_editor_downloads,
+            write_full_res_png,
+        )
 
         lib = Library.open_or_create(settings.resolved_library_root)
         try:
@@ -3584,6 +3587,9 @@ def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int
                 png = (Path(proj.project_dir) / "output"
                        / f"{safe_basename(run.output_basename)}_edit_{ts}.png")
                 write_full_res_png(png, out)
+                # One file per button per run, not one per click: these exist
+                # only for the download GET, and a mosaic PNG is ~43 MB.
+                replace_older_editor_downloads(png, run.output_basename)
             finally:
                 proj.close()
             return {"safe": safe, "run_id": run_id,
@@ -3622,7 +3628,11 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
 
         from seestack.io.project import Project
         from seestack.printexport import print_advice, print_options, print_refusal, render_print
-        from seestack.stack.output import safe_basename, save_display_jpeg
+        from seestack.stack.output import (
+            replace_older_editor_downloads,
+            safe_basename,
+            save_display_jpeg,
+        )
         from webapp.derived_light import stacking_samples_per_pixel
         from webapp.field_fulls import native_frame_shape
 
@@ -3689,6 +3699,7 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
                 # a 6-inch picture happens.
                 save_display_jpeg(img, jpeg, quality=95,
                                   dpi=(option.dpi, option.dpi))
+                replace_older_editor_downloads(jpeg, run.output_basename)
             finally:
                 proj.close()
             return {"safe": safe, "run_id": run_id,
@@ -3726,7 +3737,11 @@ def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: i
         from seestack.io.project import Project
         from seestack.nightrange import format_night_range
         from seestack.sharecard import share_blurb
-        from seestack.stack.output import safe_basename, write_share_jpeg
+        from seestack.stack.output import (
+            replace_older_editor_downloads,
+            safe_basename,
+            write_share_jpeg,
+        )
         from webapp.capture_nights import capture_night_range
 
         lib = Library.open_or_create(settings.resolved_library_root)
@@ -3749,6 +3764,7 @@ def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: i
                 plate = _nameplate_fields(
                     run.fits_path, entry, run, lon) if nameplate else None
                 write_share_jpeg(jpeg, out, nameplate=plate)
+                replace_older_editor_downloads(jpeg, run.output_basename)
                 # The night it was shot — the one fact the copyable caption was
                 # missing while Target, History, Gallery and the baked nameplate
                 # all carried it. Read off the run's capture window, never off

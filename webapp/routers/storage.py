@@ -13,6 +13,7 @@ router reports where the space went and lets the user reclaim it safely:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 from collections.abc import Collection
@@ -130,6 +131,30 @@ def delete_run_artifacts(run: StackRunRow, *,
             pass
 
 
+def _delete_editor_downloads(proj: Any, run: StackRunRow) -> None:
+    """Unlink the editor's Download PNG / Share / Print files this run left in
+    ``output/`` (:func:`seestack.stack.output.editor_download_paths`). They are
+    keyed by the run's *basename*, not a recorded path, so when another row
+    still carries the same basename (a pre-guard shared group) they are that
+    row's too and stay. Copies the owner already downloaded; never ``incoming/``.
+    Best-effort."""
+    from seestack.stack.output import editor_download_paths, safe_basename
+
+    basename = getattr(run, "output_basename", None)
+    if not basename or not getattr(proj, "project_dir", None):
+        return
+    try:
+        others = {safe_basename(b) for b in
+                  proj.stack_run_basenames(exclude_run_id=run.id)}
+    except Exception:  # noqa: BLE001 — unsure who owns them means keep them
+        return
+    if safe_basename(basename) in others:
+        return
+    for p in editor_download_paths(Path(proj.project_dir) / "output", basename):
+        with contextlib.suppress(OSError):
+            p.unlink(missing_ok=True)
+
+
 def purge_stack_run(proj: Any, run: StackRunRow) -> None:
     """Delete a stack run and everything the app hung off its id.
 
@@ -138,7 +163,9 @@ def purge_stack_run(proj: Any, run: StackRunRow) -> None:
     six ``project_meta`` annotations (:mod:`webapp.run_meta`). The single-run
     delete endpoint used to clear some of that and the "Prune old stacks" path
     none of it, so pruning — the *disk-space* feature — left the proxy behind for
-    every run it removed.
+    every run it removed. The editor's timestamped Download PNG / Share / Print
+    files go too (:func:`_delete_editor_downloads`) — nothing else ever
+    reclaimed them.
     """
     from seestack.edit.proxy import clear_proxy
     from webapp.run_meta import delete_run_meta
@@ -155,6 +182,7 @@ def purge_stack_run(proj: Any, run: StackRunRow) -> None:
     for paths in proj.iter_stack_run_output_paths(exclude_run_id=run.id):
         keep.update(run_artifact_paths(*paths))
     delete_run_artifacts(run, keep_paths=keep)
+    _delete_editor_downloads(proj, run)
     if run.id is None:
         return
     proj.delete_stack_run(run.id)

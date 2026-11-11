@@ -25,6 +25,7 @@ and accidental clobbers are bad.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -890,6 +891,74 @@ RUN_ARTEFACT_SUFFIXES: dict[str, str] = {
     "deepening_apng": "_deepening.png",
     "deepening_sig": "_deepening.sig",
 }
+
+
+#: The editor's one-off downloads — "Download PNG", "Share" and "Print" — each
+#: written into ``output/`` as ``<basename>_edit_<ts>.png``,
+#: ``<basename>_share_<ts>.jpg`` and ``<basename>_print_<size>_<ts>.jpg`` only so
+#: the job's download GET can hand it over. Timestamped, so they cannot sit in
+#: :data:`RUN_ARTEFACT_SUFFIXES`; matched instead by this pattern after the run's
+#: exact ``<basename>_`` prefix. ``kind`` is ``edit``, ``share`` or
+#: ``print_<size>`` — one paper size is its own kind, so printing A4 then A3
+#: keeps both.
+_EDITOR_DOWNLOAD_RE = re.compile(
+    r"(?P<kind>edit|share|print_[^_/\\]+)_\d{8}_\d{6}\.(?P<ext>png|jpg)\Z")
+_EDITOR_DOWNLOAD_EXT = {"edit": "png", "share": "jpg", "print": "jpg"}
+
+
+def editor_download_kind(name: str, basename: str) -> str | None:
+    """The kind of editor download ``name`` is **for this run's basename**, or
+    ``None`` when it is not one (a different run, a run artefact, anything
+    else). The prefix is the sanitised basename the writers use, matched
+    exactly, so ``M_42`` never claims ``M_42b``'s files."""
+    prefix = f"{safe_basename(basename)}_"
+    if not name.startswith(prefix):
+        return None
+    m = _EDITOR_DOWNLOAD_RE.match(name[len(prefix):])
+    if m is None:
+        return None
+    kind = m.group("kind")
+    if _EDITOR_DOWNLOAD_EXT[kind.split("_", 1)[0]] != m.group("ext"):
+        return None
+    return kind
+
+
+def editor_download_paths(output_dir: str | Path, basename: str,
+                          *, kind: str | None = None) -> list[Path]:
+    """Every editor download a run with ``basename`` left in ``output_dir``
+    (optionally only one ``kind``). Lists one directory; never recurses."""
+    out = Path(output_dir)
+    try:
+        names = [e.name for e in os.scandir(out) if e.is_file(follow_symlinks=False)]
+    except OSError:
+        return []
+    found = []
+    for name in sorted(names):
+        k = editor_download_kind(name, basename)
+        if k is not None and (kind is None or k == kind):
+            found.append(out / name)
+    return found
+
+
+def replace_older_editor_downloads(new_path: str | Path, basename: str) -> int:
+    """Unlink every *older* download of the same kind as ``new_path`` for this
+    run, so repeated clicks of one button keep one file instead of piling up
+    (~43 MB a mosaic PNG). Called right after the new file is written; returns
+    how many were removed. Best-effort — a file that will not go is left."""
+    new_path = Path(new_path)
+    kind = editor_download_kind(new_path.name, basename)
+    if kind is None:
+        return 0
+    removed = 0
+    for p in editor_download_paths(new_path.parent, basename, kind=kind):
+        if p.name == new_path.name:
+            continue
+        try:
+            p.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 # The artefacts that have a dedicated ``stack_runs`` column, i.e. the only ones a
 # repoint can actually move. Stated as an allow-list rather than a list of
