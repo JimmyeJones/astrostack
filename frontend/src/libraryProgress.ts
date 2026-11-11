@@ -80,7 +80,10 @@ export function rankLibraryProgress(rows: TargetProgress[]): RankedProgress[] {
     if (!readiness) continue;
     // "How much longer?" only has an answer while there's still a gap to close;
     // once a target has plenty, the level badge says the useful thing instead.
-    const gapSeconds = (readiness.goalHours - readiness.hours) * 3600;
+    // The gap at the current framing (``remainingHours``), not ``goalHours −
+    // hours``: on a grown mosaic that difference re-splits every future hour
+    // the way the past ones were split, ~4× too many nights.
+    const gapSeconds = readiness.remainingHours * 3600;
     const est =
       readiness.level === "plenty"
         ? null

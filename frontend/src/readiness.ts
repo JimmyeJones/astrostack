@@ -138,6 +138,17 @@ export interface IntegrationReadiness {
   // try something new") asks the same question the sentence answered, instead of
   // keeping its own copy of the "is this scope worth saying?" rule.
   canvasScope: string | null;
+  // The shooting time still between the picture and its goal, in hours, **at
+  // the current framing** — what every "~N more clear nights" figure divides
+  // by the pace. Usually ``goalHours − hours``; on a measured *uneven* mosaic
+  // it is not: that difference is ``(g − T/D)·D``, which assumes each future
+  // hour splits as unevenly as the past did. An hour shot on today's framing
+  // spreads over the canvas's ``fieldFulls`` (the planner's own
+  // ``nightplan._panel_noise_gain``), so the gap is the per-part shortfall
+  // ``g − hours/goalScale`` times ``fieldFulls``. Equal to ``goalHours − hours``
+  // whenever ``goalScale == fieldFulls`` (single field, unmeasured mosaic,
+  // older backend) and under a user-set goal; never negative.
+  remainingHours: number;
 }
 
 // The goal as a compact figure: "6", "4", "1.5" (trailing ".0" trimmed), for a
@@ -230,6 +241,16 @@ export function integrationReadiness(
   const hours = exposureSeconds / 3600;
   const ratio = hours / goalHours;
   const fraction = Math.max(0, Math.min(1, ratio));
+  // A user-set goal is a whole-target figure, so its gap is plain subtraction;
+  // otherwise price the per-part shortfall over the sky new time covers. When
+  // ``goalScale`` is ``cleanFieldFulls`` the two forms are the same number, so
+  // keep the subtraction there too and every un-measured case stays exact.
+  const remainingHours = Math.max(
+    0,
+    customGoal || goalScale === cleanFieldFulls
+      ? goalHours - hours
+      : (baseGoalHours - hours / goalScale) * cleanFieldFulls,
+  );
 
   // Blank/whitespace and the absent case are one answer — say nothing extra —
   // so a caller that computes the scope from a response can pass it straight
@@ -278,6 +299,7 @@ export function integrationReadiness(
     level,
     verdict,
     canvasScope: scope,
+    remainingHours,
   };
 }
 
@@ -397,7 +419,7 @@ export function readinessRowBadge(
     exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty, canvasScope,
     depthFulls);
   if (r && r.level !== "plenty") {
-    const est = clearNightsFromPace((r.goalHours - r.hours) * 3600, paceSeconds);
+    const est = clearNightsFromPace(r.remainingHours * 3600, paceSeconds);
     if (est && est.nights !== null && est.nights <= FINISH_FIRST_MAX_NIGHTS) {
       return {
         label: `~${est.nights} more ${nightWord(est.nights)}`,

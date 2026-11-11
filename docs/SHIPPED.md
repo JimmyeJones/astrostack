@@ -1,5 +1,46 @@
 # Shipped — the record
 
+## 2026-11-11 (Builder, branch `claude/nice-galileo-2xruwe`)
+
+### v0.506.30 — nights-to-go on an uneven mosaic priced at the current framing
+
+**What.** `integrationReadiness` now returns `remainingHours`: `goalHours − hours` everywhere it was right (single
+field, unmeasured mosaic, older backend, user-set goal — any case where `goalScale == fieldFulls`), and on a
+measured *uneven* mosaic the per-part shortfall `baseGoal − hours/goalScale` times `fieldFulls` — an hour shot on
+today's framing spreads over the canvas's area, as `nightplan._panel_noise_gain` already assumes. Never negative.
+All four gap callers route through it: the Target page's clear-nights line and `NextSessionCard`,
+`rankLibraryProgress` (Dashboard "Target progress") and `readinessRowBadge` (Tonight). The readiness fraction and
+verdict are unchanged (still the median pixel, v0.502.40). Not done: the entry's optional rephrasing of "of ~47 h"
+per part. Frontend only; no config, schema, default or API change.
+
+**Tests.** `readiness.test.ts` (grown shape → 5 nights at 2 h, even-3×3 control, the unchanged-subtraction cases,
+the badge at 4 h/night → "~3 more nights") and `libraryProgress.test.ts` (grown shape → `nightsToGo` 5); four
+fail before.
+
+**The Bugs entry, as filed:**
+
+- **🟡 (Scout 2026-11-11, QA rotation sweep (2)) — on an uneven mosaic the "~N more clear nights" estimate
+  multiplies the per-part shortfall by the *past* split ratio (`depth_fulls`), not by the sky new time is spread
+  over, so a grown 2×2→3×3 is told ~21 nights where shooting its current framing at the same pace takes ~5.**
+  *(Pillar: autonomy / trust — the walk-away planning answer, PRIORITY 2. Severity moderate: the owner's own
+  shape (a mosaic grown over nights), ~4× too many nights on three surfaces, pointing a beginner away from a
+  target that is close. Confidence: **reproduced**. Size **S**, frontend only.)* v0.502.40 rightly scaled the
+  per-type goal by `typicalPartFulls(fieldFulls, depthFulls)` so the readiness *fraction* reads the median pixel
+  (`T/D` of `g`). But every nights-to-go figure then divides `goalHours − hours = (g − T/D)·D` by the pace —
+  i.e. assumes each future hour splits as unevenly as the past did. A future hour on the current framing is
+  spread over `F` (the area `fieldFulls`), which is exactly what the planner's own `nightplan._panel_noise_gain`
+  assumes ("another hour spread over a canvas of F fields reaches each patch as h/F"). **Reproduced** with the
+  real `integrationReadiness` + `clearNightsFromPace` (esbuild, scratch) on the v0.502.40 grown shape (F 7.59,
+  D 31.5, cluster 1.5 h, pace 2 h/night): T = 7 / 9 / 12 h → **21 / 20 / 18 nights** and "7.0 h of ~47.3 h",
+  against `(g − T/D)·F / pace` = **5 / 5 / 5**. Even-3×3 control (D 9): 4 vs 3. Same gap on all three callers:
+  `routes/Target.tsx:884` + `:1988` (Target page card), `libraryProgress.ts:83` (Dashboard "Target progress"),
+  `readiness.ts:400` (`readinessRowBadge`, Tonight). **Fix shape:** expose `remainingHours` from
+  `integrationReadiness` = `max(0, baseGoal − hours/goalScale) × cleanFieldFulls` on a measured mosaic (equal to
+  `goalHours − hours` whenever `goalScale == cleanFieldFulls`, so single-field, unmeasured, user-goal and older
+  backends are byte-for-byte unchanged) and route the three callers through it; optionally phrase the verdict's
+  "of ~47 h" per part. Vitest beside the v0.502.40 grown-shape cases in `readiness.test.ts` /
+  `libraryProgress.test.ts` (fail today).
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-50wcqa`)
 
 ### v0.506.29 — the no-Qt test fallback lists `test_library_dialog_summary.py`
