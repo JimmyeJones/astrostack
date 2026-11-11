@@ -1,5 +1,52 @@
 # Shipped — the record
 
+## 2026-11-11 (Builder, branch `claude/focused-noether-e1jr71`)
+
+### v0.506.19 — an unedited trimmed canvas wider than the Full-res cap keeps its true size
+
+**Why.** Scout 2026-11-11 QA sweep (1) filed it reproduced: `render_preview_png_full_res` called
+`load_stack_rgb(max_width=max_long_edge)`, which area-averages the whole *canvas* to 8000 px, and only then cut the
+unedited border trim (`unedited_border_trim`, the owner's live `auto_crop_border`). A 9000 px canvas trimmed to a true
+7200 px came out 6400 px; a trim still over the cap (10000 → 8500) came out 6800 px, under the cap its note cited; and
+`picturesarchive.build_full_size_archive` counted the first as "at its true size" with no `_reduced_size.txt`.
+
+**What changed.** `seestack.render.thumbnail.full_res_load_width`: with a trim on a linear master wider than the cap,
+the load targets the *trimmed* width — `min(canvas_w, ceil(cap / (x1 − x0)))`, the kept fraction floored at 0.5 so the
+load is never more than 2× the cap wide (Auto's own trim keeps at least half the canvas, so the floor is never reached by
+the app). No trim, a display-space edit, or a canvas under the cap keeps the old load and so the old bytes. The asinh
+path's preview-grid anchor is told the real load width. `webapp.pipeline.full_res_png_size` replays that same load grid
+(`preview_grid_size`) instead of returning `None` for a canvas over the cap, so the download menu now prints the file's
+size there too and the archive's `_true_size` judges by the real render. The cached Full-res PNG is keyed on the app
+version, so a stale shrunk file is rebuilt.
+
+**Tests.** +4 in `tests/test_full_res_trim_over_cap.py` (both trim widths through the real renderer, the unchanged
+no-trim/display-space load, the load-width bounds) and +3 in `tests/webapp/test_full_res_trim_over_cap.py` (the
+download and menu size at both widths; the archive counts the 7200 px trim full size and names the 8500 px one as
+reduced to 8000). All three webapp tests fail with the fix reverted (6400×107 against 7200×120; 6800 against 8000).
+
+**The filed entry, verbatim:**
+
+- **🟡 (Scout 2026-11-11, QA rotation sweep (1), reproduced) — an unedited mosaic canvas wider than 8000 px gets
+  its Full-res PNG shrunk *before* the border trim. The download comes out smaller than its true size even when
+  that size fits under the cap, and the full-size archive counts it as full-res with no note.**
+  *(Pillar: trust / image quality, PRIORITY 2–4. Severity: low–moderate, and only on a canvas over 8000 px wide
+  with `auto_crop_border` on (his live default) and no saved recipe. How often that happens in his library is
+  **unmeasured**. Confidence: **reproduced**. Size **S**.)* `render_preview_png_full_res` calls
+  `load_stack_rgb(max_width=max_long_edge)`, which area-averages the *canvas* to 8000 px, and only then cuts
+  `crop` (`unedited_border_trim`). Repro (scratch, real functions): a 9000×1200 master with crop
+  `(0.1, 0, 0.9, 1)` has a true trimmed size of **7200×1200** (`full_res_png_size(…, max_long_edge=10**9,
+  trim_border=True)`), but the render is **6400×1067**, about 11 % short on each side for no reason. Through
+  `picturesarchive.build_full_size_archive` the same pick lands in `n_full_res=1, n_reduced=0`, with no
+  `_reduced_size.txt`. `_true_size` says 7200 ≤ cap, so the v0.506.14 "at their true size" promise is broken
+  silently. A trim that leaves more than the cap (e.g. 8500) still comes out under 8000 (7556). The note then
+  names the right true size, but the file is smaller than the cap it cites. The recipe path
+  (`render_run_recipe_fullres_png`) caps only at the end and is not affected. **Fix shape (Builder's call):**
+  when `crop` applies to a linear master, load at `min(canvas_w, ceil(max_long_edge / (x1 − x0)))` so the
+  *trimmed* width lands at or under the cap. The final `long_edge > max_long_edge` resize still caps it. The
+  memory bound stays one capped picture. Check that the STF measured on the slightly finer grid keeps the
+  stored-preview tone (the scale-diff parity tests), and let `full_res_png_size` then predict this case
+  instead of returning `None` for `w > max_long_edge`. Test: the repro at both trim widths.
+
 ## 2026-11-11 (Builder, branch `claude/focused-noether-paumkw`)
 
 ### v0.506.18 — a sub whose file name is not valid UTF-8 is one unreadable sub, never a failed scan

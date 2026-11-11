@@ -3152,11 +3152,11 @@ def full_res_png_size(
     Replays the renderers' own geometry: a saved recipe's crops and resizes
     through :func:`~seestack.edit.ops.geometry.geometry_pixel_steps` (the code the
     WCS carried onto an export uses), the unedited trim through ``crop_bounds``,
-    then the final long-edge cap. ``None`` — the menu then keeps its canvas-based
-    sentence — for a North-up turn (it re-grids the picture), a recipe that
-    rotates, and an unedited canvas wider than the cap (``load_stack_rgb``
-    area-averages it during the load). Reads at most the coverage maps' trim and
-    one FITS header; never the pixels."""
+    then the final long-edge cap. An unedited canvas wider than the cap replays
+    the load's own grid (``full_res_load_width``, ``preview_grid_size``) first.
+    ``None`` — the menu then keeps its canvas-based sentence — for a North-up
+    turn (it re-grids the picture) and a recipe that rotates. Reads at most the
+    coverage maps' trim and one FITS header; never the pixels."""
     w, h = int(run.canvas_w or 0), int(run.canvas_h or 0)
     if w <= 0 or h <= 0 or not run.fits_path:
         return None
@@ -3201,20 +3201,24 @@ def full_res_png_size(
         display_space = fits_is_display_space(run.fits_path)
     except Exception:  # noqa: BLE001
         return None
+    rect = unedited_border_trim(run) if trim_border and not display_space else None
     if w > max_long_edge:
-        return None
-    trimmed = False
-    if trim_border and not display_space:
-        rect = unedited_border_trim(run)
-        if rect is not None:
-            from seestack.edit.ops.geometry import crop_bounds
+        # ``load_stack_rgb`` area-averages the canvas onto this grid first —
+        # wide enough, with a trim, that the *trimmed* width meets the cap.
+        from seestack.render.thumbnail import full_res_load_width, preview_grid_size
 
-            box = crop_bounds(h, w, {"x0": rect[0], "y0": rect[1],
-                                     "x1": rect[2], "y1": rect[3]})
-            if box is not None:
-                nw, nh = box[1] - box[0], box[3] - box[2]
-                trimmed = (nw, nh) != (w, h)
-                w, h = nw, nh
+        w, h = preview_grid_size(
+            w, h, max_width=full_res_load_width(w, rect, max_long_edge))
+    trimmed = False
+    if rect is not None:
+        from seestack.edit.ops.geometry import crop_bounds
+
+        box = crop_bounds(h, w, {"x0": rect[0], "y0": rect[1],
+                                 "x1": rect[2], "y1": rect[3]})
+        if box is not None:
+            nw, nh = box[1] - box[0], box[3] - box[2]
+            trimmed = (nw, nh) != (w, h)
+            w, h = nw, nh
     return (*_capped_size(w, h, max_long_edge), trimmed)
 
 

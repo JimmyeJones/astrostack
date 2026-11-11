@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- Trim-after-shrink Full-res PNG over the 8000 px cap (`render_preview_png_full_res`, Bugs, Scout 2026-11-11) — branch `claude/focused-noether-e1jr71`.
+*No live claims.*
 
 ---
 
@@ -143,27 +143,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   clicks don't pile up (an older job's download GET then 404s — check the editor words that plainly). Not
   `incoming/`; nothing the owner made is lost — these are copies he already downloaded. Test: the repro, plus a
   second export of the same kind replacing the first.
-
-- **🟡 (Scout 2026-11-11, QA rotation sweep (1), reproduced) — an unedited mosaic canvas wider than 8000 px gets
-  its Full-res PNG shrunk *before* the border trim. The download comes out smaller than its true size even when
-  that size fits under the cap, and the full-size archive counts it as full-res with no note.**
-  *(Pillar: trust / image quality, PRIORITY 2–4. Severity: low–moderate, and only on a canvas over 8000 px wide
-  with `auto_crop_border` on (his live default) and no saved recipe. How often that happens in his library is
-  **unmeasured**. Confidence: **reproduced**. Size **S**.)* `render_preview_png_full_res` calls
-  `load_stack_rgb(max_width=max_long_edge)`, which area-averages the *canvas* to 8000 px, and only then cuts
-  `crop` (`unedited_border_trim`). Repro (scratch, real functions): a 9000×1200 master with crop
-  `(0.1, 0, 0.9, 1)` has a true trimmed size of **7200×1200** (`full_res_png_size(…, max_long_edge=10**9,
-  trim_border=True)`), but the render is **6400×1067**, about 11 % short on each side for no reason. Through
-  `picturesarchive.build_full_size_archive` the same pick lands in `n_full_res=1, n_reduced=0`, with no
-  `_reduced_size.txt`. `_true_size` says 7200 ≤ cap, so the v0.506.14 "at their true size" promise is broken
-  silently. A trim that leaves more than the cap (e.g. 8500) still comes out under 8000 (7556). The note then
-  names the right true size, but the file is smaller than the cap it cites. The recipe path
-  (`render_run_recipe_fullres_png`) caps only at the end and is not affected. **Fix shape (Builder's call):**
-  when `crop` applies to a linear master, load at `min(canvas_w, ceil(max_long_edge / (x1 − x0)))` so the
-  *trimmed* width lands at or under the cap. The final `long_edge > max_long_edge` resize still caps it. The
-  memory bound stays one capped picture. Check that the STF measured on the slightly finer grid keeps the
-  stored-preview tone (the scale-diff parity tests), and let `full_res_png_size` then predict this case
-  instead of returning `None` for `w > max_long_edge`. Test: the repro at both trim widths.
 
 - **🟡 (Scout 2026-11-03 + 11-07, QA rotation sweep (3); part (a) shipped v0.505.10) — a `.recycle/`, `.Trash-*/` or `.zfs/` folder
   a NAS share or a Linux desktop writes *into* `incoming/` becomes a library target of the subs he deleted.**
@@ -3214,6 +3193,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.19 **An unedited trimmed canvas wider than the 8000 px Full-res cap keeps its true size — the canvas was shrunk to the cap *before* the trim, so a 9000 px canvas trimmed to 7200 px downloaded at 6400 px and the archive counted it full size** (`thumbnail.full_res_load_width`, `render_preview_png_full_res`, `pipeline.full_res_png_size`)
 - ✅ v0.506.18 **A sub whose file name is not valid UTF-8 is one unreadable sub, never a failed scan — before, SQLite refused it in `Project.add_frame` and every target after it never ingested** (`ingest.name_is_valid_text`, `scan_and_organize` per-unit isolation, `RingBufferLogHandler` sanitises). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.17 **A plate solve whose ASTAP console output carries a non-UTF-8 byte is still a solve — a strict decode raised after a good solve and stored a decoder traceback as the reject reason** (`ASTAPSolver._run_astap`, `errors="replace"`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.16 **Diagnostic `sky_falloff` v3 samples a mosaic target on one panel — v2's within-target pairs crossed panels, so each panel's own part of the object read as vignetting (a vignette-free library two-thirds mosaics read 0.70–0.90)** (`sky_falloff.one_panel`). Full entry in [`SHIPPED.md`](SHIPPED.md).
