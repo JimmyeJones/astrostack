@@ -1,5 +1,30 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-x5qu3g`) — QA rotation sweep (2), new angle — the registry centre's panel floor (`_CENTRE_PANEL_MIN_SHARE`, a share of the *whole target's* subs) on uneven S30 mosaics: CLEAN, one observation not filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8699 passed / 7 skipped on `6324aae5` (xdist `-n 4`, BLAS capped, 13m11s). No open
+  PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+  No `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors,
+  Auto trim 7.9 %; the Target page's notes agree — top-right panel 30 s behind, 23 % of the picture 3 subs deep).
+- **Sweep (2).** No per-panel code since the last (2) (`fwsbuf`/`mw5sgl`): v0.506.17/18 are ASTAP console bytes and
+  non-UTF-8 file names. Angle not run before (grep `_CENTRE_PANEL_MIN`): `library._main_object_panels` keeps a
+  pointing as a mosaic *panel* only if it holds ≥ 5 subs **and ≥ 1 % of the target's accepted subs** — a whole-target
+  share deciding a per-panel question. Its output feeds the registry centre (`_panel_extent_mid`, which the merge
+  nudge matches at 0.1° and the life list at one field) and the life list's panel footprint (`_panel_footprint`).
+  Ran the real function on S30-spaced (1.7° step) synthetic mosaics with dither: 3×3 and 6×6 at the owner's 35,894
+  subs, a 6×6 with panels uneven 3:1, a 3×3 whose thinnest panel has ¼ of the others, a 2×2 at 120 subs with one
+  10-sub panel — **every panel kept, centre within 0.004°**. The rule only bites at ~10:1 unevenness: a 6×6 whose
+  left column holds 1/10 of the others' subs (0.33 % share) drops that column — **30/36 panels kept, centre 0.85°
+  off, footprint one column short**. Not filed: the Seestar shoots a mosaic's panels in rotation, so one night's
+  panels are within a sub or two of each other; 10:1 needs two *different* layouts under one `<T>_mosaic_sub` name
+  (e.g. one 6×6 night among nine 5×6 nights), which nothing on record says the owner does. If a `mosaic_panel_hints`
+  result ever shows panel counts that uneven, this is the place to look — a per-panel floor relative to the
+  *median panel* rather than the target would keep the column.
+- **Not yet run in a sweep (2):** `edit/starmask.star_mask`'s 0.15 floor is relative to the canvas's 99.9th-pct top-hat
+  (star cores), so a thin panel's noise counts toward the mask only if it reaches 15 % of a star core — read, not
+  measured on a stretched uneven mosaic.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-dsfjim`) — QA rotation sweep (1), new angle — an *unedited, trimmed* canvas wider than the Full-res PNG's 8000 px cap, through the per-run render and the full-size archive: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8699 passed / 7 skipped on `e10d536f` (xdist `-n 4`, BLAS capped). No open PRs. Inbox: the
