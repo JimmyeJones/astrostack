@@ -1,5 +1,26 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-dsfjim`) — QA rotation sweep (1), new angle — an *unedited, trimmed* canvas wider than the Full-res PNG's 8000 px cap, through the per-run render and the full-size archive: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8699 passed / 7 skipped on `e10d536f` (xdist `-n 4`, BLAS capped). No open PRs. Inbox: the
+  same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated, so nothing is owed. No
+  `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors,
+  Auto trim 7.9 %; standing non-findings only: no ASTAP here, `[phone] /life-list [Still to shoot]` 14,513 px).
+- **Sweep (1).** Picked up the lead the 11-10 `55nwei` (1) left: the archive member for a mosaic over the cap. Its
+  North-up fallback reads sound. With `_true_size` → `None`, a file at exactly the cap is reported reduced, which is
+  right for a turn whose bounding box grows. A turned picture that is genuinely exactly 8000 px would be
+  over-reported, a harmless false note, so it was not filed. That read led to the bug: the *unedited* path's order
+  of operations. `render_preview_png_full_res` loads through `load_stack_rgb(max_width=max_long_edge)`, which
+  area-averages the whole canvas to 8000 px, and only then cuts `unedited_border_trim`'s rectangle. Scratch repro
+  with the real functions (9000×1200 linear master, crop `(0.1, 0, 0.9, 1)`, `unedited_border_trim` and
+  `baked_north_up_deg` stubbed): true size 7200×1200, rendered **6400×1067**. `build_full_size_archive` reports it as
+  `n_full_res=1, n_reduced=0` with no `_reduced_size.txt`. Filed 🟡 S in Bugs. The saved-recipe path
+  (`render_run_recipe_fullres_png`) renders at native size and caps last, so it is clean by reading.
+- **Not yet run in a sweep (1):** what the Full-res PNG menu's size line (`full_res_png_size` → `None` for
+  `w > max_long_edge`) says on such a canvas, and whether the fix's finer load grid moves the STF tone measurably
+  against the stored preview.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-jy9aay`) — QA rotation sweep (4), new angle — the editor's download-by-job routes and the files their jobs leave on disk: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8693 passed / 7 skipped on `080dbfd5` (xdist `-n 4`, BLAS capped). No open PRs. Inbox: the
