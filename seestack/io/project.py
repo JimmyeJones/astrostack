@@ -3128,6 +3128,20 @@ class Project:
         return [(row["fits_path"], row["tiff_path"], row["preview_path"])
                 for row in self._conn.execute(sql, params)]
 
+    def stack_run_basenames(self, *, exclude_run_id: int | None = None) -> set[str]:
+        """Every stack run's ``output_basename``, optionally excluding one — a
+        one-column read for a delete that must know whether another row still
+        writes under the same name (the editor's timestamped downloads are
+        keyed by it, not by a recorded path)."""
+        assert self._conn is not None
+        sql = "SELECT output_basename FROM stack_runs"
+        params: tuple[int, ...] = ()
+        if exclude_run_id is not None:
+            sql += " WHERE id <> ?"
+            params = (int(exclude_run_id),)
+        return {str(row["output_basename"]) for row in self._conn.execute(sql, params)
+                if row["output_basename"]}
+
     def delete_stack_run(self, run_id: int) -> None:
         assert self._conn is not None
         self._conn.execute("DELETE FROM stack_runs WHERE id = ?", (run_id,))

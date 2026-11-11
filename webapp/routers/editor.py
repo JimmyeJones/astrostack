@@ -3112,6 +3112,13 @@ def export_png(safe: str, run_id: int, body: PngRequest, request: Request) -> di
     return {"job_id": job.id}
 
 
+#: The editor's downloads keep one file per button per run (a newer click
+#: replaces the older file, and deleting the run removes them), so an old job's
+#: download link can outlive its file — say so plainly rather than "not found".
+_GONE = ("{what} is no longer on the server — a newer export of this picture "
+         "replaced it, or its stack was deleted. Export it again.")
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/png/{job_id}")
 def download_png(safe: str, run_id: int, job_id: str, request: Request) -> FileResponse:
     jm = deps.get_job_manager(request)
@@ -3122,7 +3129,7 @@ def download_png(safe: str, run_id: int, job_id: str, request: Request) -> FileR
         raise HTTPException(status_code=409, detail=f"PNG not ready (job {job.state})")
     png_path = job.result.get("png_path")
     if not png_path or not Path(png_path).exists():
-        raise HTTPException(status_code=404, detail="PNG not found")
+        raise HTTPException(status_code=404, detail=_GONE.format(what="This PNG"))
     filename = job.result.get("filename") or Path(png_path).name
     return FileResponse(png_path, media_type="image/png", filename=filename)
 
@@ -3178,7 +3185,7 @@ def download_share(safe: str, run_id: int, job_id: str, request: Request) -> Fil
         raise HTTPException(status_code=409, detail=f"Share image not ready (job {job.state})")
     jpeg_path = job.result.get("jpeg_path")
     if not jpeg_path or not Path(jpeg_path).exists():
-        raise HTTPException(status_code=404, detail="Share image not found")
+        raise HTTPException(status_code=404, detail=_GONE.format(what="This share image"))
     filename = job.result.get("filename") or Path(jpeg_path).name
     return FileResponse(jpeg_path, media_type="image/jpeg", filename=filename)
 
@@ -3281,7 +3288,7 @@ def download_print(safe: str, run_id: int, job_id: str, request: Request) -> Fil
         raise HTTPException(status_code=409, detail=f"Print not ready (job {job.state})")
     jpeg_path = job.result.get("jpeg_path")
     if not jpeg_path or not Path(jpeg_path).exists():
-        raise HTTPException(status_code=404, detail="Print not found")
+        raise HTTPException(status_code=404, detail=_GONE.format(what="This print"))
     filename = job.result.get("filename") or Path(jpeg_path).name
     return FileResponse(jpeg_path, media_type="image/jpeg", filename=filename)
 
