@@ -385,3 +385,69 @@ def test_a_rewritten_file_that_then_disappears_leaves_no_stale_state():
     assert tr.update({"a.fit": (100, mtime)}) == set()
     clock.advance(31)
     assert tr.update({"a.fit": (100, mtime)}) == {"a.fit"}
+
+
+# --- A source clock running AHEAD of ours (future mtime) -------------------
+#
+# The quiet-period gate used to also demand ``now - mtime >= quiet_period_s``.
+# A file whose mtime is in the future — an SMB/NFS server whose clock runs
+# ahead, or a copy that kept a device's skewed timestamp — failed that test
+# until our clock caught up (hours, for a timezone-sized skew), and the
+# watcher has no other path to those files: no batch ever fired, so a
+# walk-away install never ingested them. Our own observation (size and mtime
+# unchanged for the whole quiet period) is then the whole gate.
+
+def test_a_future_dated_file_goes_stable_after_the_quiet_period():
+    clock = FakeClock()
+    tr = StabilityTracker(quiet_period_s=30, time_fn=clock)
+    mtime = clock.t + 3 * 3600  # source clock three hours ahead
+
+    assert tr.update({"a.fit": (100, mtime)}) == set()
+    clock.advance(31)
+    assert tr.update({"a.fit": (100, mtime)}) == {"a.fit"}
+
+
+def test_a_future_dated_file_still_being_written_is_held():
+    clock = FakeClock()
+    tr = StabilityTracker(quiet_period_s=30, time_fn=clock)
+    skew = 3 * 3600
+    for size in (100, 200, 300):
+        # Still growing, and every write moves the (future) mtime.
+        assert tr.update({"a.fit": (size, clock.t + skew)}) == set()
+        clock.advance(31)
+    # Not quiet for a full period of our own observation yet.
+    final = clock.t + skew
+    assert tr.update({"a.fit": (300, final)}) == set()
+    clock.advance(10)
+    assert tr.update({"a.fit": (300, final)}) == set()
+    clock.advance(21)
+    assert tr.update({"a.fit": (300, final)}) == {"a.fit"}
+
+
+def test_poll_fires_for_files_dated_in_the_future(tmp_path):
+    import os
+
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    f = incoming / "a.fit"
+    f.write_bytes(b"x" * 100)
+
+    clock = FakeClock()
+    ahead = clock.t + 5 * 3600
+    os.utime(f, (ahead, ahead))
+
+    fired = []
+    settings = SimpleNamespace(
+        resolved_incoming_dir=incoming, watch_quiet_period_s=30,
+        watch_poll_interval_s=300, watcher_enabled=True,
+    )
+    w = Watcher(
+        get_settings=lambda: settings,
+        on_batch_ready=lambda: fired.append(1),
+        time_fn=clock,
+    )
+    assert w.poll_once() == set()
+    # One ordinary poll interval later the batch fires — not five hours later.
+    clock.advance(300)
+    assert w.poll_once() == {str(f)}
+    assert fired == [1]
