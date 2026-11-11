@@ -59,4 +59,10 @@ describe("detectSolveSetupProblem", () => {
       detectSolveSetupProblem({ "solve_failed:astap cannot run": 5, "qc:fwhm": 1 }),
     ).toEqual({ kind: "astap", frames: 5, cannot_run: true });
   });
+
+  it("reports a full temp dir as its own kind, not a missing database", () => {
+    expect(
+      detectSolveSetupProblem({ "solve_failed:solve scratch full": 12, "qc:fwhm": 1 }),
+    ).toEqual({ kind: "scratch", frames: 12 });
+  });
 });

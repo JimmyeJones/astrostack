@@ -19,8 +19,10 @@
  * problem, so the UI simply shows nothing (today's behaviour). */
 // `cannotRun` (server: `cannot_run`) marks the "astap" kind whose binary is there
 // but won't start — a different one-time fix from "install it".
+// `scratch` (server-only, v0.506.22): the temp dir the solve copies each sub
+// into is full, so ASTAP never ran — the subs are fine and the fix is space.
 export type SolveSetup = {
-  kind: "astap" | "database";
+  kind: "astap" | "database" | "scratch";
   frames: number;
   cannot_run?: boolean;
 };
@@ -35,6 +37,8 @@ const ASTAP_MISSING = ["astap.exe not found", "astap not found"];
 // ASTAP is there but the OS refused to start it (`SOLVE_SETUP_ASTAP_CANNOT_RUN`).
 const ASTAP_CANNOT_RUN = ["astap cannot run"];
 const DB_MISSING = ["no star database", "star database not found", "star database"];
+// The solve's scratch copy had no room (`SOLVE_SETUP_SCRATCH_FULL`).
+const SCRATCH_FULL = ["solve scratch full"];
 
 export function detectSolveSetupProblem(
   counts: Record<string, number> | undefined | null,
@@ -43,17 +47,20 @@ export function detectSolveSetupProblem(
   let astapFrames = 0;
   let cannotRunFrames = 0;
   let dbFrames = 0;
+  let scratchFrames = 0;
   for (const [reason, n] of Object.entries(counts)) {
     if (!reason.startsWith("solve_failed")) continue;
     const low = reason.toLowerCase();
     if (ASTAP_MISSING.some((s) => low.includes(s))) astapFrames += n;
     else if (ASTAP_CANNOT_RUN.some((s) => low.includes(s))) cannotRunFrames += n;
+    else if (SCRATCH_FULL.some((s) => low.includes(s))) scratchFrames += n;
     else if (DB_MISSING.some((s) => low.includes(s))) dbFrames += n;
   }
   // ASTAP-missing is the more fundamental problem (the solver never even ran, so
   // a "no database" message can't also be present); report it first.
   if (astapFrames > 0) return { kind: "astap", frames: astapFrames };
   if (cannotRunFrames > 0) return { kind: "astap", frames: cannotRunFrames, cannot_run: true };
+  if (scratchFrames > 0) return { kind: "scratch", frames: scratchFrames };
   if (dbFrames > 0) return { kind: "database", frames: dbFrames };
   return null;
 }

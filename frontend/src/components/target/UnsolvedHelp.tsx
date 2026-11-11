@@ -75,6 +75,11 @@ export function UnsolvedHelp({ setup }: { setup?: SolveSetup | null } = {}) {
                     + "program that does the locating — isn't installed yet. That's "
                     + "the orange note above, and until it's sorted no sub can reach "
                     + "your picture."
+                  : setup.kind === "scratch"
+                  ? "Right now none of them can be located, because the app's "
+                    + "temporary folder is full and the locating needs a working copy "
+                    + "of each sub. That's the orange note above, and until it's sorted "
+                    + "no sub can reach your picture."
                   : "Right now none of them can be located, because ASTAP has no star "
                     + "database to match your subs against. That's the orange note "
                     + "above, and until it's sorted no sub can reach your picture."}
