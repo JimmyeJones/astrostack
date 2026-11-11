@@ -1,5 +1,41 @@
 # Shipped — the record
 
+## 2026-11-11 (Builder, branch `claude/focused-noether-mpprlu`)
+
+### v0.506.21 — a future-dated sub is ingested by the folder watcher
+
+**Why.** The ⚪ hardening note below (Scout 2026-08-27) traced it and left it for an owner report; re-read
+2026-11-11, it is worse than the note assumed for the walk-away path: the watcher is the *only* automatic route
+into the library (there is no periodic backstop scan), and `/api/incoming-lag` reads a folder whose newest mtime is
+in the future as "still being written" — so a source clock running ahead (an SMB/NFS server, or a copy that kept a
+device's skewed timestamp; a timezone-sized skew is hours) stranded those subs silently on both surfaces until the
+app's clock caught up. Not observed on the owner's install; shipped because the fix is a one-clause clamp that
+cannot change anything for a file dated in the past.
+
+**What changed.** `webapp.watcher.StabilityTracker.update`: an mtime later than `now` is judged on the quiet period
+alone (size and mtime unchanged across `watch_quiet_period_s` of the watcher's own observation), instead of also
+demanding `now - mtime >= quiet_period_s`. A file dated in the past is gated exactly as before. `incoming-lag`'s
+silence on a future-dated folder is unchanged — with the watcher on, those subs now ingest, so there is nothing
+waiting to report; with it off, a manual Scan picks them up as it always did.
+
+**Tests.** +3 in `tests/webapp/test_watcher.py`: a three-hours-ahead file goes stable after the quiet period; a
+future-dated file still growing is held until it has been quiet a full period; a real `Watcher.poll_once` over a
+file `os.utime`'d five hours ahead fires its batch one poll interval later. All three fail with the clamp reverted.
+
+**The filed entry, verbatim:**
+
+- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #8, traced — possibly by-design; low confidence) — the folder
+  watcher's stability gate compares host wall-clock `now` to the source file's `mtime`
+  (`(now - mtime) >= quiet_period_s`, `webapp/watcher.py` ~line 94), so if the NAS/SMB source filesystem's clock
+  runs AHEAD of the host, completed files may never satisfy the age gate and never go stable → never ingested
+  until the host clock catches up.** *(Severity: low — needs a genuinely skewed source clock, and a manual
+  "Scan incoming" or app restart re-globs and picks the files up anyway; the mtime-age gate is a deliberate
+  "has the write finished settling" heuristic, so this may be acceptable as-is. Confidence: traced, not
+  reproduced; flagged so it isn't re-investigated.)* **If ever worth hardening:** gate on size-stability across
+  two polls (already tracked) rather than absolute mtime age, or clamp a negative `now - mtime` to "treat as
+  just-modified" so a skewed-ahead clock can't strand a file forever. Only worth doing if the owner reports
+  files that never ingest until a rescan.
+
 ## 2026-11-11 (Builder, branch `claude/focused-noether-e1jr71`, second task)
 
 ### v0.506.20 — the editor's Download PNG / Share / Print files are reclaimed

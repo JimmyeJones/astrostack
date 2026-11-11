@@ -6,7 +6,9 @@ finished arriving, enqueues a single pipeline job (scan → QC → solve).
 The hard part is not *noticing* files — it's not reacting to a file that's
 still being copied over SMB/NFS. We solve that with a size+mtime quiet period:
 a file is only "stable" once its size and mtime haven't changed for
-``quiet_period_s`` and its mtime is at least that old. The debounce core
+``quiet_period_s`` and its mtime is at least that old (an mtime in the future —
+a source clock running ahead of ours — is judged on the quiet period alone,
+or it would never go stable). The debounce core
 (:class:`StabilityTracker`) is pure and clock-injectable so it can be unit
 tested without real files.
 
@@ -92,7 +94,16 @@ class StabilityTracker:
             # Unchanged since last poll. Stable once it's been quiet long enough
             # AND the file itself hasn't been touched recently.
             quiet_long_enough = (now - prev.first_seen) >= self.quiet_period_s
-            mtime_old_enough = (now - mtime) >= self.quiet_period_s
+            # An mtime in the *future* says nothing about when the write settled:
+            # the source filesystem's clock runs ahead of ours (an SMB/NFS
+            # server, or a copy that kept a device's skewed timestamp), so
+            # ``now - mtime`` stays negative until our clock catches up — hours,
+            # for a timezone-sized skew — and the watcher has no other path to
+            # those files. Our own observation, size and mtime unchanged for the
+            # whole quiet period, is then the whole gate.
+            mtime_old_enough = (
+                mtime > now or (now - mtime) >= self.quiet_period_s
+            )
             if quiet_long_enough and mtime_old_enough:
                 self._stable.add(path)
                 self._stable_stat[path] = (size, mtime)

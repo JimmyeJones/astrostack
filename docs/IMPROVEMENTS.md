@@ -496,18 +496,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   cheaper and more useful fix for a real install is a re-stack, and the whole population shrinks every night the
   owner shoots.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #8, traced — possibly by-design; low confidence) — the folder
-  watcher's stability gate compares host wall-clock `now` to the source file's `mtime`
-  (`(now - mtime) >= quiet_period_s`, `webapp/watcher.py` ~line 94), so if the NAS/SMB source filesystem's clock
-  runs AHEAD of the host, completed files may never satisfy the age gate and never go stable → never ingested
-  until the host clock catches up.** *(Severity: low — needs a genuinely skewed source clock, and a manual
-  "Scan incoming" or app restart re-globs and picks the files up anyway; the mtime-age gate is a deliberate
-  "has the write finished settling" heuristic, so this may be acceptable as-is. Confidence: traced, not
-  reproduced; flagged so it isn't re-investigated.)* **If ever worth hardening:** gate on size-stability across
-  two polls (already tracked) rather than absolute mtime age, or clamp a negative `now - mtime` to "treat as
-  just-modified" so a skewed-ahead clock can't strand a file forever. Only worth doing if the owner reports
-  files that never ingest until a rescan.
-
 - **⚪ HARDENING NOTE (found incidentally, 2026-08-17 audit — not currently firing for the owner, no fix
   needed yet, just a landmine to know about) — the mosaic-canvas outlier-exclusion pass's rejections are
   PERMANENT with no reconcile path**, unlike auto-grade's post-v0.221.0 behaviour. Verified not to have fired
@@ -3175,6 +3163,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.21 **A sub whose file time is in the future (a source clock running ahead of the app's) is ingested by the folder watcher after the ordinary quiet period — before, it never went stable until the app's clock caught up, and no batch fired** (`watcher.StabilityTracker.update`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.20 **The editor's Download PNG / Share / Print files no longer pile up in `output/` — a newer click of one button replaces the older file, and deleting or pruning the run removes them all** (`output.replace_older_editor_downloads`, `storage._delete_editor_downloads` in `purge_stack_run`)
 - ✅ v0.506.19 **An unedited trimmed canvas wider than the 8000 px Full-res cap keeps its true size — the canvas was shrunk to the cap *before* the trim, so a 9000 px canvas trimmed to 7200 px downloaded at 6400 px and the archive counted it full size** (`thumbnail.full_res_load_width`, `render_preview_png_full_res`, `pipeline.full_res_png_size`)
 - ✅ v0.506.18 **A sub whose file name is not valid UTF-8 is one unreadable sub, never a failed scan — before, SQLite refused it in `Project.add_frame` and every target after it never ingested** (`ingest.name_is_valid_text`, `scan_and_organize` per-unit isolation, `RingBufferLogHandler` sanitises). Full entry in [`SHIPPED.md`](SHIPPED.md).
