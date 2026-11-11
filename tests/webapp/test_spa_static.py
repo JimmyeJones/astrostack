@@ -91,3 +91,44 @@ def test_spa_confinement_uses_resolved_root(spa_client, tmp_path):
     assert r.status_code == 200
     assert "TOPSECRET" not in r.text
     assert Path(root / "SECRET.txt").exists()  # sanity: the file really is there
+
+
+@pytest.mark.parametrize(
+    "path", ["/api", "/api/", "/api/no-such-route", "/api/targets/M_42/no-such",
+             "/api/diagnosticz"],
+)
+def test_spa_answers_unknown_api_paths_404_not_the_shell(spa_client, path):
+    """A GET under ``/api`` that no route matched is a 404 JSON answer, never
+    the SPA shell with 200 — the frontend's ``req`` and the read-only observer
+    both read a 200 as success and then choke on (or misread) the HTML."""
+    client, _ = spa_client
+    r = client.get(path)
+    assert r.status_code == 404
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.json() == {"detail": "Not Found"}
+    assert "SPA-SHELL" not in r.text
+
+
+def test_spa_still_serves_shell_for_client_routes_merely_starting_with_api(spa_client):
+    """Only the ``/api`` path *segment* is reserved — a client route whose first
+    segment merely begins with the letters ``api`` still gets the shell."""
+    client, _ = spa_client
+    r = client.get("/apiary")
+    assert r.status_code == 200
+    assert "SPA-SHELL" in r.text
+
+
+def test_real_app_answers_unknown_api_get_404_with_built_frontend(tmp_path, monkeypatch):
+    """End to end through ``create_app``: real API routes still win, and an
+    unknown ``/api`` GET is a 404 even with a built frontend mounted."""
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<html>SPA-SHELL</html>")
+    monkeypatch.setattr(main, "STATIC_DIR", static)
+    monkeypatch.setenv("ASTROSTACK_DATA", str(tmp_path / "data"))
+    client = TestClient(main.create_app())
+    assert client.get("/api/health").status_code == 200
+    r = client.get("/api/no-such-route")
+    assert r.status_code == 404
+    assert "SPA-SHELL" not in r.text
+    assert "SPA-SHELL" in client.get("/library").text

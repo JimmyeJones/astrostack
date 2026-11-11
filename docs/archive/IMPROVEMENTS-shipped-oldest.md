@@ -4,6 +4,10 @@ Moved verbatim and in order from the foot of the `## Shipped` list in [`../IMPRO
 oldest last, so the working list stays no longer than a run found it (AGENTS.md §2). Newer moves are appended
 above older ones.
 
+## Moved 2026-11-11 (Scout, branch `claude/optimistic-cannon-crb7x5`)
+
+- **Mono single-frame edge test** — verified the mono stack path on a
+
 ## Moved 2026-11-10 (Scout, branch `claude/optimistic-cannon-i30qi1`)
 
 - **Low-frame sigma-clip caution** — the Stack form now shows an inline caution
