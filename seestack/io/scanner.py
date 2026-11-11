@@ -1691,6 +1691,10 @@ def run_qc_and_solve(
         reconcile_streak_rejections,
         reconcile_unreadable_frames,
     )
+    from seestack.solve.astap import (
+        SOLVE_SETUP_SCRATCH_FULL,
+        classify_solve_setup_error,
+    )
     from seestack.solve.runner import (
         apply_solve_result_to_db,
         build_sibling_retry_arglist,
@@ -1799,6 +1803,21 @@ def run_qc_and_solve(
                     log.warning("solve DB write failed: %s", exc)
             summary["solve_done"] = done
         summary["solve_ok"] = solve_ok
+        # A full (or read-only) temp dir fails every solve before ASTAP runs, in
+        # a worker process whose own logging never reaches the app's log — and
+        # every DB write still succeeds, so nothing else would say so. Name it
+        # here, once per pass, with the temp dir's own error text (which carries
+        # its free space), so ``/api/logs`` points at the real cause.
+        scratch_full = [err for _fid, err in failures
+                        if classify_solve_setup_error(err) == SOLVE_SETUP_SCRATCH_FULL]
+        if scratch_full:
+            summary["solve_scratch_full"] = len(scratch_full)
+            log.warning(
+                "plate solve could not copy %d sub(s) into the temp dir, so they "
+                "were not solved (the subs are fine — free space there and re-run "
+                "solving): %s",
+                len(scratch_full), (scratch_full[0] or "").splitlines()[0][:300],
+            )
 
         # Second pass: re-offer the frames that didn't locate around the centre the
         # subs that *did* solve agree on, at the tight sibling radius. A Seestar

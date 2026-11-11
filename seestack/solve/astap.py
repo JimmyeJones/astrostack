@@ -51,6 +51,19 @@ class ASTAPCannotRunError(ASTAPError):
     """
 
 
+class ASTAPScratchError(ASTAPError):
+    """Raised when the solve's scratch copy can't be made in the temp dir.
+
+    Every solve copies the sub into a fresh directory under
+    :func:`tempfile.gettempdir` (see :meth:`ASTAPSolver._solve_once`) — in the
+    container that is its own writable layer, a *different filesystem* from the
+    mounted library. When that is full (or read-only), every frame fails the same
+    way before ASTAP ever runs: a one-time environment problem, not a per-frame
+    "couldn't be located", so the ladder stops on it and the message leads with
+    :data:`SOLVE_SETUP_SCRATCH_FULL` for the classifier to find.
+    """
+
+
 @dataclass
 class ASTAPResult:
     """Outcome of a single solve."""
@@ -304,9 +317,10 @@ class ASTAPSolver:
                     dec_hint_deg=dec_hint_deg,
                     radius_deg=radius_deg,
                 )
-            except ASTAPCannotRunError:
-                # The binary can't be started at all: every rung would fail the
-                # same way, so don't try the other two.
+            except (ASTAPCannotRunError, ASTAPScratchError):
+                # The binary can't be started at all, or there is nowhere to put
+                # the scratch copy: every rung would fail the same way, so don't
+                # try the other two.
                 raise
             except ASTAPError as exc:
                 # A per-rung failure — most often a *timeout* on the slow full-res
@@ -381,12 +395,31 @@ class ASTAPSolver:
         #   -wcs            write a .wcs sidecar
         #   -update         also update FITS header (we DON'T want this — keep raws untouched)
         radius = radius_deg if radius_deg is not None else self.search_radius_deg
-        with tempfile.TemporaryDirectory(prefix=SOLVE_SCRATCH_PREFIXES[0]) as td:
+        try:
+            scratch_dir = tempfile.TemporaryDirectory(prefix=SOLVE_SCRATCH_PREFIXES[0])
+        except OSError as exc:
+            # Nowhere to make the scratch dir at all (temp dir full, read-only,
+            # not writable) — the same for every frame.
+            raise _scratch_error(exc) from exc
+        with scratch_dir as td:
             # Same *name* as the source: ASTAP derives the sidecar names from the
             # file it is given, and the log tail reads better when it names the
             # frame the user recognises.
             scratch = Path(td) / fits_path.name
-            shutil.copy2(fits_path, scratch)
+            try:
+                shutil.copy2(fits_path, scratch)
+            except OSError as exc:
+                # A full / read-only temp dir fails every frame identically and is
+                # not the sub's fault. ``copy2`` labels a full disk with the
+                # *source* name, so the errno decides those; a permission error
+                # counts only when it names the scratch side — an unreadable
+                # source is that one sub's problem and keeps its own error.
+                if exc.errno in _SCRATCH_FULL_ERRNOS or (
+                        exc.errno in (errno.EACCES, errno.EPERM)
+                        and str(scratch) in (exc.filename, exc.filename2)
+                        and str(fits_path) not in (exc.filename,)):
+                    raise _scratch_error(exc) from exc
+                raise
             return self._run_astap(
                 fits_path, scratch, radius=radius, downsample=downsample,
                 max_stars=max_stars, ra_hint_deg=ra_hint_deg, dec_hint_deg=dec_hint_deg,
@@ -558,6 +591,25 @@ SOLVE_SETUP_ASTAP_MISSING = "astap not found"
 SOLVE_SETUP_NO_DATABASE = "no star database"
 #: ASTAP is present but the OS won't start it (see :class:`ASTAPCannotRunError`).
 SOLVE_SETUP_ASTAP_CANNOT_RUN = "astap cannot run"
+#: The temp dir the solve copies each sub into is full or not writable (see
+#: :class:`ASTAPScratchError`) — ASTAP never ran, and the subs are fine.
+SOLVE_SETUP_SCRATCH_FULL = "solve scratch full"
+# Errnos on writing the scratch copy that mean "the temp dir can't take it",
+# whichever file name the OS attached to them.
+_SCRATCH_FULL_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT, errno.EROFS, errno.EFBIG})
+
+
+def _scratch_error(exc: OSError) -> ASTAPScratchError:
+    """Build the canonical scratch-failure error, naming the temp dir (not the
+    sub) and its free space so the one log line says what to clear."""
+    tmp = tempfile.gettempdir()
+    try:
+        free = f"{shutil.disk_usage(tmp).free / 1e6:.0f} MB free"
+    except OSError:
+        free = "free space unknown"
+    return ASTAPScratchError(
+        f"{SOLVE_SETUP_SCRATCH_FULL}: temp dir {tmp} ({free}): "
+        f"{exc.strerror or type(exc).__name__}")
 # ``subprocess`` errnos that mean "this file can't be executed here", every time.
 _CANNOT_RUN_ERRNOS = frozenset({errno.EACCES, errno.EPERM, errno.ENOEXEC, errno.ENOENT})
 
@@ -574,7 +626,7 @@ def classify_solve_setup_error(error_text: str | None) -> str | None:
     """Classify a plate-solve failure message as a *setup* problem, or ``None``.
 
     Returns :data:`SOLVE_SETUP_ASTAP_MISSING` / :data:`SOLVE_SETUP_ASTAP_CANNOT_RUN`
-    / :data:`SOLVE_SETUP_NO_DATABASE` when the full failure text shows ASTAP or its
+    / :data:`SOLVE_SETUP_SCRATCH_FULL` / :data:`SOLVE_SETUP_NO_DATABASE` when the full failure text shows ASTAP or its
     star database isn't available (or ASTAP can't be started) —
     a problem that fails every frame the same way and is fixed once, not per
     frame. Returns ``None`` for an ordinary per-frame failure (no catalog match, a
@@ -595,6 +647,9 @@ def classify_solve_setup_error(error_text: str | None) -> str | None:
     # Present but un-startable — also before the database check: it never ran.
     if SOLVE_SETUP_ASTAP_CANNOT_RUN in low:
         return SOLVE_SETUP_ASTAP_CANNOT_RUN
+    # No room for the scratch copy — ASTAP never ran either.
+    if SOLVE_SETUP_SCRATCH_FULL in low:
+        return SOLVE_SETUP_SCRATCH_FULL
     if "no star database" in low or "star database not found" in low:
         return SOLVE_SETUP_NO_DATABASE
     return None

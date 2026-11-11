@@ -23,6 +23,7 @@ from seestack.solve.astap import (
     SOLVE_SETUP_ASTAP_CANNOT_RUN,
     SOLVE_SETUP_ASTAP_MISSING,
     SOLVE_SETUP_NO_DATABASE,
+    SOLVE_SETUP_SCRATCH_FULL,
     classify_solve_setup_error,
 )
 from seestack.solve.bootstrap import rescue_is_worth_offering
@@ -209,8 +210,10 @@ def _solve_setup_problem(counts: dict[str, int]) -> dict | None:
     message can't also be present).
 
     ASTAP present but un-startable reports as ``"astap"`` too, with an additive
-    ``cannot_run`` flag so the banner can name the right fix."""
-    astap = cannot_run = db = 0
+    ``cannot_run`` flag so the banner can name the right fix. A full temp dir
+    (the solve's scratch copy had nowhere to go, so ASTAP never ran) reports as
+    ``"scratch"``: the subs are fine and the fix is free space, not ASTAP."""
+    astap = cannot_run = scratch = db = 0
     for reason, n in counts.items():
         if not reason.startswith("solve_failed:"):
             continue
@@ -219,12 +222,16 @@ def _solve_setup_problem(counts: dict[str, int]) -> dict | None:
             astap += n
         elif kind == SOLVE_SETUP_ASTAP_CANNOT_RUN:
             cannot_run += n
+        elif kind == SOLVE_SETUP_SCRATCH_FULL:
+            scratch += n
         elif kind == SOLVE_SETUP_NO_DATABASE:
             db += n
     if astap:
         return {"kind": "astap", "frames": astap}
     if cannot_run:
         return {"kind": "astap", "frames": cannot_run, "cannot_run": True}
+    if scratch:
+        return {"kind": "scratch", "frames": scratch}
     if db:
         return {"kind": "database", "frames": db}
     return None

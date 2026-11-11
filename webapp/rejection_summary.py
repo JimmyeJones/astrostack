@@ -21,7 +21,11 @@ from seestack.io.project import (
     REJECT_REASON_SEESTAR_OUTPUT,
 )
 from seestack.qc import grading
-from seestack.solve.astap import SOLVE_FAILED_TIMEOUT
+from seestack.solve.astap import (
+    SOLVE_FAILED_TIMEOUT,
+    SOLVE_SETUP_SCRATCH_FULL,
+    classify_solve_setup_error,
+)
 
 # Ordered bucket definitions. Each raw ``reject_reason`` is matched by the first
 # rule (exact string or namespace prefix) that applies; the *order here* is also
@@ -105,6 +109,13 @@ def bucket_for(reason: str) -> str:
         # "ran out of time" is the one solve failure with an obvious fix, so it
         # gets its own bucket and advice rather than the generic "couldn't be
         # matched to the star field".
+        #
+        # A full temp dir (no room for the solve's scratch copy) means ASTAP
+        # never looked at the sub, so "couldn't be matched … check your subs
+        # aren't trailed or fogged" blames the wrong thing. Those subs are
+        # simply not located yet — the Target page's orange banner names the fix.
+        if classify_solve_setup_error(reason) == SOLVE_SETUP_SCRATCH_FULL:
+            return "unsolved"
         return ("solve_timeout"
                 if reason == f"solve_failed:{SOLVE_FAILED_TIMEOUT}"
                 else "solve_failed")

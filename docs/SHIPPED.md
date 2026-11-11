@@ -1,5 +1,56 @@
 # Shipped — the record
 
+## 2026-11-11 (Builder, branch `claude/focused-noether-po8hte`)
+
+### v0.506.23 — a full container temp dir is a setup problem, not subs that "couldn't be located"
+
+**What.** Every plate solve copies its sub into a scratch dir under `tempfile.gettempdir()` — the container's own
+layer, a different filesystem from the mounted library. When that was full, every solve failed before ASTAP ran
+with a raw `OSError: [Errno 28] …` (cut at 120 chars), every DB write still succeeded, nothing was logged, and the
+reject summary's verdict told a beginner to check his subs for trails or fog. Now:
+- `ASTAPSolver._solve_once` turns a failure to make the scratch dir, or a full / read-only / quota'd write of the
+  copy (ENOSPC, EDQUOT, EROFS, EFBIG; a permission error only when it names the scratch side), into
+  `ASTAPScratchError` led by the canonical `solve scratch full` (`SOLVE_SETUP_SCRATCH_FULL`), naming the temp dir
+  and its free space — never the sub. The ladder stops on it like `ASTAPCannotRunError`; an unreadable *source*
+  keeps its own per-sub error.
+- `classify_solve_setup_error` recognises it, so the stored reason is `solve_failed:solve scratch full` and the
+  sibling-hint retry skips it.
+- `run_qc_and_solve` logs one warning per pass in the parent process (the workers' logging never reached
+  `/api/logs`) and adds `solve_scratch_full` to its summary.
+- `reject-summary.solve_setup_problem` gains `kind: "scratch"` (additive), and the Target page shows an orange
+  "Plate-solving ran out of temporary space" banner; the "not located yet" explainer names it too.
+- `rejection_summary.bucket_for` puts the scratch-full reason in "not located yet", never "couldn't be matched
+  to the star field", so the verdict no longer blames the subs.
+
+**Tests.** `tests/test_solve_scratch_full.py` (6 of 7 fail before; the unreadable-source guard passes either way by
+design), `tests/webapp/test_solve_scratch_full_api.py`, two vitest cases. Optional `/api/system` temp-dir free space
+not done (the log line and banner carry the cause).
+
+**The Bugs entry as filed:**
+
+- **🟢 (Scout 2026-11-11, QA rotation sweep (3)) — a full container temp dir turns every plate solve into "couldn't
+  be located in the sky", and the summary tells a beginner to check his subs for trails or fog.** *(Pillar:
+  "just works" / friendliness, PRIORITY 2–3. Severity low: rare trigger, self-heals once space is back, but the
+  advice is wrong and nothing points at the real cause. Confidence: **reproduced**. Size **S**.)*
+  `ASTAPSolver._solve_once` copies each sub into an `astrostack-solve-*` dir under `tempfile.gettempdir()` — the
+  container's own writable layer, a **different filesystem** from the mounted `data_root`. **Reproduced:** a 2-panel
+  S30-shaped `M_42_mosaic_sub/` (12 × 4.1 MB subs, `copy_to_cache` off, spaces in the names), `TMPDIR` on a 3 MB
+  tmpfs, stub ASTAP, `scan_and_organize` → `run_qc_and_solve` (pool, 4 workers): **12/12** stored
+  `solve_failed:OSError: [Errno 28] No space left on device: '<temp path>…` (the 120-char cut drops the frame name);
+  the job ended `solve_ok: 0` with every DB write succeeding, so `jobs.classify_job_error`'s `disk_full` never fires;
+  no log line (`scanner.run_qc_and_solve` logs only a failed *DB write*), so `/api/logs` and the observer see
+  nothing; `rejection_summary.bucket_for` → `solve_failed`, verdict *"…mostly ones that couldn't be located in the
+  sky … check your subs aren't trailed or fogged"*; and the free-space surfaces (`system.py`, `stats.py`,
+  `storage.py`) measure `data_root` only, so Storage shows plenty of room. Side effects clean (`incoming/`
+  sha256/mtime-identical, no scratch left). The 2026-10-20 sweep (PROCESS-NOTES, `zen-curie-6t1j5s`) stood this down
+  on the premise that "a disk that full fails the job's own DB/cache writes too" — this run shows it does not when
+  only the temp dir is full. **Fix shape:** in `_solve_once`, turn an `OSError` from the scratch step (ENOSPC/EDQUOT/
+  EROFS/EACCES) into a canonical setup reason (e.g. `solve scratch full`) recognised by
+  `classify_solve_setup_error`, stop the pass the way `ASTAPCannotRunError` does, log one warning naming the temp
+  dir and its free space, and give it a plain banner; optionally add the temp dir's free space to `/api/system`.
+  Regression test: point `TMPDIR` at a full location (or patch `shutil.copy2` to raise ENOSPC) and assert the
+  canonical reason and that no `solve_failed` verdict blames the subs.
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-kab7ux`)
 
 ### v0.506.22 — a frame id or page window past SQLite's integer range is "no such frame", not a 500
