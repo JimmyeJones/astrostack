@@ -1,5 +1,26 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-mh7yxx`) — QA rotation sweep (3), new angle — ASTAP exits 0 but leaves a *cut-short* `.wcs` sidecar: CLEAN. Inbox unchanged. Dogfood `--mosaic` DOGFOOD_RESULT.
+
+- **Baseline / inbox / PRs.** Suite 8691 passed / 7 skipped on `a38ef3e4` (xdist `-n 4`, BLAS capped, 14m18s). No
+  open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet.
+- **Sweep (3), new angle.** The 10-30 sweep fed a successful ASTAP a non-finite `.ini`; none fed it a `.wcs` that
+  stops part-way (a sidecar written into a full scratch `/tmp`, or a binary killed between its writes after the exit
+  code). `wcs_text_is_usable` is only "has a celestial centre": cutting an ASTAP-ordered header card by card shows it
+  passes a header that stops after `CTYPE2` (centre read as RA 0 / Dec 0 at 1°/px) and every cut after `CDELT1` or
+  `CD1_1` with one axis at 3600″/px. End to end — a stub ASTAP that writes a good sidecar for every sub but one,
+  through `scan_and_organize` (`copy_to_cache` off) → `solve_one` → `apply_solve_result_to_db` → `run_stack`, at 4,
+  6 and 12 subs, cut after `CTYPE2`, `CDELT1`, `CD1_1` and `CD2_1`: **the CTYPE-only cut is refused on save**
+  (`solve_failed:unreadable plate solution` — CRVAL is absent, so the wrapper's centre comes out None), and every
+  wrong-scale cut is stored as solved but **dropped by the stack** — the footprint guard below 10 subs, the
+  plate-scale guard (`worst +35950 %`) at 12 — then excluded and flagged rejected with a named reason; the stack uses
+  the rest. Nothing written beside the raw sub. Not filed: a cut inside one 4 KiB page needs a sidecar write to
+  succeed partially, which a full disk does not do to a ~2 KiB file (it gets 0 bytes, already the "unreadable"
+  path); the stack guards are the net if it ever happens.
+- **Next (3) angle not yet run:** `GET /api/system` runs ASTAP `-h` uncached on every call (`_astap_info`), in the app's own
+  cwd — how often the pages call it, and a binary slow to answer `-h` (15 s timeout) against the request thread pool.
+
 ## 2026-11-11 (Builder, branch `claude/focused-noether-dtzzop`) — no app change: nothing ungated; dogfood `--mosaic --editor --restack --deep --calibration` CLEAN.
 
 Suite 8691 passed / 7 skipped on `86726637` (xdist `-n 4`, BLAS capped, 15m59s). Bugs unchanged (every open entry gated on the owner or a diagnostic result); no open PRs. Dogfood chosen because `--restack`, `--deep` and `--calibration` had not run alongside `--mosaic --editor`: exit 0, nothing overflowing, no console errors. Calibrated restack: run 5 records dark + flat applied, the calibration note withdraws, the suggester is confident on both; reel 3 → 6 subs, noise-delta ratio 1.642 pixel-exact. Mosaic: Auto trim 7.9 %; panel map, `grain_uneven` and seams notes agree on the thin top-right panel (3 subs vs 6, ~30 s behind); next-best-move, readiness and framing verdict point the same way. Both editor drives re-render all 21 ops, Undo/Redo apply, taste chips as before (10 live, 2 at-limit), "Hold back highlights (0.05)" on the mosaic. Deep frames table: 301 of 1,200 rows, grows to 601 on scroll, first paint 1.3 s. Standing non-findings only (no ASTAP here; the single-field 3×3/18 h clause is the gated LEAD; `[phone] /life-list [Still to shoot]` 14,513 px by design). Trap: a dogfood run with these flags takes longer than 10 minutes — a Bash `timeout` of 600000 killed it mid editor-drive (`page.waitForTimeout: Target page … has been closed`), which reads like an editor crash and is not one; give it the background maximum. Also re-read v0.506.15 (`_build_or_get_deepening_reel` lock) inside its soak: the sig is written only after `os.replace`, so an unlocked `_hit()` during a build sees the old sig and waits on the lock — nothing to file.
