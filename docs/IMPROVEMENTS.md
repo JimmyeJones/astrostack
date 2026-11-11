@@ -3175,6 +3175,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.17 **A plate solve whose ASTAP console output carries a non-UTF-8 byte is still a solve — a strict decode raised after a good solve and stored a decoder traceback as the reject reason** (`ASTAPSolver._run_astap`, `errors="replace"`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.16 **Diagnostic `sky_falloff` v3 samples a mosaic target on one panel — v2's within-target pairs crossed panels, so each panel's own part of the object read as vignetting (a vignette-free library two-thirds mosaics read 0.70–0.90)** (`sky_falloff.one_panel`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.15 **Overlapping "night after night" reel requests render once and never serve a half-written file** (`_build_or_get_deepening_reel` per-reel lock; `write_deepening_reel` encodes to a temp name and `os.replace`s it in) — Scout 2026-11-10 sweep (4) bug.
 - ✅ v0.506.14 **The "Full-size versions" pictures archive names a picture the 8000 px Full-res cap shrank (`_reduced_size.txt`, job-result `n_reduced`) instead of counting it as full size** (`picturesarchive.build_full_size_archive`). Full entry in [`SHIPPED.md`](SHIPPED.md).
