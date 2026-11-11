@@ -149,13 +149,14 @@ cd frontend && npm install
 
 If the Qt system libs above can't be installed in your environment (e.g. `apt`
 is blocked, so `libEGL.so.1` is missing), fall back to:
-`python -m pytest tests/ -p no:pytest-qt --ignore=tests/test_compare_dialog.py --ignore=tests/test_end_to_end.py --ignore=tests/test_footprint_view.py -q`
+`python -m pytest tests/ -p no:pytest-qt --ignore=tests/test_compare_dialog.py --ignore=tests/test_end_to_end.py --ignore=tests/test_footprint_view.py --ignore=tests/test_library_dialog_summary.py -q`
 **The `-p no:pytest-qt` is not optional here:** without `libEGL`, the `pytest-qt`
 plugin's `pytest_configure` hook fails at import (`ImportError: libEGL.so.1`),
 which is a collection-time **INTERNALERROR that aborts the whole run** — so
 `--ignore`-ing the three GUI files alone is *not* enough (the plugin crashes
-before any test is collected). Disabling the plugin skips it cleanly; the three
-`--ignore`d files are the ones that actually use its `qtbot` fixture. (This is a
+before any test is collected). Disabling the plugin skips it cleanly; the first three
+`--ignore`d files use its `qtbot` fixture, and `test_library_dialog_summary.py` (v0.506.0)
+imports `seestack.gui.library_dialog`, which pulls in `PySide6.QtGui` at collection. (This is a
 fallback, not a licence to ignore GUI regressions when Qt *is* available.)
 Frontend: `npx tsc --noEmit`, `npx vitest run`, `npx vite build`.
 

@@ -33,7 +33,8 @@ if ! ldconfig -p 2>/dev/null | grep -q 'libEGL\.so\.1'; then
     echo "      python -m pytest tests/ -p no:pytest-qt \\"
     echo "        --ignore=tests/test_compare_dialog.py \\"
     echo "        --ignore=tests/test_end_to_end.py \\"
-    echo "        --ignore=tests/test_footprint_view.py -q"
+    echo "        --ignore=tests/test_footprint_view.py \\"
+    echo "        --ignore=tests/test_library_dialog_summary.py -q"
     QT_LIBS_MISSING=1
   fi
 fi
@@ -88,7 +89,8 @@ if [ "${QT_LIBS_MISSING:-0}" = "1" ]; then
   echo "  tests:    python -m pytest tests/ -p no:pytest-qt \\"
   echo "              --ignore=tests/test_compare_dialog.py \\"
   echo "              --ignore=tests/test_end_to_end.py \\"
-  echo "              --ignore=tests/test_footprint_view.py -q   (Qt libs unavailable)"
+  echo "              --ignore=tests/test_footprint_view.py \\"
+  echo "              --ignore=tests/test_library_dialog_summary.py -q   (Qt libs unavailable)"
 else
   echo "  tests:    QT_QPA_PLATFORM=offscreen python -m pytest -q"
 fi

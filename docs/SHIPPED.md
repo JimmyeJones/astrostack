@@ -1,5 +1,15 @@
 # Shipped — the record
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-50wcqa`)
+
+### v0.506.29 — the no-Qt test fallback lists `test_library_dialog_summary.py`
+
+**What.** `tests/test_library_dialog_summary.py` (v0.506.0) imports `seestack.gui.library_dialog`, which pulls in
+`PySide6.QtGui` while tests are collected, so on a box without `libEGL` the documented fallback command stopped at a
+collection error. The fallback in `docs/AGENT-ENVIRONMENT.md` and both of `scripts/agent-setup.sh`'s printed hints now
+`--ignore` it beside the other three GUI files. Agent tooling only: no app behaviour, config, schema or API change.
+Verified: the suite under the updated fallback is 8757 passed / 7 skipped with no error.
+
 ## 2026-11-11 (Builder, branch `claude/focused-noether-eq5w42`)
 
 ### v0.506.28 — the full-size archive counts a turned picture read shrunk as reduced
