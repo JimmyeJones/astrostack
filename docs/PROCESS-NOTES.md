@@ -1,5 +1,25 @@
 # Process notes & QA sweep records
 
+## 2026-11-11 (Scout, branch `claude/optimistic-cannon-facsy5`) — QA rotation sweep (1), new angle — the editor's *Print* menu (sized off the stored canvas) against the print the export renders, after Auto's own mosaic trim: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8720 passed / 7 skipped on `18e28a3e` (xdist `-n 4`, BLAS capped, 14m53s). No open PRs. Inbox: the
+  same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors,
+  Auto trim 7.9 %).
+- **Sweep (1).** The 10-21 `j1f6lp` (1) *read* the print path and recorded "`print-sizes` sizes off the uncropped
+  canvas, a documented optimism the export re-checks. Holds", and v0.438.5's `print_refusal` frames the refusal as
+  undoing the *user's* crop. Nobody had driven the beginner's default: `Editor.tsx` always sends
+  `printableSizes[0]` (the largest offered), and on a mosaic Auto crops by itself. Driven through the real routes
+  (`/editor/auto` → `/editor/print-sizes` → `/editor/print` with that size) on mosaic-flagged runs with a ragged
+  left border and a coverage sibling: 2600 × 1850 (Auto `geometry.crop` x0 = 0.055) — menu "up to A3 at 157 DPI",
+  job error "A3 would have to be enlarged … up to A4 at 210 DPI"; 1560 × 1270 (x0 = 0.064) — 10×8 in offered,
+  refused, "up to 7×5 in". Filed in Bugs (🟡 S, ungated) with the fix shape (size `print-sizes` off the recipe's
+  crop). Scratch probe deleted; not Scout-fixed because it touches an API param and the frontend query key.
+  The Download PNG / Share paths were read again (both `nan_to_num` then resize the same rendered `out`) — hold.
+- **Not yet run in a sweep (1):** the archive's member for a North-up-baked mosaic over the cap (still read only);
+  whether the Share JPEG's 2048 px long-edge cap and the nameplate scale agree on a very wide strip mosaic.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-11 (Scout, branch `claude/optimistic-cannon-kab7ux`) — QA rotation sweep (4), new angle — hostile numbers in every GET route's numeric and `recipe` query params and in its `run_id`/`frame_id` path params: one bug, Scout-fixed (v0.506.22). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8715 passed / 7 skipped on `c722bb69` (xdist `-n 4`, BLAS capped, 17m34s). No open
