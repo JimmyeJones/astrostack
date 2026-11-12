@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-11-12 (Scout, branch `claude/sweet-euler-g4pc96`) — QA rotation sweep (3), new angle — the *second* ASTAP call site, the `/api/system` self-test: one bug, Scout-fixed (v0.506.32). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. No open PRs. **Dogfood `--build --mosaic`:** exit 0, nothing overflowing,
+  no console errors, Auto trim 7.9 %.
+- **Sweep (3), new angle.** Every earlier (3) sweep drove ASTAP through the *solve* (`ASTAPSolver._solve_once` /
+  `_run_astap`) or ffmpeg through the Moon & Sun decode; none drove the third subprocess call site, `_astap_info`'s
+  `ASTAP -h` self-test behind `/api/system`, which feeds the Dashboard's `astapReadiness` and the Settings badge.
+  It still used a strict `text=True` decode — the class v0.506.17 fixed in `_run_astap` only. Stub ASTAP that runs,
+  prints its help with one Latin-1 `0xB0` byte and exits 0: `runs: false`, hint "ASTAP is there but can't be
+  started — check the file is executable (and not on a noexec mount)", Settings badge "ASTAP can't start", while a
+  real solve with the same binary works. Mechanism certain; whether the owner's ASTAP prints such a byte in `-h` is
+  unknown (low confidence in the trigger). Fixed with `encoding="utf-8", errors="replace"` (one-line, obviously
+  safe — the text is only scanned for a "version" line); regression test fails before. Side effects: the probe passes
+  only `-h` and no frame path, so nothing it does can reach `incoming/`; the other two call sites (ffprobe JSON,
+  ffmpeg raw pipe) already decode bytes leniently — re-read, CLEAN.
+- **Rotation: (3) done → next sweep is (4)** (the webapp routers).
+
 ## 2026-11-12 (Builder, branch `claude/sweet-feynman-kzkpgk`) — no app change: nothing ungated; dogfood `--empty` and `--no-site --editor` CLEAN.
 
 Suite 8771 passed / 7 skipped on `b7426726` (xdist `-n 4`, BLAS capped, 18m39s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; the Features entries are declined or gated; the "sentences that name a number" sweep is closed); no open PRs. Flags chosen because neither `--empty` nor `--no-site` had run in the recent log — the first-run and no-location screens. Both exit 0, nothing overflowing, no console errors. Empty: the Dashboard's only speaking note is the ASTAP-missing one (expected here). No site: Tonight shows "Your subs don't say where you were" with the Settings link, then "Worth more time" ranking the sample; the Night picker reads a blank `mm/dd/yyyy` — **not a finding**, `tonight.ts::shownNightDate` documents staying blank without a dark window rather than guessing. Editor drive re-renders all 21 ops, Undo/Redo apply, taste chips 10 live / 2 at-limit. Also read the editor ops (`geometry`, `stars`, `tone`, `detail`, `background`) and the loupe's window context for an unhardened path — nothing to file; the loupe's missing `coverage` is covered by the `frozen_deltas` replay. Standing non-findings only (`[phone] /life-list [Still to shoot]` ~14,500 px by design).

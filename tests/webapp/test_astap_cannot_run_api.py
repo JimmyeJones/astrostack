@@ -54,3 +54,22 @@ def test_system_hint_names_an_unstartable_astap(client, tmp_path):
     assert astap["found"] is True
     assert astap["runs"] is False
     assert "can't be started" in astap["hint"]
+
+
+def test_system_probe_tolerates_non_utf8_help_text(client, tmp_path):
+    """An ASTAP that starts fine but prints one non-UTF-8 byte in its ``-h`` text
+    (a Latin-1 "°") is *running*: the self-test must not read the decode error as
+    "can't be started" and send the owner to check execute bits and mounts —
+    the same strict-decode class ``ASTAPSolver._run_astap`` was fixed for in
+    v0.506.17."""
+    p = tmp_path / "astap_latin1" / "astap"
+    p.parent.mkdir()
+    p.write_bytes(
+        b"#!/bin/sh\nprintf 'ASTAP version 2024.01.01\\n-r radius [\\260]\\n'\nexit 0\n")
+    p.chmod(0o755)
+    assert client.put("/api/settings", json={"astap_path": str(p)}).status_code == 200
+    astap = client.get("/api/system").json()["astap"]
+    assert astap["found"] is True
+    assert astap["runs"] is True, astap
+    assert astap["version"] == "ASTAP version 2024.01.01"
+    assert "can't be started" not in (astap.get("hint") or "")

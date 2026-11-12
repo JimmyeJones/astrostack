@@ -4,6 +4,10 @@ Moved verbatim and in order from the foot of the `## Shipped` list in [`../IMPRO
 oldest last, so the working list stays no longer than a run found it (AGENTS.md §2). Newer moves are appended
 above older ones.
 
+## Moved 2026-11-12 (Scout, branch `claude/sweet-euler-g4pc96`)
+
+- **Editable notes/label on History cards** — the long-standing `notes` column
+
 ## Moved 2026-11-11 (Scout, branch `claude/optimistic-cannon-crb7x5`)
 
 - **Mono single-frame edge test** — verified the mono stack path on a
