@@ -28,6 +28,33 @@ describe("OpParamPanel", () => {
     expect(onChange).toHaveBeenCalledWith({ amount: 1.0 });
   });
 
+  // An added Stretch starts in STF (opDefaults.ts), so Reset returns there —
+  // not to the schema's asinh default, which clips half the sky to black.
+  const STRETCH: EditOp = {
+    id: "tone.stretch", label: "Stretch", group: "tone", stage: "any",
+    proxy_safe: true, is_stretch: true, help: null,
+    params: [{
+      key: "mode", label: "Curve", type: "enum", group: "simple", default: "asinh",
+      min: null, max: null, step: null, options: ["asinh", "stf"], help: null,
+      depends_on: null,
+    }],
+  };
+
+  it("resets a Stretch to the STF start an added one gets", () => {
+    const onChange = vi.fn();
+    wrap(<OpParamPanel spec={STRETCH} params={{ mode: "asinh" }} onChange={onChange} />);
+    expect(screen.getByLabelText("Reset Curve")).toBeEnabled();
+    fireEvent.click(screen.getByText("Reset op"));
+    expect(onChange).toHaveBeenCalledWith({ mode: "stf" });
+    fireEvent.click(screen.getByLabelText("Reset Curve"));
+    expect(onChange).toHaveBeenLastCalledWith({ mode: "stf" });
+  });
+
+  it("reads a Stretch in STF as already at its start", () => {
+    wrap(<OpParamPanel spec={STRETCH} params={{ mode: "stf" }} onChange={() => {}} />);
+    expect(screen.getByLabelText("Reset Curve")).toBeDisabled();
+  });
+
   it("per-param reset is disabled when the value already equals the default", () => {
     wrap(<OpParamPanel spec={SPEC} params={{ amount: 1.0 }} onChange={() => {}} />);
     expect(screen.getByLabelText("Reset Amount")).toBeDisabled();

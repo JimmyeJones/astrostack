@@ -3917,6 +3917,55 @@ describe("EditorView — \"does my colour look right?\"", () => {
   });
 });
 
+// v0.506.33: "Add stretch" (the No-stretch nudge's button, and the Add menu) used
+// to seed the engine schema's asinh default at black 0.35 — a black point just
+// above the sky median, so half the sky went to pure black and the picture
+// jumped away from the STF look the editor had been showing. An added Stretch
+// now starts in STF (components/editor/opDefaults.ts).
+describe("EditorView — an added Stretch keeps the look on screen", () => {
+  const STRETCH_MODES: EditOp = {
+    id: "tone.stretch", label: "Stretch", group: "tone", stage: "any",
+    proxy_safe: true, is_stretch: true, help: "tone map",
+    params: [
+      { key: "mode", label: "Curve", type: "enum", group: "simple", default: "asinh",
+        min: null, max: null, step: null, options: ["asinh", "stf"], help: null,
+        depends_on: null },
+      { key: "black", label: "Black point", type: "float", group: "simple", default: 0.35,
+        min: 0, max: 1, step: 0.01, options: null, help: null, depends_on: "mode=asinh" },
+    ],
+  };
+
+  it("adds the nudge's Stretch in STF mode, and saves it that way", async () => {
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH_MODES, CURVES]);
+    // A saved look with no Stretch at all — the case the nudge exists for.
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "c1", id: "tone.curves", enabled: true,
+              params: { points: [[0, 0], [1, 1]] } }],
+      base_run_id: 3,
+    });
+    const putRecipe = vi.spyOn(client.api, "putRecipe")
+      .mockResolvedValue({ ops: [], base_run_id: 3 });
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add stretch" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Add stretch" })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(putRecipe).toHaveBeenCalledTimes(1));
+    const added = putRecipe.mock.calls[0][2].ops
+      .find((o: { id: string }) => o.id === "tone.stretch");
+    expect(added?.params).toEqual({ mode: "stf", black: 0.35 });
+  });
+});
+
 // The editor writes nothing on its own: a look lives in the browser until Save,
 // so leaving the page silently drops it. Before v0.392.0 there was no guard of
 // any kind (`useBlocker`/`beforeunload` appeared nowhere in the frontend). These

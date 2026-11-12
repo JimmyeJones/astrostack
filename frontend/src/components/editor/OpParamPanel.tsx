@@ -5,10 +5,12 @@ import { dependencyMet } from "../../api/depends";
 import { HintLabel, StackOptionControl } from "../StackOptionControl";
 import { CurvesWidget } from "./CurvesWidget";
 import { matchesSuggestion } from "./suggestionMatch";
+import { opStartParams, paramStartValue } from "./opDefaults";
 
 /** Renders the parameter form for one operation instance. Scalars use the shared
  * StackOptionControl (as sliders here), curves use the CurvesWidget (with the
- * histogram behind it), and every param can be reset to its schema default. */
+ * histogram behind it), and every param can be reset to the value a freshly added
+ * op starts at (its schema default, except where `ADDED_OP_DEFAULTS` says). */
 export function OpParamPanel({ spec, params, onChange, histogram, suggestions,
   curveGhost, onBakeCurve }: {
   spec: EditOp;
@@ -40,10 +42,12 @@ export function OpParamPanel({ spec, params, onChange, histogram, suggestions,
   const simple = spec.params.filter((p) => p.group !== "advanced");
   const advanced = spec.params.filter((p) => p.group === "advanced");
 
+  // A missing key is the *schema* default (that is what the engine fills in);
+  // "at default" means at the value a freshly added op starts at.
   const isDefault = (p: StackOptionField) =>
-    JSON.stringify(params[p.key] ?? p.default) === JSON.stringify(p.default);
-  const resetAll = () =>
-    onChange(Object.fromEntries(spec.params.map((p) => [p.key, p.default])));
+    JSON.stringify(params[p.key] ?? p.default)
+      === JSON.stringify(paramStartValue(spec, p));
+  const resetAll = () => onChange(opStartParams(spec));
 
   const control = (p: StackOptionField) => {
     if (p.type === "curve") {
@@ -95,7 +99,7 @@ export function OpParamPanel({ spec, params, onChange, histogram, suggestions,
           <div style={{ flex: 1, minWidth: 0 }}>{control(p)}</div>
           <Tooltip label="Reset to default" withArrow>
             <ActionIcon variant="subtle" size="sm" color="gray" disabled={isDefault(p)}
-              onClick={() => set(p.key, p.default)} aria-label={`Reset ${p.label}`}>
+              onClick={() => set(p.key, paramStartValue(spec, p))} aria-label={`Reset ${p.label}`}>
               <IconRestore size={14} />
             </ActionIcon>
           </Tooltip>

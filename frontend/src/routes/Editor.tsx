@@ -32,6 +32,7 @@ import { QueryError } from "../components/QueryError";
 import { Histogram } from "../components/editor/Histogram";
 import { guidesNeedOpInput, tonalHistView } from "../components/editor/tonalGuides";
 import { OpList } from "../components/editor/OpList";
+import { opStartParams } from "../components/editor/opDefaults";
 import { AutoFeedback } from "../components/editor/AutoFeedback";
 import { saveRecipeMessage } from "../components/editor/saveMessage";
 import { UnsavedLookGuard } from "../components/editor/UnsavedLookGuard";
@@ -129,9 +130,9 @@ function SlowPreviewChip() {
 }
 
 function newOp(spec: EditOp): OpInstance {
-  const params: Record<string, unknown> = {};
-  spec.params.forEach((p) => { params[p.key] = p.default; });
-  return { uid: uid(), id: spec.id, enabled: true, params };
+  // `opStartParams`, not the bare schema defaults: an added Stretch starts in
+  // STF so it shows the picture the editor was already showing (opDefaults.ts).
+  return { uid: uid(), id: spec.id, enabled: true, params: opStartParams(spec) };
 }
 
 export function EditorView() {
@@ -1301,8 +1302,9 @@ export function EditorView() {
     hist.data, ops, hasEnabledStretch(ops, specs));
   const neutraliseBackground = () =>
     setOps((p) => neutraliseBackgroundOps(p, specs, uid));
-  // No enabled stretch → the pipeline silently applies a default asinh stretch at
-  // the end. Nudge the user to add/enable an explicit, controllable one.
+  // No enabled stretch → the pipeline silently applies a default STF stretch at
+  // the end. Nudge the user to add/enable an explicit, controllable one (an added
+  // one starts at that same STF look — `ADDED_OP_DEFAULTS`).
   const disabledStretch = ops.find((o) => !o.enabled && specs[o.id]?.is_stretch) ?? null;
   const noStretch = ops.length > 0 && !hasEnabledStretch(ops, specs);
   const addOrEnableStretch = () => {
