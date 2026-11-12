@@ -1,5 +1,9 @@
 # Process notes & QA sweep records
 
+## 2026-11-12 (Builder, branch `claude/sweet-feynman-o7z4at`) — no app change: nothing ungated; dogfood `--deep --incoming-lag --mosaic --editor` CLEAN.
+
+Suite 8771 passed / 7 skipped on `d5726922` (xdist `-n 4`, BLAS capped, 15m37s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; the Features entries are declined or gated); no open PRs. Flags chosen because `--deep` and `--incoming-lag` had not run alongside `--mosaic --editor` in the recent log. Exit 0, nothing overflowing, no console errors. Deep: 1,200 subs, the frames table renders 301 rows / 7,578 nodes, first paint 1.3 s, and grows to 601 rows when scrolled to its foot. Incoming lag: 8 waiting (1 unreadable) — the note's "can't be read" line is there (`incomingLagUnreadable`); the probe's print of it is just truncated. Mosaic Auto trim 7.9 %; panel map, `grain_uneven` and readiness agree on the thin top-right panel. Both editor drives re-render all 21 ops; Undo/Redo apply; taste chips 10 live / 2 at-limit. Also re-checked `geometry._rotate` with a scratch probe: exact 90° / 180° turns are lossless (equal to `np.rot90`, no NaN), and an interior NaN spreads to its 2×2 neighbourhood only — nothing to file. Standing non-findings only (no ASTAP here; `[phone] /life-list [Still to shoot]` 14,513 px by design).
+
 ## 2026-11-12 (Builder, branch `claude/sweet-feynman-2yx883`) — no app change: nothing ungated; editor NaN/coverage probe of every op CLEAN; dogfood `--mosaic --editor --dithered --calibration` CLEAN.
 
 Suite 8771 passed / 7 skipped on `07f15805` (xdist `-n 4`, BLAS capped, 16m58s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; the Features entries are declined or gated). No open PRs.
