@@ -182,3 +182,71 @@ def test_crop_then_resize_stays_renderable():
     assert 0 not in out.shape
     u8 = (np.clip(np.nan_to_num(out), 0.0, 1.0) * 255).astype(np.uint8)
     Image.fromarray(u8, mode="RGB").save(io.BytesIO(), format="PNG")  # must not raise
+
+
+# ---- geometry.resize: a shrink averages, it does not point-sample ----------
+
+def _resize(img, scale):
+    return np.asarray(get_op("geometry.resize").apply(img, {"scale": scale}, EditContext()))
+
+
+def test_resize_shrink_averages_the_sky_noise_away():
+    # A bare order-1 zoom lands each output pixel on ~one input pixel, so a
+    # 0.25x "Resize" came out exactly as grainy as full size (std 0.67 sigma).
+    # A real downscale averages what it drops: sigma/4 in theory.
+    rng = np.random.default_rng(1)
+    img = (0.1 + 0.01 * rng.standard_normal((400, 600, 3))).astype(np.float32)
+    out = _resize(img, 0.25)
+    assert out.shape == (100, 150, 3)
+    assert float(np.std(out[..., 0])) < 0.35 * 0.01
+    assert abs(float(np.mean(out)) - 0.1) < 1e-3  # level preserved
+
+
+def test_resize_shrink_keeps_every_star_at_its_brightness():
+    # Point-sampling let a star's brightness swing with its sub-pixel phase:
+    # measured +-41 % (coefficient of variation) at 0.25x, some nearly gone.
+    rng = np.random.default_rng(2)
+    h, w = 480, 640
+    yy, xx = np.mgrid[0:h, 0:w]
+    sig = 2.5 / 2.355
+    field = np.zeros((h, w), np.float32)
+    centres = [(y + rng.random() * 4, x + rng.random() * 4)
+               for y in range(20, h - 20, 40) for x in range(20, w - 20, 40)]
+    for cy, cx in centres:
+        sl = (slice(int(cy) - 6, int(cy) + 7), slice(int(cx) - 6, int(cx) + 7))
+        field[sl] += np.exp(-((yy[sl] - cy) ** 2 + (xx[sl] - cx) ** 2) / (2 * sig * sig))
+    out = _resize(np.stack([field] * 3, axis=-1), 0.25)[..., 0]
+    flux = np.array([out[int(round(cy / 4)) - 2:int(round(cy / 4)) + 3,
+                         int(round(cx / 4)) - 2:int(round(cx / 4)) + 3].sum()
+                     for cy, cx in centres])
+    assert flux.std() / flux.mean() < 0.1
+    assert flux.min() > 0.75 * flux.mean()
+
+
+def test_resize_shrink_keeps_coverage_and_does_not_darken_a_mosaic_edge():
+    # NaN = no coverage: the anti-alias blur must neither eat into covered sky
+    # next to a gap (zeros bleeding in would darken it) nor fill the gap.
+    from scipy.ndimage import zoom
+
+    img = np.full((200, 300, 3), 0.2, dtype=np.float32)
+    img[:, :130] = np.nan          # an uncovered mosaic border
+    img[150:, 200:, 1] = np.nan    # and a gap in one channel only
+    out = _resize(img, 0.5)
+    bare = zoom(img, (0.5, 0.5, 1.0), order=1)
+    # The covered area (finite in every channel) is the area it always was.
+    assert np.array_equal(np.isnan(out).any(axis=2), np.isnan(bare).any(axis=2))
+    # Channel 0 has only the border gap; channel 1's extra gap stays in channel 1.
+    assert np.array_equal(np.isnan(out[..., 1]), np.isnan(bare[..., 1]))
+    assert np.isnan(out[..., 0]).sum() < np.isnan(out[..., 1]).sum()
+    assert np.allclose(out[np.isfinite(out)], 0.2, atol=1e-5)
+
+
+def test_resize_enlarge_is_unchanged():
+    from scipy.ndimage import zoom
+
+    rng = np.random.default_rng(3)
+    img = rng.random((40, 60, 3)).astype(np.float32)
+    img[:5, :5] = np.nan
+    out = _resize(img, 1.5)
+    assert np.array_equal(out, zoom(img, (60 / 40, 90 / 60, 1.0), order=1).astype(np.float32),
+                          equal_nan=True)
