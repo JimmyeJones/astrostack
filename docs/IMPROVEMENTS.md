@@ -3163,6 +3163,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.32 **The `/api/system` ASTAP self-test (`ASTAP -h`) decodes its help text leniently — one non-UTF-8 byte made a working ASTAP read "can't start" on the Dashboard and Settings, sending the owner to check execute bits and mounts** (`webapp/routers/system.py::_astap_info`, same strict-decode class as v0.506.17) — Scout 2026-11-12 sweep (3), Scout-fixed. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.31 **The editor's Resize averages when it shrinks instead of point-sampling — at 0.25× the noise was no smoother than full size and a star's brightness swung ±41 % with its sub-pixel phase** (`geometry._resize`, NaN-aware `_antialias_for_shrink`) — Builder 2026-11-12 editor bug hunt. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.30 **The "~N more clear nights" estimates (Target page card + next-session card, Dashboard "Target progress", Tonight row badge) price an uneven mosaic's remaining time over the sky new time covers — a grown 2×2→3×3 read ~21 nights where its current framing at the same pace takes ~5** (`IntegrationReadiness.remainingHours`, `readinessRowBadge`, `rankLibraryProgress`) — Scout 2026-11-11 sweep (2) entry. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.506.29 **The no-Qt test fallback (`docs/AGENT-ENVIRONMENT.md`, `scripts/agent-setup.sh`) ignores `tests/test_library_dialog_summary.py`, which imports PySide6 when tests are collected** — Scout 2026-11-11
@@ -4581,5 +4582,3 @@ _Newest first. One line each: what + commit/PR. Entries that had grown to paragr
 - **Pre-run stack estimate endpoint** — new `GET /targets/{safe}/stack-estimate`
 
 - **Outlier-safe drizzle** — new opt-in `drizzle_reject`: two-pass κ-σ
-
-- **Editable notes/label on History cards** — the long-standing `notes` column

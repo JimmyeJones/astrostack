@@ -110,6 +110,12 @@ def _astap_info(settings) -> dict:  # noqa: ANN001
         try:
             proc = subprocess.run(  # noqa: S603
                 [str(path), "-h"], capture_output=True, text=True, timeout=15, check=False,
+                # The help text is only scanned for a "version" line and is not
+                # guaranteed to be UTF-8. A strict decode raised on one Latin-1
+                # byte *after* ASTAP had run, and the handler below then reported
+                # a working binary as "can't be started" (same class as
+                # ``ASTAPSolver._run_astap``, v0.506.17).
+                encoding="utf-8", errors="replace",
             )
             out = (proc.stdout + proc.stderr)
             ver = next((ln for ln in out.splitlines() if "version" in ln.lower()), "")

@@ -1,5 +1,22 @@
 # Shipped — the record
 
+## 2026-11-12 (Scout, branch `claude/sweet-euler-g4pc96`)
+
+### v0.506.32 — the ASTAP self-test no longer calls a working ASTAP "can't start" over one non-UTF-8 byte
+
+**What.** `_astap_info` (`webapp/routers/system.py`, served on `/api/system`) runs `ASTAP -h` to check the binary
+starts, with `subprocess.run(text=True)` — a strict UTF-8 decode. v0.506.17 fixed exactly this in
+`ASTAPSolver._run_astap`, but the self-test is a second call site it did not reach. A stub ASTAP that runs, prints
+its help and one Latin-1 `0xB0` byte, and exits 0: the decode raised `UnicodeDecodeError` *after* the run, the
+blanket `except` recorded `runs: false`, and the Dashboard (`astapReadiness` → `cannotRun`) and Settings ("ASTAP
+can't start") told the owner to check the execute bit, a `noexec` mount and the CPU architecture, while every real
+solve worked. Fixed with `encoding="utf-8", errors="replace"` — the text is only scanned for a "version" line.
+Whether the owner's ASTAP build prints such a byte in `-h` is unknown (low confidence in the trigger, high in the
+mechanism), the same standing as v0.506.17. No config, schema, default, API-shape or on-disk change.
+
+**Tests.** `tests/webapp/test_astap_cannot_run_api.py::test_system_probe_tolerates_non_utf8_help_text` — fails
+before (`runs` is `False`), passes after.
+
 ## 2026-11-12 (Builder, branch `claude/sweet-feynman-esi1u4`)
 
 ### v0.506.31 — the editor's Resize averages when it shrinks instead of point-sampling
