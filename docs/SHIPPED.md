@@ -1,5 +1,34 @@
 # Shipped — the record
 
+## 2026-11-12 (Builder, branch `claude/sweet-feynman-efy4co`)
+
+### v0.506.33 — an added Stretch starts at the look the editor was already showing, not a half-black sky
+
+**What.** An editor recipe with no enabled Stretch renders through the pipeline's STF fallback (sky at 20 % grey),
+and shows a "No **Stretch** step" nudge whose **Add stretch** button — like the Add menu — seeded the new op with
+the engine schema's defaults: `mode: "asinh"`, `black: 0.35`. `asinh_stretch` anchors its black point on the sky
+(0.33 *is* the median), so 0.35 clips just over half the sky to pure black on any picture. Measured on a synthetic
+mosaic-shaped field (two NaN gaps, 150 stars, faint nebula): the fallback's median 0.20 and 0.04 % of covered pixels
+at exactly 0 became median **0.00** and **54 %** at 0 the moment the beginner did what the nudge asked. An added
+Stretch now starts in STF at the schema's own `target_bg` 0.20 — byte-for-byte the fallback (same `autostretch`
+call, same default), so adding it changes nothing on screen and puts the look under a control. Asinh is one click
+away in the op's Curve menu, with its measured "Auto stretch" button.
+Frontend-only, by design (§9): `frontend/src/components/editor/opDefaults.ts` (`ADDED_OP_DEFAULTS`,
+`opStartParams`, `paramStartValue`) feeds `newOp` in `routes/Editor.tsx`, the op panel's Reset / Reset-op
+(`OpParamPanel`) and the "tuned" dot (`opModified`), so all three agree on what "default" means. The engine schema
+default stays `asinh` because `validate_ops` fills a missing key from it — changing it could move a recipe already
+on disk; a missing `mode` still reads as asinh (and as "tuned") in the panel, matching what the engine renders.
+Auto, the presets and every saved recipe carry `mode` explicitly and are untouched. No config, schema, API-shape or
+on-disk change.
+
+**Found by** a probe of every editor op at each numeric parameter's min and max and every enum option on that
+mosaic-shaped field (no errors, no coverage lost or invented; `detail.chroma_denoise` / `tone.scnr` dip a few
+thousandths below 0 in display space, which every downstream op and both encoders clip — benign).
+
+**Tests (+10).** `opDefaults.test.ts` (new, +7), `OpParamPanel.test.tsx` (+2: Reset returns a Stretch to STF; STF
+reads as at-start), `Editor.test.tsx` (+1: the nudge's **Add stretch** saves `mode: "stf"` — fails before with
+`"asinh"`).
+
 ## 2026-11-12 (Scout, branch `claude/sweet-euler-g4pc96`)
 
 ### v0.506.32 — the ASTAP self-test no longer calls a working ASTAP "can't start" over one non-UTF-8 byte
