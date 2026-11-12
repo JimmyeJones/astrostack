@@ -74,6 +74,15 @@ _UNSCALED_BY_DESIGN: dict[str, str] = {
         "Same sweep, same answer: ext_frac 0.0254/0.0254/0.0254/0.0255/0.0253 "
         "across steps 1-8 on the galaxy scene, and galaxy and nebula classify "
         "identically at every step.",
+
+    "seestack/edit/ops/geometry.py::_antialias_for_shrink::gaussian_filter(sigma)":
+        "An anti-alias for the Resize's own resample, so it is a length on the "
+        "*grid being resampled*, like the zoom factor beside it — not on the sky. "
+        "Measured (sky-noise std, preview vs the export viewed at preview size): "
+        "proxy step 3 at 0.5x 0.00489 vs 0.00485, at 0.25x 0.00185 vs 0.00182; "
+        "step 2 at 0.25x 0.00185 vs 0.00182. Scaling sigma by proxy_scale "
+        "over-blurs the preview 2-3x (0.00184 / 0.00064 / 0.00095 on the same "
+        "three). Pinned by test_resize_shrink_averages_the_sky_noise_away.",
 }
 
 
