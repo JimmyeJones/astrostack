@@ -1,5 +1,11 @@
 # Process notes & QA sweep records
 
+## 2026-11-12 (Builder, branch `claude/sweet-feynman-e6l80a`) — no app change: nothing ungated; star-op gap-edge probe CLEAN; dogfood `--mosaic --big --calibration --incoming-lag --editor` CLEAN.
+
+Suite 8772 passed / 7 skipped on `2fad1a50` (xdist `-n 4`, BLAS capped, 13m46s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; the Features entries are declined, gated on diagnostic `filter_card_values` v2, or wait on a real big upload); no open PRs.
+- **Editor probe (scratchpad, not landed):** `geometry.rotated_shape` against `_rotate`'s real output, 300 random sizes 3–120 px × angles ±180° — 0 mismatches. `stars.boost_nebula` / `stars.reduce` next to a mosaic gap beside a panel 0.1 brighter: on a *starless* noise field the star mask normalises noise to its own peak (interior 0.68) and feathers to 0 at the gap, so the boost reads ~1.7× stronger in the edge strip — a synthetic artefact; with 300 stars on the same canvas the per-column boost is flat to 0.0003 from the gap edge inward and `reduce` moves the sky by 0.0. Not filed.
+- **Dogfood** (`--build --mosaic --big --calibration --incoming-lag --editor`, a combination not run together before): exit 0, nothing overflowing, no console errors. Scale diff: only `sky` moved (0.004 → 0.003); trim 7.9 % small / 6.7 % full-size (the documented same-pixel-jitter share). Calibrated single field: health says "calibrated (dark+flat)", calibration note withdraws. The full-size mosaic's health card offers darks — right, the masters fit the small sensor only. Incoming-lag: Target page "8 subs … haven't been imported", Dashboard "a sub … can't be read" — the documented `incomingLagUnreadable` split, read before. Three editor drives (field, mosaic, full-size decimated at 847 px) re-render all 21 ops; Undo/Redo apply; the loupe follows the navigator; taste chips 10 live / 2 at-limit. Standing non-findings only (no ASTAP here; `[phone] /life-list [Still to shoot]` 14,513 px by design).
+
 ## 2026-11-12 (Scout, branch `claude/sweet-euler-g4pc96`) — QA rotation sweep (3), new angle — the *second* ASTAP call site, the `/api/system` self-test: one bug, Scout-fixed (v0.506.32). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
