@@ -107,7 +107,54 @@ def _resize(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     if shape is None:
         return rgb
     out_h, out_w = shape
-    return zoom(img, (out_h / h, out_w / w, 1.0), order=1).astype(np.float32)
+    zy, zx = out_h / h, out_w / w
+    if zy < 1.0 or zx < 1.0:
+        # Shrinking: low-pass each channel before it is resampled, one plane at
+        # a time, so a mosaic-sized export holds a few planes extra, never a
+        # second full RGB copy.
+        out = np.empty((out_h, out_w, img.shape[2]), dtype=np.float32)
+        for c in range(img.shape[2]):
+            out[..., c] = zoom(_antialias_for_shrink(img[..., c], zy, zx),
+                               (zy, zx), order=1)
+        return out
+    return zoom(img, (zy, zx, 1.0), order=1).astype(np.float32)
+
+
+def _antialias_for_shrink(plane: np.ndarray, zy: float, zx: float) -> np.ndarray:
+    """Low-pass one channel before a downscale by ``(zy, zx)`` so the resample
+    *averages* the pixels it drops instead of skipping them.
+
+    A bare order-1 ``zoom`` lands each output pixel on (nearly) one input
+    pixel, so shrinking a picture point-samples it: measured at 0.25× the sky
+    noise came out 2.7× what a real downscale gives (no smoother than full
+    size), and a star's brightness swung by ±41 % with its sub-pixel phase —
+    some all but vanished. That is not what "0.5 = half size" promises.
+
+    The blur is the standard anti-alias width ``σ = (1/zoom − 1) / 2`` per axis
+    (scikit-image's ``rescale`` default), and **NaN-aware**: a normalised
+    convolution weights only covered pixels, so a mosaic's uncovered border
+    never darkens the sky next to it, and every pixel that was NaN is NaN again
+    afterwards — the gap ``zoom`` then sees is exactly the gap it saw before,
+    and "NaN = no coverage" holds. Sized from the zoom alone, so the decimated
+    preview proxy and the full-resolution export are each smoothed relative to
+    their own grid, the way every other pixel-scaled op keeps them in step.
+    """
+    from scipy.ndimage import gaussian_filter
+
+    plane = np.asarray(plane, dtype=np.float32)
+    sigma = (max(0.0, (1.0 / zy - 1.0) / 2.0), max(0.0, (1.0 / zx - 1.0) / 2.0))
+    if max(sigma) <= 0.0:
+        return plane
+    covered = np.isfinite(plane)
+    if covered.all():
+        return gaussian_filter(plane, sigma=sigma, mode="nearest")
+    smoothed = gaussian_filter(np.where(covered, plane, np.float32(0.0)),
+                               sigma=sigma, mode="nearest")
+    weight = gaussian_filter(covered.astype(np.float32), sigma=sigma, mode="nearest")
+    with np.errstate(invalid="ignore", divide="ignore"):
+        smoothed /= weight
+    smoothed[~covered] = np.nan
+    return smoothed
 
 
 # The reshape-the-canvas ops. A recipe's *enabled* members of this set are the

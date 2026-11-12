@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-11-12 (Builder, branch `claude/sweet-feynman-esi1u4`)
+
+### v0.506.31 — the editor's Resize averages when it shrinks instead of point-sampling
+
+**What.** `geometry.resize` (`seestack/edit/ops/geometry.py::_resize`) shrank a picture with a bare order-1
+`scipy.ndimage.zoom`, which lands each output pixel on about one input pixel — a point sample. Measured on a
+synthetic sky at 0.25×: the noise came out 2.7× what a real downscale gives (0.67 σ against the ideal 0.25 σ — no
+smoother than full size) and a 2.5 px star's brightness swung by ±41 % (coefficient of variation) with its sub-pixel
+phase, the faintest landing at a quarter of the mean. A shrink now low-passes each channel first
+(`_antialias_for_shrink`: Gaussian σ = (1/zoom − 1)/2 per axis, scikit-image's `rescale` default), as a
+**normalised convolution** so a mosaic's uncovered border never darkens the sky beside it and every NaN pixel is
+NaN again before the resample — the covered area (`finite_mask`) is the one the bare zoom gave. After: 0.18 σ
+noise, star spread ±2.5 %. One channel at a time (a few extra planes on a mosaic export, never a second RGB copy;
+~6 s on a 48 MP canvas). As a side effect a one-channel gap no longer leaks into the other two channels (the 3-D
+zoom's zero-weight NaN neighbour along the channel axis did that). Enlarging is byte-identical to before. The
+filter is sized from the zoom alone, so the strided preview proxy and the full-resolution export are each smoothed
+relative to their own grid. No config, schema, default, API or on-disk change.
+
+**Tests.** `tests/test_edit_ops_pixel_transform.py`: the shrink averages the sky noise away, keeps every star at
+its brightness, keeps the coverage and does not darken a mosaic edge (and a one-channel gap stays in its channel),
+and an enlarge is unchanged. The first three fail before (checked on a scratch worktree of `origin/main`).
+
 ## 2026-11-11 (Builder, branch `claude/nice-galileo-2xruwe`)
 
 ### v0.506.30 — nights-to-go on an uneven mosaic priced at the current framing
