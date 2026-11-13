@@ -1,5 +1,30 @@
 # Shipped — the record
 
+## 2026-11-13 (Scout, branch `claude/sweet-euler-c961hx`)
+
+### v0.506.36 — a download named after a typed *Output name* with a dash, accent, emoji or quote no longer fails
+
+**What.** An editor export stores whatever the user typed in *Output name* as the run's `output_basename` (only the
+files on disk go through `_sanitize_basename`). The hand-built downloads that name their file after it — the
+Full-res PNG (`full_res_png`), the phone/desktop wallpaper, the share JPEG (`/{kind}` = `jpeg`) and the
+before/after JPEG — formatted it straight into `f'attachment; filename="{name}"'`. Reproduced through the real
+export job: "Orion – final" (en dash) and "M42 ✨" made Starlette's Latin-1 header encoding raise
+`UnicodeEncodeError` — **a 500 instead of the picture** on all three; "Orión" went out as a raw Latin-1 byte a
+UTF-8 client can't decode; `my "best" M42` closed the quoted filename early (saved as `my `). The FITS/TIFF/preview
+downloads of the same run were fine — `FileResponse(filename=…)` already sends RFC 5987. New
+`webapp/routers/_disposition.attachment` gives the `Response(...)` routes the same shape (an ASCII `filename="…"`
+fallback with accents folded and quotes replaced, plus `filename*=UTF-8''…`); the frontend's `DownloadMenuItem`
+already prefers `filename*`. A plain ASCII name keeps its header byte-for-byte. The two `.ics` routes (plan.py)
+route through it too.
+
+**Found by** QA rotation sweep (4), new angle: hostile characters in the filenames the router layer puts in
+response headers.
+
+**Tests (+11).** `tests/webapp/test_download_filename_header.py` (new): the helper encodes as Latin-1 and round-trips
+six names; a plain name is byte-identical; no router hand-builds a filename header from a variable (pins the
+class); the three downloads of an export typed "Orion – final", "M42 ✨" and `my "best" M42` answer 200 with the
+typed name offered. 4 fail on the old routers.
+
 ## 2026-11-13 (Builder, branch `claude/sweet-feynman-l5vkz4`)
 
 ### v0.506.35 — a picture straightened in the editor is no longer turned North-up a second time
