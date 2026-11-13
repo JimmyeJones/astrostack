@@ -2407,7 +2407,7 @@ def _build_or_get_deepening_reel(series, lon_deg: float | None = None) -> Path |
         return None
     newest = runs[-1]
     out_dir = Path(newest.fits_path).parent
-    basename = newest.output_basename or "master"
+    basename = _run_artefact_stem(newest)
     night_steps = _deepening_night_steps(series, lon_deg)
     sig = _deepening_signature(runs, series.dated_by, night_steps)
     # Named from `RUN_ARTEFACT_SUFFIXES`, the table the delete / archive / merge
@@ -2805,6 +2805,30 @@ async def compare_placement(safe: str, request: Request, a: int, b: int,
 _ZOOM_CLIP_SUFFIXES = ("_zoom.webp", "_zoom.png")
 
 
+def _run_artefact_stem(run: Any) -> str:
+    """The stem a run's cached siblings (zoom clip, deepening reel) are named by.
+
+    The recorded FITS's own stem, as the share and Full-res caches already use and
+    as delete / archive / merge resolve ``RUN_ARTEFACT_SUFFIXES`` — never
+    ``output_basename`` itself: an editor export stores the typed *Output name*
+    there verbatim (only its files are ``safe_basename``'d), so "M42/final" made
+    the clip 500 and "../x" wrote it outside ``output/``; and a re-stack repoints
+    the older rows' files to ``{base}_{stamp}`` while their column keeps ``base``.
+    Falls back to the preview's stem, then to the sanitised column.
+    """
+    from seestack.stack.output import safe_basename
+
+    if run.fits_path:
+        p = Path(run.fits_path)
+        return p.name[:-len(p.suffix)] if p.suffix else p.name
+    if run.preview_path:
+        p = Path(run.preview_path)
+        stem = p.name[:-len(p.suffix)] if p.suffix else p.name
+        if stem.endswith("_preview") and len(stem) > len("_preview"):
+            return stem[:-len("_preview")]
+    return safe_basename(run.output_basename or "master")
+
+
 def zoom_clip_min_source_long_edge() -> int:
     """The smallest source that lets the clip come out at its full
     :data:`~seestack.render.zoomclip.CLIP_LONG_EDGE`.
@@ -3087,7 +3111,7 @@ async def zoom_clip(safe: str, run_id: int, request: Request) -> FileResponse:
     inputs = _zoom_clip_inputs(request, safe, run_id)
     if inputs.preview_path is None:
         raise HTTPException(status_code=404, detail="No preview for this run")
-    basename = inputs.run.output_basename or "master"
+    basename = _run_artefact_stem(inputs.run)
     clip = await run_in_threadpool(
         _build_or_get_zoom_clip, inputs.run, inputs.entry, inputs.preview_path,
         basename, inputs.recipe_json, inputs.focus_xy)
