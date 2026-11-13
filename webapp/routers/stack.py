@@ -3236,6 +3236,7 @@ async def _save_processed_preview(
         AUTO_EDIT_BAKED_LOOK_PREFIX,
         render_run_display_array,
     )
+    from seestack.edit.ops.geometry import recipe_rotation_deg
     from seestack.edit.recipe import recipe_from_json
     from seestack.render.thumbnail import applied_north_up_deg, orient_preview_north_up
     from seestack.stack.output import _write_preview_png
@@ -3275,8 +3276,13 @@ async def _save_processed_preview(
             return crop_json, 0.0
         # Turn the bytes we just wrote rather than the array, so the rotation goes
         # through the one helper the share/download path uses — and record the
-        # angle from the same rules, so the two can never disagree.
-        rotated = orient_preview_north_up(preview_path.read_bytes(), run.fits_path)
+        # angle from the same rules, so the two can never disagree. A recipe that
+        # rotates has already turned the picture part of the way, so only the
+        # rest of the master's correction is applied: the bytes then sit at the
+        # run's whole North-up turn, which is what is recorded.
+        rotated = orient_preview_north_up(
+            preview_path.read_bytes(), run.fits_path,
+            already_deg=recipe_rotation_deg(recipe))
         preview_path.write_bytes(rotated)
         return crop_json, applied_north_up_deg(run.fits_path)
 

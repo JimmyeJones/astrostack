@@ -2807,16 +2807,26 @@ def render_run_recipe_fullres_png(
     import numpy as np
     from PIL import Image
 
-    from seestack.render.thumbnail import _apply_north_up
+    from seestack.edit.ops.geometry import recipe_rotation_deg
+    from seestack.render.orient import rotate_image_north_up
+    from seestack.render.thumbnail import preview_north_up_remainder_deg
     from seestack.stack.output import pack_unit
 
     def _noop_progress(*_a: Any, **_k: Any) -> None:  # this path has no job to report to
         return None
 
-    out, _recipe = _render_recipe_fullres(fits_path, recipe_dict, _noop_progress)
+    out, recipe = _render_recipe_fullres(fits_path, recipe_dict, _noop_progress)
     disp = np.clip(np.nan_to_num(np.asarray(out, dtype=np.float32)), 0.0, 1.0)
     if north_up:
-        disp = _apply_north_up(disp, fits_path)
+        # The master's WCS says how far *its* grid is from North-up; a recipe that
+        # rotates has already turned the picture part (or all) of that way, so only
+        # the remainder is applied. Turning by the master's whole angle on top used
+        # to rotate an editor-straightened picture a second time — North off by the
+        # recipe's own angle and the canvas grown with black corners.
+        angle = preview_north_up_remainder_deg(
+            fits_path, already_deg=recipe_rotation_deg(recipe))
+        if angle:
+            disp = np.clip(rotate_image_north_up(disp, angle), 0.0, 1.0)
     u8 = pack_unit(disp)
     img = Image.fromarray(u8, mode="RGB")
     h, w = u8.shape[:2]
