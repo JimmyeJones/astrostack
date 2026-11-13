@@ -1,5 +1,12 @@
 # Process notes & QA sweep records
 
+## 2026-11-13 (Builder, branch `claude/sweet-feynman-cojkqd`) — no app change: nothing ungated; dogfood `--build --mosaic --dithered --closing --restack --editor` CLEAN as far as it ran.
+
+Suite 8772 passed / 7 skipped on `b0ba090b` (xdist `-n 4`, BLAS capped, 15m46s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; the Features entries are declined, gated on diagnostic `filter_card_values` v2, or wait on a real big upload); no open PRs.
+- **Dogfood:** mosaic trim 7.9 %, dithered 30.7 % (its recorded apron, not the tiled bar); the mosaic's panel map, `grain_uneven` and readiness card agree on one thin top-right panel; the closing-season card, Plan my week and its closing line name the same target and night. Page probe: nothing overflowing, no console errors. The field editor drive re-rendered all 21 ops, Undo/Redo applied, the Auto taste chips moved and reset.
+- **Process trap worth keeping:** these six flags together overran the harness's **30-minute background-command cap** — the run was killed during the *mosaic* editor drive (at Rotate), and the Node error that followed (`page.waitForTimeout: Target page, context or browser has been closed`) is the kill, not the app. Split `--editor` from the slow sample flags, or pass `--no-probe` on one of two runs.
+- **Read, not landed:** `recipe._coerce_param`, `curve.suggest_tone_curve` / `fallback_tone_curve`, `tone._curves`, `curveDrag.ts`, `levels.suggest_levels_*` and `stretch.suggest_asinh_stretch` re-read for degenerate inputs (duplicate x, all-zero shadows, NaN gaps): each already guards the case. Nothing filed.
+
 ## 2026-11-13 (Builder, branch `claude/sweet-feynman-xik5fg`) — no app change: nothing ungated; added-op probe and its preview↔export parity CLEAN.
 
 Suite 8772 passed / 7 skipped on `948b75e9` (xdist `-n 4`, BLAS capped, 17m54s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; the Features entries are declined, gated on diagnostic `filter_card_values` v2, or wait on a real big upload); no open PRs.
