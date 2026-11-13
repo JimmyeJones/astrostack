@@ -177,3 +177,71 @@ def test_keep_processed_north_up_save_does_not_turn_a_straightened_recipe_again(
     assert r.status_code == 200
     assert _size(preview) == straightened
     assert abs(r.json()["north_up_deg"]) > 5.0
+
+
+def _add_rotate_to_saved_recipe(data_root, safe: str, run_id: int, angle: float) -> None:
+    from seestack.io.library import Library
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            recipe = json.loads(proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}"))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    recipe["ops"].append(json.loads(Recipe(ops=[OpInstance(
+        id="geometry.rotate", params={"angle": angle, "expand": True})]).to_json())["ops"][0])
+    _set_meta(data_root, safe, f"{RECIPE_META_PREFIX}{run_id}", json.dumps(recipe))
+
+
+@pytest.mark.parametrize("fraction", [1.0, 1.0 / 3.0])
+def test_keep_processed_save_without_north_up_records_the_recipes_turn(
+        client, solved_library, fraction):
+    """History's "Adjust → keep processed" save *without* North up re-bakes a
+    recipe that rotates, so the stored bytes carry the recipe's turn. It used to
+    record 0.0 ("on the canvas grid"), and every later North-up surface — the
+    share/download turn, the History toggle — then turned the straightened
+    picture by the master's whole angle again. The run must record the recipe's
+    turn, so the turn still to come is only the rest of the master's."""
+    from seestack.render.thumbnail import stack_north_up_deg
+    from webapp.preview_orient import remaining_north_up_deg
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, _preview = _register_run(solved_library, safe, rot_deg=30.0)
+    assert _auto_edit(solved_library, safe, run_id) is not None
+    angle = stack_north_up_deg(_run_row(solved_library, safe, run_id).fits_path)
+    assert angle is not None and abs(angle) > 5
+    turn = angle * fraction
+    _add_rotate_to_saved_recipe(solved_library, safe, run_id, turn)
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                    json={"keep_processed": True, "north_up": False})
+    assert r.status_code == 200
+    assert r.json()["north_up_deg"] == pytest.approx(turn)
+    row = _run_row(solved_library, safe, run_id)
+    assert row.preview_north_up_deg == pytest.approx(turn)
+    assert remaining_north_up_deg(row) == pytest.approx(angle - turn, abs=1e-6)
+
+
+def test_keep_processed_north_up_save_without_a_wcs_records_the_recipes_turn(
+        client, solved_library):
+    """No usable WCS: the North-up half can't turn anything, but the recipe
+    still did — record that, not 0.0."""
+    from astropy.io import fits
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, _preview = _register_run(solved_library, safe, rot_deg=30.0)
+    assert _auto_edit(solved_library, safe, run_id) is not None
+    fits_path = _run_row(solved_library, safe, run_id).fits_path
+    with fits.open(fits_path) as hdul:
+        data = hdul[0].data.copy()
+    fits.PrimaryHDU(data=data).writeto(fits_path, overwrite=True)
+    _add_rotate_to_saved_recipe(solved_library, safe, run_id, 25.0)
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                    json={"keep_processed": True, "north_up": True})
+    assert r.status_code == 200
+    assert _run_row(solved_library, safe, run_id).preview_north_up_deg == pytest.approx(25.0)
