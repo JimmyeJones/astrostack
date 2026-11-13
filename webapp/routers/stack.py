@@ -43,6 +43,7 @@ from webapp.preview_orient import (
     remaining_north_up_deg,
 )
 from webapp.reeloffer import night_reel_offer
+from webapp.routers import _disposition
 from webapp.run_options import parse_run_options, run_has_reusable_options
 from webapp.schemas import (
     STACK_DEFAULTS_META_KEY,
@@ -1411,7 +1412,7 @@ async def download_full_res_png(
     filename = f"{basename}_fullres.png"
     return Response(
         content=png, media_type="image/png",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _disposition.attachment(filename)},
     )
 
 
@@ -4044,7 +4045,7 @@ async def before_after_jpeg(safe: str, run_id: int, request: Request,
     return Response(
         content=data, media_type="image/jpeg",
         headers={"Content-Disposition":
-                 f'attachment; filename="{basename}_before-after.jpg"'},
+                 _disposition.attachment(f"{basename}_before-after.jpg")},
     )
 
 
@@ -5479,7 +5480,7 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
     filename = f"{run.output_basename}_{aspect}_wallpaper.jpg"
     return Response(
         content=data, media_type="image/jpeg",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _disposition.attachment(filename)},
     )
 
 
@@ -5645,7 +5646,7 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         filename = f"{run.output_basename}{suffix}.jpg"
         return Response(
             content=data, media_type="image/jpeg",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": _disposition.attachment(filename)},
         )
     attr, media = _KIND_FIELDS[kind]
     path = getattr(run, attr)
@@ -5675,7 +5676,7 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
             content=data, media_type=media,
             headers={
                 "Cache-Control": "no-cache",
-                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Disposition": _disposition.attachment(filename),
             },
         )
     # The preview PNG is regenerated *in place* (same path) by "Save as preview"

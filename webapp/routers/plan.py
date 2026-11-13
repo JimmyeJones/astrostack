@@ -45,6 +45,7 @@ from webapp import deps
 from webapp.goals import read_goal_s
 from webapp.ics import IcsEvent, to_ics
 from webapp.registry_cache import cached_for_registry, registry_signature
+from webapp.routers import _disposition
 from webapp.site_location import SiteProbe, resolve_night_key
 from webapp.site_location import probe_site_from_library as _probe_site_from_library
 
@@ -874,7 +875,7 @@ def get_next_session_ics(
     return Response(
         content=body,
         media_type="text/calendar",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _disposition.attachment(filename)},
     )
 
 
@@ -1358,5 +1359,5 @@ def catalog_object_ics_response(
     return Response(
         content=body,
         media_type="text/calendar",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _disposition.attachment(filename)},
     )
