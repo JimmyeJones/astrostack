@@ -1,5 +1,11 @@
 # Process notes & QA sweep records
 
+## 2026-11-13 (Builder, branch `claude/sweet-feynman-yag6up`) — v0.506.34; a full-resolution geometry probe otherwise CLEAN.
+
+- **`edited_shape` vs the rendered shape:** 300 random 1–3-op chains of crop / rotate (incl. 90°, 180°, 0.5°, expand off) / resize on 3–120 px canvases — 0 mismatches.
+- **Export WCS after a resize** (`wcs_text_after_pixel_steps`): uses `zoom`'s corner-aligned mapping — matches. Not changed.
+- **Peak memory per op** (`tracemalloc`, full res): Rotate and enlarging Resize 2.00× their output from a redundant `.astype(np.float32)` → fixed (v0.506.34). Sharpen / Deconvolution ~6.9×, set by `_with_nan_filled` temporaries, not by their own trailing cast — a lead only if an export is ever measured OOM there.
+
 ## 2026-11-13 (Builder, branch `claude/sweet-feynman-cojkqd`) — no app change: nothing ungated; dogfood `--build --mosaic --dithered --closing --restack --editor` CLEAN as far as it ran.
 
 Suite 8772 passed / 7 skipped on `b0ba090b` (xdist `-n 4`, BLAS capped, 15m46s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; the Features entries are declined, gated on diagnostic `filter_card_values` v2, or wait on a real big upload); no open PRs.
