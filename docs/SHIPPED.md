@@ -1,5 +1,28 @@
 # Shipped — the record
 
+## 2026-11-13 (Builder, branch `claude/sweet-feynman-yag6up`)
+
+### v0.506.34 — the editor's Rotate and enlarging Resize hold the canvas once, not twice
+
+**What.** `geometry._rotate` and the enlarge branch of `geometry._resize` build their result with SciPy's
+`rotate` / `zoom`, which already return `float32` for `float32` input, and then called `.astype(np.float32)` —
+which copies even when the dtype matches. So every full-resolution export through a Rotate or an enlarging Resize
+briefly held the rotated / enlarged canvas **twice**. Measured with `tracemalloc`: peak **2.00×** the result for
+both ops before, **1.00×** after (a 2000×1500 RGB picture: Rotate 7° 90 MB → 45 MB peak; Resize ×1.5 162 MB →
+81 MB). On a mosaic-sized export that copy is the whole canvas again — the path AGENTS.md says is memory-bounded on
+purpose. Now `.astype(np.float32, copy=False)`. **Output is byte-identical** (checked against the old expression
+with NaN gaps in the input); shapes, NaN coverage and the WCS-replay helpers are untouched.
+
+**Found by** an editor probe of the geometry ops at full resolution: `edited_shape` against the real rendered shape
+over 300 random crop/rotate/resize chains (0 mismatches — CLEAN) and the export WCS's resize mapping (corner-aligned,
+as `zoom` samples — CLEAN), then a peak-memory read of each op. Sharpen and Deconvolution carry the same redundant
+cast, but their peak (~6.9×) is set by the NaN-fill temporaries, so removing it there would not move the bound;
+left alone. Denoise's cast is a real float64→float32 conversion.
+
+**Tests (+7).** `tests/test_edit_geometry_memory.py` (new): peak ≤ 1.5× the output for Rotate (expand on/off, 90°)
+and Resize ×1.5 / ×2 — all five fail before at 2.00×; plus dtype and gap preservation. No config, schema, API or
+on-disk change.
+
 ## 2026-11-12 (Builder, branch `claude/sweet-feynman-efy4co`)
 
 ### v0.506.33 — an added Stretch starts at the look the editor was already showing, not a half-black sky

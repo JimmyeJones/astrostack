@@ -74,8 +74,11 @@ def _rotate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         # meaningful orientation to change, so leave it untouched (mirroring the
         # <2 px guards on crop/resize/denoise). A no-op on any real ≥3 px image.
         return img
+    # ``rotate`` already returns float32 for float32 input; ``copy=False`` keeps
+    # the cast from duplicating the whole rotated canvas on a mosaic export
+    # (tests/test_edit_geometry_memory.py — peak was 2.0× the result).
     return rotate(img, angle, axes=(0, 1), reshape=bool(params.get("expand", True)),
-                  order=1, mode="constant", cval=np.nan).astype(np.float32)
+                  order=1, mode="constant", cval=np.nan).astype(np.float32, copy=False)
 
 
 def resize_shape(h: int, w: int, params: dict) -> tuple[int, int] | None:
@@ -117,7 +120,8 @@ def _resize(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
             out[..., c] = zoom(_antialias_for_shrink(img[..., c], zy, zx),
                                (zy, zx), order=1)
         return out
-    return zoom(img, (zy, zx, 1.0), order=1).astype(np.float32)
+    # As in _rotate: the enlarged result is already float32, so don't copy it.
+    return zoom(img, (zy, zx, 1.0), order=1).astype(np.float32, copy=False)
 
 
 def _antialias_for_shrink(plane: np.ndarray, zy: float, zx: float) -> np.ndarray:
