@@ -1,5 +1,25 @@
 # Process notes & QA sweep records
 
+## 2026-11-13 (Scout, branch `claude/sweet-euler-c961hx`) — QA rotation sweep (4), new angle — hostile characters in the download filenames the routers put into `Content-Disposition`: one bug, Scout-fixed (v0.506.36). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8795 passed / 7 skipped with the fix on `fc608ce3` (xdist `-n 4`, BLAS capped, 18m09s). No open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since
+  2026-10-12, all owner-gated — nothing owed. No `Diagnostic result:` issue yet. **Dogfood `--build --mosaic`:**
+  CLEAN (exit 0, nothing overflowing, no console errors, Auto trim 7.9 %).
+- **Sweep (4), angle not run before** (grep `Content-Disposition`/`filename=`/`unicode` in this file: none as a
+  sweep). Listed every router that writes a download header: `FileResponse(filename=…)` (RFC 5987-safe) vs
+  hand-built `f'attachment; filename="{…}"'` on a `Response` (7 sites: stack.py ×5, plan.py ×2). The only one
+  fed free text is `run.output_basename`, which an editor export stores *unsanitised* from the typed *Output name*
+  (`pipeline._apply_editor_to_run`: `base = output_name or …`; only the on-disk files are `_sanitize_basename`'d —
+  the stacker sanitises before its row, the editor/combine paths don't). Drove the real export job with four
+  names: en dash / emoji → `UnicodeEncodeError` (500) on `full-res-png`, `wallpaper`, `jpeg`; an accent → raw
+  Latin-1 byte; a `"` → truncated filename. FITS/TIFF/preview of the same run fine. **Scout-fixed** with
+  `webapp/routers/_disposition.attachment` on all 7 sites; 4 tests fail before.
+- **Lead, not filed (no user-visible harm found):** the unsanitised `output_basename` on editor-export and combine
+  rows differs from the sanitised file stem on disk (`Orion – final` vs `Orion_final.fits`). Not traced further;
+  any consumer that rebuilds a path from `output_basename` instead of the stored paths would miss.
+- **Not yet run in a sweep (4):** `HEAD` / `Range` on the file-serving GETs; wrong-method on a real path.
+- **Rotation: (4) done → next sweep is (1)** (preview↔export parity at mosaic scale).
+
 ## 2026-11-13 (Builder, branch `claude/sweet-feynman-l5vkz4`) — v0.506.35 from an editor bug hunt.
 
 - **Angle:** where the editor's geometry ops meet the North-up surfaces. `geometry_pixel_steps` already refuses to carry a WCS through a rotate, but the two renders that turn a *recipe* North-up (`render_run_recipe_fullres_png`, `_save_processed_preview`) took the master's whole WCS angle anyway → double turn (fixed). Sense checked empirically: `ndimage.rotate(axes=(0,1))` and PIL `rotate` are both CCW for a positive angle.
