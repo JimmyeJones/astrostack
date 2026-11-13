@@ -1,5 +1,36 @@
 # Shipped — the record
 
+## 2026-11-13 (Builder, branch `claude/sweet-feynman-l5vkz4`)
+
+### v0.506.35 — a picture straightened in the editor is no longer turned North-up a second time
+
+**What.** The editor's Rotate op turns counter-clockwise for a positive angle — the same sense as the North-up turn
+(`orient.rotate_image_north_up`) — so a saved recipe that rotates has already given the picture part (or all) of
+the master's North-up correction. The two places that turn a *recipe render* North-up applied the master's **whole**
+WCS angle on top: the Full-res PNG download / archive (`pipeline.render_run_recipe_fullres_png`, reached for any
+processed run whose preview is a baked display-space edit) and History's "Adjust → keep processed → North up" save
+(`routers/stack._save_processed_preview`). Reproduced on a master 140° from North-up whose recipe rotates 140°: the
+North-up download grew **499×487 → 697×695** with black corners and North pointing **140° away**; a recipe that
+turned a third of the way came out **46° off**. Both now apply only the remainder
+(`preview_north_up_remainder_deg(..., already_deg=geometry.recipe_rotation_deg(recipe))`, the same helper the share
+and wallpaper paths use for a baked turn); the save still records the run's whole turn, which is where the bytes now
+sit. A recipe with no Rotate is byte-identical to before.
+
+**Found by** an editor bug hunt with nothing ungated in Bugs: reading how the editor's geometry ops reach the
+North-up surfaces after `geometry_pixel_steps` already refuses to carry a WCS through a rotate.
+
+**Left as a lead (not reproduced, by reading):** a keep-processed save *without* North up records
+`preview_north_up_deg = 0` although the bytes carry the recipe's turn, so a later North-up share/download of that
+stored preview (`orient_preview_north_up(already_deg=baked_north_up_deg(run))`) would still turn it by the full
+angle. Placement consumers already decline (`preview_crop_of_recipe` → UNKNOWN for a rotate), so only the turn is
+affected. Fixing it means recording the recipe's turn in that column, which the Sky map also reads — weigh that
+first.
+
+**Tests (+5).** `tests/webapp/test_north_up_after_recipe_rotate.py` (new): the helper; the straightened full-res
+download is unchanged by North up; a part-turned one lands at the master's orientation (a marked star's bearing);
+no-rotate unchanged; the keep-processed North-up save keeps the straightened size — three fail before. No config,
+schema, API-shape or on-disk change.
+
 ## 2026-11-13 (Builder, branch `claude/sweet-feynman-yag6up`)
 
 ### v0.506.34 — the editor's Rotate and enlarging Resize hold the canvas once, not twice

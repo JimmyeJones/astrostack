@@ -262,6 +262,26 @@ def geometry_pixel_steps(recipe, shape: tuple[int, int],
     return steps
 
 
+def recipe_rotation_deg(recipe) -> float:  # noqa: ANN001 — a Recipe
+    """The total counter-clockwise turn (deg) a recipe's *enabled* rotate ops give
+    the picture — ``0.0`` when it has none.
+
+    :func:`_rotate` turns counter-clockwise for a positive angle, the same sense as
+    :func:`seestack.render.orient.rotate_image_north_up`, and turns compose by
+    adding their angles (each one's re-centring moves pixels, never the
+    orientation). So a caller that wants the edited picture North-up has already
+    been given this much of the master's own correction, and must apply only the
+    rest — the full correction on top of a recipe that turns would turn the
+    picture twice. Mirrors :func:`_rotate`'s angle no-op guard."""
+    total = 0.0
+    for op in recipe.ops:
+        if op.enabled and op.id == "geometry.rotate":
+            angle = float(op.params.get("angle", 0.0))
+            if abs(angle) >= 1e-3:
+                total += angle
+    return total
+
+
 def rotated_shape(h: int, w: int, params: dict) -> tuple[int, int] | None:
     """The ``(out_h, out_w)`` :func:`_rotate` produces from an ``h × w`` image, or
     ``None`` when the op leaves the image as it is.

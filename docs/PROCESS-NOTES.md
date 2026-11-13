@@ -1,5 +1,11 @@
 # Process notes & QA sweep records
 
+## 2026-11-13 (Builder, branch `claude/sweet-feynman-l5vkz4`) — v0.506.35 from an editor bug hunt.
+
+- **Angle:** where the editor's geometry ops meet the North-up surfaces. `geometry_pixel_steps` already refuses to carry a WCS through a rotate, but the two renders that turn a *recipe* North-up (`render_run_recipe_fullres_png`, `_save_processed_preview`) took the master's whole WCS angle anyway → double turn (fixed). Sense checked empirically: `ndimage.rotate(axes=(0,1))` and PIL `rotate` are both CCW for a positive angle.
+- **Lead left (by reading, not reproduced):** keep-processed save without North up records 0° for bytes carrying the recipe's turn; recorded in SHIPPED.md v0.506.35. Crop/resize do not change the North angle — CLEAN.
+- The baseline suite was started before the edits and the source files were edited while it ran (against §7); the final suite was re-run on the finished tree, which is the result reported.
+
 ## 2026-11-13 (Builder, branch `claude/sweet-feynman-yag6up`) — v0.506.34; a full-resolution geometry probe otherwise CLEAN.
 
 - **`edited_shape` vs the rendered shape:** 300 random 1–3-op chains of crop / rotate (incl. 90°, 180°, 0.5°, expand off) / resize on 3–120 px canvases — 0 mismatches.
