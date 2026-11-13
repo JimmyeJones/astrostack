@@ -1,5 +1,10 @@
 # Process notes & QA sweep records
 
+## 2026-11-13 (Builder, branch `claude/sweet-feynman-aibhk1`) — v0.506.38 from the Scout's `output_basename` lead.
+
+- **Baseline:** none run separately — the setup ran, then the fix was written and the full suite run once on the finished tree: 8806 passed / 7 skipped (xdist `-n 4`, BLAS capped, 16m08s).
+- **Lead traced** (Scout 2026-11-13 sweep (4), "not traced further"): every `output_basename` consumer listed. Only two built a *path* from the raw column — the zoom clip and the deepening reel caches; fixed (`_run_artefact_stem`). Editor download files / cleanup use `safe_basename`; the rest name a download only. `seestack/post/export_scripts.py` writes the raw name into a Siril/PixInsight script string (a `"` would break the script) — desktop-GUI only, not reached by the webapp; not filed.
+
 ## 2026-11-13 (Scout, branch `claude/sweet-euler-c961hx`) — QA rotation sweep (4), new angle — hostile characters in the download filenames the routers put into `Content-Disposition`: one bug, Scout-fixed (v0.506.36). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8795 passed / 7 skipped with the fix on `fc608ce3` (xdist `-n 4`, BLAS capped, 18m09s). No open PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since

@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-11-13 (Builder, branch `claude/sweet-feynman-aibhk1`)
+
+### v0.506.38 — a typed *Output name* no longer becomes the zoom clip's path
+
+**What.** The lead the Scout's 2026-11-13 sweep (4) left ("the unsanitised `output_basename` on editor-export rows
+differs from the sanitised file stem on disk"), traced to its consumers. An editor export stores the typed *Output
+name* verbatim in `output_basename`; the zoom-clip cache (`_build_or_get_zoom_clip`, `GET …/zoom-clip`) and the
+deepening-reel cache (`_build_or_get_deepening_reel`) named their files `out_dir / f"{run.output_basename}…"`.
+Reproduced through the real export job: "M42/final" made the zoom clip **500** (`FileNotFoundError`, no such
+directory); "../escape" wrote — and on a rebuild unlinked — `escape_zoom.*` one folder **above** the target's
+`output/`; "Orion – final" cached `Orion – final_zoom.*` beside `Orion_final.fits`, which no delete ever reclaimed
+(delete / archive / merge resolve `RUN_ARTEFACT_SUFFIXES` from the FITS stem). Both caches now take
+`routers/stack._run_artefact_stem(run)`: the recorded FITS's stem (as the share and Full-res caches already do),
+then the preview's, then `safe_basename` of the column. Side effect, an improvement: an older re-stacked run (files
+archived to `{base}_{stamp}`) now finds its own archived clip instead of rebuilding over the newest run's. The
+deepening reel's newest run is a linear stack in practice, whose FITS stem equals its column, so existing reels keep
+matching their cache. The other `output_basename` consumers were read: the editor download files and their cleanup
+already go through `safe_basename`; the remaining ones only name a download (`_disposition.attachment`, v0.506.36).
+
+**Tests (+8).** `tests/webapp/test_typed_name_artefact_paths.py`: the zoom clip of an export named "M42/final",
+"../escape" and "Orion – final" answers 200 and is cached only in `output/` on the sanitised stem; deleting that
+run removes its clip; `_run_artefact_stem` never yields the raw column. All fail before. No config, schema,
+API-shape or on-disk-layout change.
+
 ## 2026-11-13 (Builder, branch `claude/sweet-feynman-c40ryk`)
 
 ### v0.506.37 — a straightened picture kept without North up records the turn it carries
