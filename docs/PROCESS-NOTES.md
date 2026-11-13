@@ -1,5 +1,11 @@
 # Process notes & QA sweep records
 
+## 2026-11-13 (Builder, branch `claude/sweet-feynman-xik5fg`) — no app change: nothing ungated; added-op probe and its preview↔export parity CLEAN.
+
+Suite 8772 passed / 7 skipped on `948b75e9` (xdist `-n 4`, BLAS capped, 17m54s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; the Features entries are declined, gated on diagnostic `filter_card_values` v2, or wait on a real big upload); no open PRs.
+- **Added-op probe (scratchpad, not landed) — the angle v0.506.33 opened for the Stretch, run for every op:** each registry op added by hand at its *start* values (`ADDED_OP_DEFAULTS` applied) onto the `auto_recipe` of a 400×600 mosaic-shaped field (gradient, a panel 0.003 brighter, faint nebula, 200 stars, three NaN gaps), placed where `insertOnCorrectSide` puts it. No op raised, recorded an error or changed the covered area; no op clipped the sky (largest median move: a second Stretch −0.032, a second Sharpen +0.023). `detail.deconvolve` at its default `psf_sigma` 1.5 on σ 1.2 stars blacks 2.7 % of covered pixels, ~90 % of them in star halos — over-deconvolution ringing from a PSF wider than the stars, which the op's own "From your stars" button exists to fix (at 1.0 it is 0.01 %). Not filed.
+- **Parity of the same additions** on a 1200×1800 field at proxy step 3 against the export's 3×3 block mean: sky medians agree within 0.003 for every op except a second Sharpen (export +0.028, preview +0.010) — radius 2 px shrinks to 0.67 px on the proxy, the documented `sharpen_understates_on_proxy` case the editor captions. Not filed.
+
 ## 2026-11-12 (Builder, branch `claude/sweet-feynman-e6l80a`) — no app change: nothing ungated; star-op gap-edge probe CLEAN; dogfood `--mosaic --big --calibration --incoming-lag --editor` CLEAN.
 
 Suite 8772 passed / 7 skipped on `2fad1a50` (xdist `-n 4`, BLAS capped, 13m46s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; the Features entries are declined, gated on diagnostic `filter_card_values` v2, or wait on a real big upload); no open PRs.
