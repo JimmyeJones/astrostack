@@ -3239,7 +3239,11 @@ async def _save_processed_preview(
     )
     from seestack.edit.ops.geometry import recipe_rotation_deg
     from seestack.edit.recipe import recipe_from_json
-    from seestack.render.thumbnail import applied_north_up_deg, orient_preview_north_up
+    from seestack.render.thumbnail import (
+        applied_north_up_deg,
+        orient_preview_north_up,
+        preview_north_up_remainder_deg,
+    )
     from seestack.stack.output import _write_preview_png
 
     # Only a run whose picture *is* a processed one has anything to keep. On an
@@ -3273,17 +3277,25 @@ async def _save_processed_preview(
         # (crop the canvas-grid quantity first, then turn it).
         crop_json = _rendered_preview_crop(project_dir, run.id, recipe, out.shape[:2])
         _write_preview_png(preview_path, out, already_display=True)
-        if not north_up:
-            return crop_json, 0.0
+        # A recipe that rotates has already turned these bytes by its own angle
+        # (the editor's Rotate turns the same way the North-up turn does), so that
+        # is what they carry until a North-up turn is added. Recording 0.0 here
+        # told every later North-up share/download/toggle that the bytes were on
+        # the canvas grid, and they turned the straightened picture by the
+        # master's whole angle a second time.
+        recipe_turn = recipe_rotation_deg(recipe)
+        if not north_up or not preview_north_up_remainder_deg(
+                run.fits_path, already_deg=recipe_turn):
+            # Nothing (more) to turn — not asked, no usable WCS, or the recipe
+            # already turned it North-up: the bytes carry the recipe's turn.
+            return crop_json, recipe_turn
         # Turn the bytes we just wrote rather than the array, so the rotation goes
         # through the one helper the share/download path uses — and record the
-        # angle from the same rules, so the two can never disagree. A recipe that
-        # rotates has already turned the picture part of the way, so only the
-        # rest of the master's correction is applied: the bytes then sit at the
-        # run's whole North-up turn, which is what is recorded.
+        # angle from the same rules, so the two can never disagree. Only the rest
+        # of the master's correction is applied: the bytes then sit at the run's
+        # whole North-up turn, which is what is recorded.
         rotated = orient_preview_north_up(
-            preview_path.read_bytes(), run.fits_path,
-            already_deg=recipe_rotation_deg(recipe))
+            preview_path.read_bytes(), run.fits_path, already_deg=recipe_turn)
         preview_path.write_bytes(rotated)
         return crop_json, applied_north_up_deg(run.fits_path)
 

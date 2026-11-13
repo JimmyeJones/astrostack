@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-11-13 (Builder, branch `claude/sweet-feynman-c40ryk`)
+
+### v0.506.37 — a straightened picture kept without North up records the turn it carries
+
+**What.** The lead v0.506.35 left (below). History's "Adjust → keep processed" save re-bakes the run's saved
+recipe into its preview; when that recipe rotates, the bytes carry the recipe's turn. With North up off,
+`routers/stack._save_processed_preview` recorded `preview_north_up_deg = 0.0` ("on the canvas grid"), so every
+later North-up surface that reads the column — the share/download/wallpaper turn
+(`orient_preview_north_up(already_deg=baked_north_up_deg(run))`) and History's toggle
+(`remaining_north_up_deg`) — turned the straightened picture by the master's whole angle a second time.
+Reproduced on a master ~30° from North-up: a recipe turned exactly North-up recorded 0.0 and still offered a
+~30° turn; a third-turned one offered the whole angle instead of two thirds. The same save *with* North up on a
+master with no usable WCS also recorded 0.0 for bytes the recipe had turned. Both now record
+`geometry.recipe_rotation_deg(recipe)` whenever no further turn is applied (not asked, no WCS, or nothing left);
+the North-up turn that does apply is unchanged and still records the whole angle. Placement consumers are
+unaffected: a rotate recipe's crop is already `UNKNOWN`, the same combination the North-up save has always
+written. A recipe with no Rotate records 0.0 exactly as before.
+
+**Tests (+3).** `tests/webapp/test_north_up_after_recipe_rotate.py`: the non-North-up save of a fully and a
+third-turned recipe records the recipe's turn and leaves only the rest to turn; the North-up save on a
+WCS-less master records the recipe's turn. All three fail before. No config, schema, API-shape or on-disk change.
+
 ## 2026-11-13 (Scout, branch `claude/sweet-euler-c961hx`)
 
 ### v0.506.36 — a download named after a typed *Output name* with a dash, accent, emoji or quote no longer fails
@@ -44,7 +66,7 @@ sit. A recipe with no Rotate is byte-identical to before.
 **Found by** an editor bug hunt with nothing ungated in Bugs: reading how the editor's geometry ops reach the
 North-up surfaces after `geometry_pixel_steps` already refuses to carry a WCS through a rotate.
 
-**Left as a lead (not reproduced, by reading):** a keep-processed save *without* North up records
+**Left as a lead (not reproduced, by reading; fixed in v0.506.37):** a keep-processed save *without* North up records
 `preview_north_up_deg = 0` although the bytes carry the recipe's turn, so a later North-up share/download of that
 stored preview (`orient_preview_north_up(already_deg=baked_north_up_deg(run))`) would still turn it by the full
 angle. Placement consumers already decline (`preview_crop_of_recipe` → UNKNOWN for a rotate), so only the turn is
