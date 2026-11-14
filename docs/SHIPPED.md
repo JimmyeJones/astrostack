@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-11-14 (Builder, branch `claude/sweet-feynman-n4gakj`)
+
+### v0.506.41 — the editor export holds fewer whole-canvas copies per op
+
+**What.** A new probe angle after v0.506.34 (geometry only): every registry op's peak *new* memory under
+`tracemalloc`, at defaults, on a 1200×1600 star field with a NaN corner, as a multiple of the picture. The
+full-resolution export (`_render_recipe_fullres`) runs each op at the canvas's own size, so on the owner's big
+mosaic rasters every temporary is a whole canvas (288 MB at 6000×4000). Worst offenders, all pure NumPy
+expression temporaries: `stars.boost_nebula` **9.4×**, `detail.sharpen` **6.4×** (clip, result, clip again, and an
+`astype` copying float32 to float32 — the op Auto adds on a clean stack), `tone.saturation` **4.7×** (on every Auto
+recipe); `_with_nan_filled` (sharpen / denoise / deconvolve / hot pixels) copied the picture twice to fill it once;
+and the export loop kept the loaded master referenced as `rgb` beside every op's output for the whole render.
+**Fix.** In-place arithmetic in the same order and a masked `np.copyto` instead of a boolean gather: boost_nebula
+→ 4.4×, sharpen → 3.1×, saturation → 2.7×, the wrapper 2.85× → 1.85× (denoise 9.1× → 8.2×, deconvolve 6.3× → 5.3×);
+`del rgb` once the loop's working array exists. **Byte-identical output**, checked over 204 op × parameter ×
+proxy-scale cases on NaN-gapped canvases including a partly-covered pixel. `detail.hot_pixels` (7.4×, inside the
+stack hot-path module `bg/hot_pixels`) and skimage's denoise internals were left alone.
+**Tests.** New `tests/test_edit_op_memory.py` (10): ratio bounds between before and after for the three ops and
+the wrapper, the export releasing the master by the second op (weakref), inputs not modified, a partly-covered
+pixel untouched — **5 fail before** (scratch revert of the four source files). No config, schema, on-disk, API
+or default change.
+
 ## 2026-11-14 (Builder, branch `claude/sweet-feynman-c49ldz`)
 
 ### v0.506.40 — the editor export applies the auto-contrast curve the preview showed

@@ -2787,6 +2787,11 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
                           rgb, recipe, coverage, frame_coverage, display_space))
     ctx.stage = "linear"
     out = as_rgb(np.asarray(rgb, dtype=np.float32))
+    # Nothing below reads the loaded master again, so let it go with the first
+    # op's result: held under its own name it stayed alive beside every op's
+    # output for the whole render — one extra full-resolution canvas at every
+    # op's peak, on the export path whose memory AGENTS.md calls deliberate.
+    del rgb
     stretched = False
     done = 0
     for op in [o for o in recipe.ops if o.enabled]:

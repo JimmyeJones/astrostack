@@ -152,9 +152,15 @@ def _saturation(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     amount = float(params.get("amount", 1.0))
     out = as_rgb(rgb).copy()
     lum = luminance(out)[..., None]
-    sat = lum + amount * (out - lum)
-    mask = finite_mask(out)
-    out[mask] = np.clip(sat[mask], 0.0, 1.0)
+    # ``lum + amount·(out − lum)``, built in one buffer and written back where
+    # covered without a boolean gather: the expression form held three temporary
+    # canvases plus two gathered copies at once (4.7× the picture on a
+    # full-resolution export). Byte-identical — IEEE multiply and add commute.
+    sat = out - lum
+    sat *= np.float32(amount)
+    sat += lum
+    np.clip(sat, 0.0, 1.0, out=sat)
+    np.copyto(out, sat, where=finite_mask(out)[..., None])
     return out
 
 
