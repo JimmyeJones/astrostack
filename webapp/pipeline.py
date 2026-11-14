@@ -2682,6 +2682,70 @@ def _nameplate_fields(fits_path: str, entry: Any, run: Any,
     )
 
 
+def _preview_curve_fits(rgb, recipe, coverage, frame_coverage,  # noqa: ANN001
+                        display_space: bool) -> dict | None:
+    """The auto-contrast curve(s) the live preview applied, for the export to reuse.
+
+    ``tone.curves`` with ``auto`` on (every one-click Auto recipe ends with one)
+    derives its points at apply time from the image entering it, and the
+    data-driven lift is **gated**: :func:`seestack.edit.curve.suggest_tone_curve`
+    lifts the midtone only when it sits ``_MIN_GAP`` above the sky's histogram
+    mode, and otherwise falls back to a shoulder-only curve. That mode is a
+    128-bin argmax and wobbles by ~0.01 between two samplings of the *same*
+    picture — and on a mosaic the gap sits right at the gate (measured 0.020–0.032
+    on a 2×2 canvas), so the preview's proxy and the export's full canvas took
+    different branches: the export's median came out 0.02 darker (or lighter)
+    than the picture the user approved, while every other op agreed to ≤0.002.
+
+    The curve's points are display-space *values*, not pixel measures, so the
+    preview's are exactly as valid at full size. So the export measures them where
+    the preview does — on the same strided proxy view of this array, with the
+    preview's context — and freezes them through the ``EditContext.fit`` channel
+    the loupe already uses. Only those points are carried: every other op still
+    measures itself at full resolution, exactly as before.
+
+    ``None`` (measure at full size, today's behaviour) when the recipe has no
+    auto curve or the proxy render fails for any reason."""
+    try:
+        import numpy as np
+
+        from seestack.edit.ops.tone import _points_are_identity
+        from seestack.edit.pipeline import apply_recipe
+        from seestack.edit.proxy import proxy_step
+        from seestack.edit.recipe import Recipe
+        from seestack.edit.registry import EditContext
+
+        enabled = [o for o in recipe.ops if o.enabled]
+        auto_idx = [i for i, o in enumerate(enabled)
+                    if o.id == "tone.curves" and o.params.get("auto")
+                    and _points_are_identity(
+                        o.params.get("points") or [[0.0, 0.0], [1.0, 1.0]])]
+        if not auto_idx:
+            return None
+        step = proxy_step(*rgb.shape[:2])
+
+        def _view(a):  # noqa: ANN001, ANN202
+            if a is None:
+                return None
+            return np.ascontiguousarray(a[::step, ::step] if step > 1 else a,
+                                        dtype=np.float32)
+
+        pctx = EditContext(proxy_scale=float(step), is_proxy=True, wcs=None,
+                           coverage=_view(coverage),
+                           frame_coverage=_view(frame_coverage),
+                           already_display=display_space)
+        prefix = Recipe(ops=enabled[:auto_idx[-1] + 1])
+        apply_recipe(_view(rgb), prefix, pctx, for_preview=True,
+                     auto_stretch=False)
+        wanted = {f"{enabled[i].uid}:points" for i in auto_idx}
+        fits = {k: v for k, v in pctx.fitted.items() if k in wanted}
+        return fits or None
+    except Exception:  # noqa: BLE001 — a failed measurement must not cost the export
+        log.warning("export: could not measure the preview's auto-contrast curve; "
+                    "measuring it at full size", exc_info=True)
+        return None
+
+
 def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
                            errors: list[str] | None = None) -> tuple[Any, Any]:
     """Apply an editor recipe to a full-res FITS. Returns ``(out_rgb, recipe)``
@@ -2716,8 +2780,11 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
     # …and the honest per-pixel frame count beside it, so the leveling op bins
     # this mosaic's panels by subs rather than by a sum of weights. None on a run
     # recorded before that sibling existed — same behaviour as before.
+    frame_coverage = load_frame_coverage(fits_path)
     ctx = EditContext(wcs=wcs, is_proxy=False, proxy_scale=1.0, coverage=coverage,
-                      frame_coverage=load_frame_coverage(fits_path))
+                      frame_coverage=frame_coverage,
+                      frozen_fits=_preview_curve_fits(
+                          rgb, recipe, coverage, frame_coverage, display_space))
     ctx.stage = "linear"
     out = as_rgb(np.asarray(rgb, dtype=np.float32))
     stretched = False
@@ -2726,6 +2793,9 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
         spec = get_op(op.id)
         if spec is None:
             continue
+        # Key fits to this op instance, as ``apply_recipe`` does, so the frozen
+        # auto-contrast curve above reaches the op it was measured for.
+        ctx.op_uid = op.uid
         try:
             out = as_rgb(spec.apply(out, op.params, ctx))
             if spec.is_stretch:
@@ -2736,6 +2806,8 @@ def _render_recipe_fullres(fits_path: str, recipe_dict: dict, progress,
             log.warning("editor op %s failed on export: %s", op.id, msg)
             if errors is not None:
                 errors.append(msg)
+        finally:
+            ctx.op_uid = None
         done += 1
         progress("render", done, n)
     if not stretched and not display_space:

@@ -102,18 +102,26 @@ def read_window_rgb(fits_path: str | Path, y0: int, x0: int,
     return np.ascontiguousarray(rgb, dtype=np.float32)
 
 
+def proxy_step(h: int, w: int, max_px: int = PROXY_MAX_PX) -> int:
+    """The stride :func:`build_proxy` decimates an ``h``×``w`` canvas by (1 = none).
+
+    Its own function so a caller holding the full-resolution array already — the
+    editor export, which needs the live preview's exact view of the picture to
+    measure what the preview measured — strides it the same way rather than
+    re-deriving the rule and drifting from it."""
+    longest = max(int(h), int(w))
+    if longest > max_px:
+        return int(np.ceil(longest / max_px))
+    return 1
+
+
 def build_proxy(fits_path: str | Path, max_px: int = PROXY_MAX_PX) -> tuple[np.ndarray, float]:
     """Return ``(proxy_rgb, proxy_scale)`` where ``proxy_scale = full_w / proxy_w``."""
     rgb = _load_fits_rgb(fits_path)
-    h, w = rgb.shape[:2]
-    longest = max(h, w)
-    if longest > max_px:
-        step = int(np.ceil(longest / max_px))
+    step = proxy_step(*rgb.shape[:2], max_px=max_px)
+    if step > 1:
         rgb = rgb[::step, ::step]
-        scale = float(step)
-    else:
-        scale = 1.0
-    return np.ascontiguousarray(rgb, dtype=np.float32), scale
+    return np.ascontiguousarray(rgb, dtype=np.float32), float(step)
 
 
 #: Side of the un-strided square :func:`source_grain_ratio` measures the noise
