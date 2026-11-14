@@ -1,5 +1,37 @@
 # Process notes & QA sweep records
 
+## 2026-11-14 (Scout, branch `claude/sweet-euler-r0r7nj`) — QA rotation sweep (1), new angle — the whole one-click Auto recipe, preview vs `_render_recipe_fullres`, at the owner's canvas scale (proxy step 5), both of Auto's noise branches, after v0.506.40's curve freeze: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8830 passed / 7 skipped on `9830c39a` (xdist `-n 4`, BLAS capped). No open PRs. Inbox: the
+  same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  `Diagnostic result:` issue yet. **Dogfood `--build --mosaic`:** CLEAN (exit 0, nothing overflowing, no console
+  errors, no 500 in `server.log`, Auto trim 7.9 %).
+- **Sweep (1), angle not run before.** Every earlier composed-Auto parity probe (the Builder's v0.506.40 taste probe,
+  the 11-13 added-op probe) ran at proxy step 2–3; the owner's mosaics sit nearer step 5 (canvas just under the
+  8000 px cap, `PROXY_MAX_PX` 1500). Driver (scratch, not landed): a synthetic 2×2 mosaic FITS with sibling
+  `_coverage` / `_framecov` maps (uneven depth 20–60, ragged NaN border, gradient, a nebula, ~14 k Gaussian stars at
+  FWHM 3.5 px), `presets.auto_recipe` built on `build_proxy`'s proxy exactly as `build_auto_recipe_for_run` does,
+  rendered on the proxy through `apply_recipe(for_preview=True)` and at full size through `_render_recipe_fullres`.
+  - **1600×2400, step 2 (control):** per-channel medians within 0.002–0.003 (export strided view), p99/p99.9 within
+    0.004, coverage mask identical.
+  - **4800×7200, step 5, noisy branch** (level_coverage → final_gradient → colour → denoise → stretch → SCNR →
+    saturation → auto curve → chroma denoise): medians within 0.0021, p99 0.706 vs 0.709, saturated fraction 0.113 %
+    vs 0.115 %, coverage identical, no op error; export 87 s.
+  - **4800×7200, step 5, clean branch** (sharpen instead of denoise): medians within 0.0046 (export a touch
+    brighter), p99 0.927 vs 0.930, saturated fraction identical, no op error.
+  - **4800×7200, step 5, noisy branch with Auto's mosaic trim on** (`_trim_rect_for_run` on the real sibling map →
+    `trim_crop`, so `geometry.crop` runs last): preview 939×1428 vs export 4696×7140 (÷5 = 939.2×1428), coverage
+    identical with no NaN left in either, medians within 0.0022, p99 0.707 vs 0.713. (The synthetic border is only
+    ~1 % ragged, so this checks the crop's placement, not a deep trim.)
+  - **Not filed (design, by reading `build_proxy`):** the proxy is *strided*, not area-averaged, so at step 5 a
+    FWHM-3.5 px star is sampled near its peak in the preview (median bright-star peak 0.95) while the export, seen
+    fit-to-screen, area-averages it (0.73); at 1:1 the export's own peak is 0.98. That is the viewer's downscale,
+    not a preview↔export divergence — the full-size loupe exists for exactly this.
+- **Not yet run in a sweep (1):** the same owner-scale Auto parity with a taste profile and a deep (>10 %) trim;
+  the saved-recipe branch of the archive's North-up turn
+  (`render_run_recipe_fullres_png`, still read only).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-14 (Builder, branch `claude/sweet-feynman-p53h60`) — no app change: nothing ungated; dogfood `--build --mosaic --editor` CLEAN, mosaic editor drive complete.
 
 - **Baseline:** 8820 passed / 7 skipped on `9d2b17c9` (xdist `-n 4`, BLAS capped, 18m07s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; the Features entries are declined, gated on diagnostic `filter_card_values` v2, or wait on a real big upload); no open PRs.
