@@ -1,5 +1,11 @@
 # Process notes & QA sweep records
 
+## 2026-11-14 (Builder, branch `claude/sweet-feynman-1xaoem`) — nothing ungated to build; saved-look / recipe-load re-read CLEAN.
+
+- **Baseline.** Suite 8830 passed / 7 skipped on `8240c996` (xdist `-n 4`, BLAS capped, 15m55s). Bugs unchanged (every open entry gated on the owner or a diagnostic result); the Features entries are declined or gated; the Autonomy/friendliness ideas re-scanned top to bottom are shipped, closed or stood down with numbers.
+- **Re-read, CLEAN.** `seestack/edit/recipe._coerce_param` / `validate_ops` against the live registry: no `int` param has a fractional `min`/`max` (which `int()` would truncate), no numeric default sits outside its range, no enum default outside its options. Saved-look crops: `_without_saved_crop` (Gallery batch, the reveal's one raw frame) and `dropSavedCrop` (editor "Use my default", "My presets") cover every seed.
+- **Considered, not filed — a saved look also replays `geometry.rotate`.** v0.502.30 drops only the crop ("framing belongs to one picture"); a look saved after straightening one picture by a few degrees would turn every other picture it is applied to by the same angle (with `expand` on, a grown canvas and wedge corners). Not a clear bug: an S30 frame is portrait, so a 90° turn may be a deliberate house style. If ever built, drop only non-right-angle turns and say so in the seed's note, like the crop. Unmeasured how often his saved looks hold a rotate — leave it unless the owner or the observer shows one.
+
 ## 2026-11-14 (Builder, branch `claude/sweet-feynman-ql3z4c`) — nothing ungated to build; dogfood `--build --mosaic --big --dithered --editor` CLEAN.
 
 - **Baseline.** Suite 8830 passed / 7 skipped on `0447a304` (xdist `-n 4`, BLAS capped, 14m24s). Bugs unchanged (every open entry gated on the owner or a diagnostic result); the three Features entries are declined or gated. Re-read without finding a fault: `_carry_hand_saved_recipe` / `_recrop_for_new_canvas` (only `geometry.crop` carries a positional param, so it is the only op a grown canvas needs re-aimed), the proxy `EditContext`s of the suggestion / histogram / loupe endpoints (all carry coverage, or freeze the whole-proxy field deltas), and `capture_nights` (solar-longitude bucketing, so a DST change cannot split a night).
