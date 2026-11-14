@@ -164,3 +164,86 @@ def test_degenerate_and_all_nan_inputs_are_left_alone():
                           sliver)
     empty = np.full((20, 20, 3), np.nan, dtype=np.float32)
     assert np.all(np.isnan(get_op(OP).apply(empty, {"strength": 1.0}, EditContext())))
+
+
+def _near_black_sky_with_coloured_stars(h=160, w=200, seed=7):
+    """What the op meets on the one-click Auto path, where it runs *after* the
+    stretch: a display-space sky the STF has pressed against black (one channel
+    at or near 0 across much of it), a colour drift on top, and a few saturated
+    coloured stars — the pixels whose chroma a wide blur pulls past an edge of
+    ``[0, 1]``."""
+    rgb = _sky_with_colour_blotch(h, w, seed) - 0.115     # sky median ~0.005
+    yy, xx = np.mgrid[0:h, 0:w]
+    rng = np.random.default_rng(seed)
+    for k in range(12):
+        cy, cx = rng.uniform(10, h - 10), rng.uniform(10, w - 10)
+        col = (np.array([1.0, 0.25, 0.05]) if k % 2 else np.array([0.1, 0.4, 1.0]))
+        rgb += (np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / (2 * 2.0 ** 2))[..., None]
+                * col).astype(np.float32)
+    return np.clip(rgb, 0.0, 1.0).astype(np.float32)
+
+
+_HARD = {"strength": 1.0, "protect_stars": False, "radius": 12.0}
+
+
+def test_after_the_stretch_it_never_pushes_a_channel_out_of_the_display_range():
+    """Run after the stretch — where Auto puts it — the op is working on a
+    display-space ``[0, 1]`` picture, and the editor export writes that picture
+    as a FITS stamped "display-space [0,1]". Blurring the chroma of a near-black
+    sky pulled single channels below 0 (and a saturated star's above 1), which
+    the PNG/TIFF then clipped: the clip changes that pixel's luminance and hue,
+    the one thing this op promises never to do. Measured before the fix on this
+    picture: a min of −0.023, on about a third of its pixels."""
+    rgb = _near_black_sky_with_coloured_stars()
+    assert rgb.min() >= 0.0 and rgb.max() <= 1.0
+    out = get_op(OP).apply(rgb, _HARD, EditContext(stage="nonlinear"))
+    assert float(out.min()) >= 0.0
+    assert float(out.max()) <= 1.0
+    # …and it does that by holding the colour change back, never by clipping:
+    # the luminance is still the input's.
+    assert float(np.max(np.abs(luminance(out) - luminance(rgb)))) < 1e-6
+
+
+def test_the_range_guard_reaches_the_editor_through_a_recipe():
+    """The pipeline is what tells the op it is past the stretch (``ctx.stage``),
+    so pin the real path a preview and an export take, not just the op."""
+    from seestack.edit.pipeline import apply_recipe
+    from seestack.edit.recipe import OpInstance, Recipe
+
+    rgb = _near_black_sky_with_coloured_stars()
+    recipe = Recipe(ops=[
+        OpInstance("tone.levels", {"black": 0.0, "white": 1.0, "gamma": 1.0}),
+        OpInstance(OP, dict(_HARD)),
+    ])
+    out = apply_recipe(rgb, recipe, EditContext(already_display=True))
+    assert float(np.nanmin(out)) >= 0.0 and float(np.nanmax(out)) <= 1.0
+
+    linear = np.clip(rgb, 1e-4, None) ** 2.2
+    recipe = Recipe(ops=[OpInstance("tone.stretch", {"mode": "stf"}), OpInstance(OP, dict(_HARD))])
+    out = apply_recipe(linear, recipe, EditContext())
+    assert float(np.nanmin(out)) >= 0.0 and float(np.nanmax(out)) <= 1.0
+
+
+def test_pixels_the_range_guard_does_not_need_are_left_exactly_as_before():
+    """The guard only ever holds back a pixel that would have left the range, so
+    every other pixel — the whole sky of an ordinary picture — is byte-for-byte
+    what the op always produced; and on linear data, before the stretch, where
+    ``[0, 1]`` is no bound at all, nothing changes."""
+    rgb = _near_black_sky_with_coloured_stars()
+    linear_ctx = get_op(OP).apply(rgb, _HARD, EditContext())
+    display = get_op(OP).apply(rgb, _HARD, EditContext(stage="nonlinear"))
+    in_range = ((linear_ctx >= 0.0) & (linear_ctx <= 1.0)).all(axis=-1)
+    assert in_range.mean() > 0.5 and not in_range.all()
+    assert np.array_equal(display[in_range], linear_ctx[in_range])
+    # Before the stretch it is the unbounded op it always was.
+    assert float(linear_ctx.min()) < 0.0
+
+
+def test_the_range_guard_keeps_mosaic_gaps_nan():
+    rgb = _near_black_sky_with_coloured_stars()
+    rgb[:, 120:140] = np.nan
+    out = get_op(OP).apply(rgb, _HARD, EditContext(stage="nonlinear"))
+    assert np.isnan(out[:, 120:140]).all()
+    fin = out[np.isfinite(out)]
+    assert np.isfinite(out[:, :120]).all() and np.isfinite(out[:, 140:]).all()
+    assert fin.min() >= 0.0 and fin.max() <= 1.0

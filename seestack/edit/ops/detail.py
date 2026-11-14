@@ -520,7 +520,53 @@ def _chroma_denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarr
         d_new = np.where(ok, d + blend * (smoothed - d), d)
         out[..., c] = y + d_new
     out[~mask] = np.nan  # never invent colour over a mosaic gap
+    if ctx.stage == "nonlinear" or ctx.already_display:
+        _hold_chroma_in_display_range(as_rgb(rgb), out, mask)
     return out
+
+
+def _hold_chroma_in_display_range(before: np.ndarray, out: np.ndarray,
+                                  mask: np.ndarray) -> None:
+    """Scale back, in place, the colour change of any pixel :func:`_chroma_denoise`
+    would push out of the display range ``[0, 1]``.
+
+    Past the stretch — where the one-click Auto recipe runs this op — the picture
+    is display-space, and blurring the chroma of a sky the STF has pressed
+    against black pulls single channels below 0 (and a saturated star's above 1).
+    The PNG/TIFF then clip them, which changes that pixel's luminance and hue —
+    the one thing this op promises never to do — and the display-space FITS the
+    export stamps "[0,1]" carries them as they are.
+
+    The fix keeps that promise rather than clipping: every pixel's change
+    ``out − before`` has zero luminance (``Σ w_c·Δ_c = 0``), so any fraction
+    ``t`` of it does too. Each pixel takes the largest ``t ≤ 1`` that keeps all
+    three channels inside ``[min(0, before), max(1, before)]`` (``t = 0`` always
+    qualifies, so a solution exists, and an input already outside the range is
+    never made worse). Pixels that never left the range keep ``t = 1`` and are
+    byte-for-byte what the op always produced. One plane at a time, so a mosaic
+    export holds no extra RGB canvas.
+    """
+    t = np.ones(mask.shape, dtype=np.float32)
+    for c in range(3):
+        b = before[..., c]
+        delta = out[..., c] - b
+        with np.errstate(divide="ignore", invalid="ignore"):
+            room = np.where(delta > 0, (np.maximum(b, 1.0) - b) / delta,
+                            np.where(delta < 0, (np.minimum(b, 0.0) - b) / delta,
+                                     np.float32(1.0)))
+        np.minimum(t, np.where(mask, room, np.float32(1.0)).astype(np.float32), out=t)
+    np.maximum(t, 0.0, out=t)
+    held = t < 1.0
+    if not held.any():
+        return
+    th = t[held]
+    for c in range(3):
+        b = before[..., c][held]
+        plane = out[..., c]
+        # The clip only absorbs float32 rounding of ``b + t·Δ`` at the bound
+        # (~1e-9), far below anything the luminance test can see.
+        plane[held] = np.clip(b + th * (plane[held] - b),
+                              np.minimum(b, 0.0), np.maximum(b, 1.0))
 
 
 # The smallest PSF sigma we'll represent on the (decimated) preview proxy. A

@@ -96,6 +96,57 @@ def test_scnr_protected_still_removes_a_real_green_cast():
     assert float(protected[..., 1].mean()) < 0.20
 
 
+def _black_clipped_green_sky(h: int = 96, w: int = 96) -> np.ndarray:
+    """A display-space sky the stretch has pressed against black, with a broad
+    green excess and per-pixel noise: many pixels' own green sits *below* the
+    smoothed excess SCNR subtracts — Auto's SCNR runs right after its stretch."""
+    rng = np.random.default_rng(3)
+    r = np.clip(0.01 + rng.normal(0, 0.012, (h, w)), 0.0, 1.0)
+    g = np.clip(0.04 + rng.normal(0, 0.012, (h, w)), 0.0, 1.0)
+    b = np.clip(0.01 + rng.normal(0, 0.012, (h, w)), 0.0, 1.0)
+    return np.stack([r, g, b], axis=-1).astype(np.float32)
+
+
+def test_scnr_after_the_stretch_never_pushes_green_below_black():
+    """Past the stretch the picture is display-space ``[0, 1]`` and the editor
+    export writes it as a FITS stamped "display-space [0,1]". Subtracting a
+    *smoothed* green excess from a black-clipped pixel drove its green negative
+    (before the fix: min −0.03 here), which the FITS carried and every later op
+    received. Green now bottoms out at 0 — what the picture already showed."""
+    rgb = _black_clipped_green_sky()
+    op = get_op("tone.scnr")
+    out = op.apply(rgb, {"amount": 1.0}, EditContext(stage="nonlinear"))
+    assert float(out[..., 1].min()) >= 0.0
+    # A re-edited export (display-space input before any stretch) is guarded too.
+    out = op.apply(rgb, {"amount": 1.0}, EditContext(already_display=True))
+    assert float(out[..., 1].min()) >= 0.0
+
+
+def test_scnr_display_floor_changes_only_the_pixels_it_must():
+    """Every pixel that stayed in range is byte-for-byte the op's old result, an
+    input already below 0 is never pulled further down *or* lifted, red/blue are
+    untouched, and on linear data (before the stretch) nothing changes at all."""
+    rgb = _black_clipped_green_sky()
+    rgb[0, :8, 1] = -0.05                     # arrived below black
+    op = get_op("tone.scnr")
+    linear = op.apply(rgb, {"amount": 1.0}, EditContext())
+    display = op.apply(rgb, {"amount": 1.0}, EditContext(stage="nonlinear"))
+    assert float(linear[..., 1].min()) < -0.05   # linear: unbounded, as always
+    kept = linear[..., 1] >= 0.0
+    assert 0.0 < kept.mean() < 1.0
+    assert np.array_equal(display[..., 1][kept], linear[..., 1][kept])
+    assert np.array_equal(display[..., 0], linear[..., 0])
+    assert np.array_equal(display[..., 2], linear[..., 2])
+    assert np.allclose(display[0, :8, 1], -0.05)
+
+
+def test_scnr_display_floor_keeps_nan_gaps():
+    rgb = _with_nan_border(_black_clipped_green_sky())
+    out = get_op("tone.scnr").apply(rgb, {"amount": 1.0}, EditContext(stage="nonlinear"))
+    assert np.isnan(out[:3]).all()
+    assert np.isfinite(out[3:]).all() and float(out[3:, :, 1].min()) >= 0.0
+
+
 def test_scnr_average_removes_at_least_as_much_green_as_maximum():
     """Locks the 'Protect' modes' relative strength against tooltip drift.
 

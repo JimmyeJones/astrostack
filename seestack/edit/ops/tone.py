@@ -293,7 +293,17 @@ def _scnr(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     n_s = gaussian_filter(np.where(mask, neutral, n_med).astype(np.float32),
                           sigma=sigma, mode="nearest")
     excess = np.clip(g_s - n_s, 0.0, None)
-    out[..., 1] = g - amount * excess  # g is NaN over gaps → stays NaN
+    new_g = g - amount * excess  # g is NaN over gaps → stays NaN
+    if ctx.stage == "nonlinear" or ctx.already_display:
+        # Past the stretch the picture is display-space [0, 1], and the excess is
+        # a *smoothed* estimate: on a pixel the STF pressed to black it is larger
+        # than that pixel's own green, which went negative (measured −0.026). The
+        # PNG/TIFF clip it back to 0 anyway, but the display-space FITS the
+        # export stamps "[0,1]" carried it, and every later op received it. So
+        # green bottoms out at 0 — what the picture already showed — or at its
+        # own value if it arrived below 0 (never made worse). NaN stays NaN.
+        new_g = np.where(new_g < 0.0, np.minimum(g, 0.0), new_g)
+    out[..., 1] = new_g
     return out
 
 

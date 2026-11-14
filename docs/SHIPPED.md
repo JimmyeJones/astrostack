@@ -1,5 +1,33 @@
 # Shipped — the record
 
+## 2026-11-14 (Builder, branch `claude/sweet-feynman-3stkp2`)
+
+### v0.506.39 — Auto's last colour steps no longer push a channel out of the display range
+
+**What.** Found by a new probe: random chains of every editor op (random params, schema bounds included) on a
+mosaic-shaped canvas with ragged NaN gaps, at full size and on a step-3 proxy, checking that covered pixels stay
+finite, gaps stay NaN and the display-space result stays in `[0, 1]`. Coverage held everywhere; the range did not,
+and every failing chain ended in one of two ops the one-click Auto recipe runs *after* its stretch.
+`detail.chroma_denoise` (`_chroma_denoise`, Auto's last tone/detail op) blurs each pixel's chroma; on a sky the STF
+has pressed against black that pulls single channels below 0 (up to −0.09 / +1.09 at user strength), and the
+PNG/TIFF clip then changed those pixels' luminance and hue — the one thing the op promises never to do.
+`tone.scnr`'s noise-protected path subtracts a *smoothed* green excess, larger than a black-clipped pixel's own
+green, driving it negative (−0.026 in the fuzz, −0.03 in the test). The display-space FITS an editor export stamps
+"[0,1]" carried both, and every later op received them. On the Auto recipe itself it was small (−0.001…−0.003 on
+≤0.13 % of pixels) but on the default path.
+**Fix, display-space only** (`ctx.stage == "nonlinear"` or `ctx.already_display`; linear data is untouched):
+chroma smoothing scales back each offending pixel's colour change by the largest `t ≤ 1` that keeps all three
+channels in range (`_hold_chroma_in_display_range`) — the change has zero luminance, so any fraction of it does
+too, and the luminance invariant still holds to 1e-6; SCNR's green bottoms out at 0 (or at its own value if it
+arrived below). Pixels that never left the range are byte-for-byte unchanged; an input already out of range is
+never made worse; NaN gaps stay NaN.
+
+**Tests (+7, five fail before).** `tests/test_edit_chroma_denoise.py` (+4: stays in range past the stretch with
+luminance preserved; through `apply_recipe` after a stretch and on a re-edited display-space export; in-range pixels
+and the linear stage byte-identical; gaps stay NaN) and `tests/test_edit_tone_ops.py` (+3: SCNR green ≥ 0 past the
+stretch and on display input; only the negative pixels change, red/blue untouched, linear unbounded as before; gaps
+stay NaN). No config, schema, API or on-disk change.
+
 ## 2026-11-13 (Builder, branch `claude/sweet-feynman-aibhk1`)
 
 ### v0.506.38 — a typed *Output name* no longer becomes the zoom clip's path
