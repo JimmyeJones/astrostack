@@ -1,5 +1,35 @@
 # Shipped — the record
 
+## 2026-11-14 (Builder, branch `claude/sweet-feynman-c49ldz`)
+
+### v0.506.40 — the editor export applies the auto-contrast curve the preview showed
+
+**What.** Found by a new probe: the one-click Auto recipe built with each taste-feedback cue saturated (×3) on a
+2×2 mosaic-shaped canvas with NaN gaps, rendered on the proxy and at full size. Every op agreed to ≤0.002 except
+`tone.curves(auto=True)` — Auto's last tonal op — which on two profiles ("too green", "core clipped") put the
+export's median **0.028 brighter** than the preview the user approved (end to end through `build_proxy` and
+`_render_recipe_fullres`, 1800×2600 canvas, proxy step 2; neutral 0.0007). Over three seeds × five profiles, 4 of
+15 renders were 0.0095–**0.045** apart in median before; after, all 15 are within 0.001. Cause: the curve derives its points at
+apply time, and `suggest_tone_curve`'s midtone lift is gated on `median − sky mode ≥ 0.02`; the sky mode is a
+128-bin argmax that wobbles 0.005–0.017 between 2×2 subsamples of the *same* image, and the mosaic's gap read
+0.020–0.032 — so the preview's proxy and the export's full canvas fell on opposite sides of the gate (lift vs the
+shoulder-only fallback). No smoothed/rebinned mode estimator was steadier on the existing sky fixtures (measured,
+six variants), and a soft gate would only shrink the jump, so the fix carries the measurement instead.
+**Fix.** `webapp/pipeline._preview_curve_fits`: when a recipe has an enabled auto curve on the identity line, the
+export renders the recipe's prefix up to it on the preview's own proxy view of the loaded array (new
+`seestack.edit.proxy.proxy_step`, now also what `build_proxy` strides by; the preview's context: strided coverage
+and frame coverage, `is_proxy`, no WCS) and freezes **only those points** into the export through the
+`EditContext.fit` channel the loupe uses; `_render_recipe_fullres` now sets `ctx.op_uid` per op so the key
+reaches that instance. Curve points are display values, not pixel measures, so they hold at full size. Every other
+op still measures itself at full size; a hand-drawn curve is untouched; any failure logs and measures at full size
+as before. Cost: one proxy-sized prefix render per export of an Auto-edited picture.
+
+**Tests (+7, the parity test fails before).** `tests/webapp/test_export_auto_curve_parity.py`: a fixture whose
+proxy grid and full canvas deterministically take different branches (premise pinned); export equals the preview's
+curve applied at full size; hand-shaped curve unchanged; no auto curve ⇒ no proxy pass; only the curve's points are
+frozen, keyed by uid; a failed measurement falls back; `proxy_step` matches `build_proxy`. No config, schema, API,
+default or on-disk change.
+
 ## 2026-11-14 (Builder, branch `claude/sweet-feynman-3stkp2`)
 
 ### v0.506.39 — Auto's last colour steps no longer push a channel out of the display range
