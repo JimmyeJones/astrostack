@@ -1,5 +1,12 @@
 # Process notes & QA sweep records
 
+## 2026-11-14 (Builder, branch `claude/sweet-feynman-3stkp2`) — v0.506.39 from a random-chain editor-op fuzz.
+
+- **Baseline:** 8806 passed / 7 skipped (xdist `-n 4`, BLAS capped, 19m14s).
+- **Probe (new angle):** 120 random recipes (0–4 linear ops, a stretch, 0–5 display ops; every param drawn uniformly or pinned at its schema min/max) on a 300×900 three-panel canvas with ragged NaN gaps and uneven depth, rendered full-size and on a step-3 proxy. Invariants: covered stays finite, gap stays NaN, display result in `[0, 1]`, no op error. Coverage held in every case; the range failures were `detail.chroma_denoise` and `tone.scnr` past the stretch — fixed (v0.506.39). After the fix: 0 range failures over three seeds.
+- **Not filed:** one chain had `background.final_gradient` at its extremes (detect σ 1.78, dilate 64 px, box 1017 px on a 300 px-tall canvas) mask every pixel and report "All input pixels are masked" — surfaced as an op error by design, the render continues; not reachable at sane settings on a real canvas.
+- **Also read, CLEAN:** the rotation siblings of v0.506.35/.37 — a recipe that rotates makes `preview_crop_of_recipe` answer UNKNOWN, so the scale bar, rose and labels decline rather than assume an expanded canvas (`expand` off included); `compute_histogram` is NaN-aware.
+
 ## 2026-11-13 (Builder, branch `claude/sweet-feynman-aibhk1`) — v0.506.38 from the Scout's `output_basename` lead.
 
 - **Baseline:** none run separately — the setup ran, then the fix was written and the full suite run once on the finished tree: 8806 passed / 7 skipped (xdist `-n 4`, BLAS capped, 16m08s).
