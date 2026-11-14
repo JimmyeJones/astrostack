@@ -1,5 +1,11 @@
 # Process notes & QA sweep records
 
+## 2026-11-14 (Builder, branch `claude/sweet-feynman-p53h60`) — no app change: nothing ungated; dogfood `--build --mosaic --editor` CLEAN, mosaic editor drive complete.
+
+- **Baseline:** 8820 passed / 7 skipped on `9d2b17c9` (xdist `-n 4`, BLAS capped, 18m07s). Bugs unchanged (every open entry gated on the owner or a diagnostic result; the Features entries are declined, gated on diagnostic `filter_card_values` v2, or wait on a real big upload); no open PRs.
+- **Dogfood, run alone under a 110-minute cap** (the 2026-11-13 six-flag pass was killed mid-*mosaic* editor drive): ~40 min end to end. Both editor drives re-rendered all 21 ops (mosaic: a steady ~17 s per op with every op stacked — the harness's waits, not a slowdown), Undo/Redo applied, the mosaic's "What Auto-process did" names the panel evening and the 8 % trim, taste chips 10 live / 2 at-limit and reset. Page probe: nothing overflowing, no console errors; `server.log` has no 500. The mosaic paragraph reads as one: panel map (top-right 30 s vs 1 min), `grain_uneven` (23 % at 3 subs vs 6) and next-best-move ("about 3 fields of sky, a typical part 1 min") agree.
+- **Read, CLEAN:** `_preview_curve_fits` (v0.506.40) against the live preview — same `proxy_step`, same strided coverage, and the no-stretch fallback STF runs *after* every op in both `apply_recipe` and `_render_recipe_fullres`, so a recipe with its Stretch removed measures the auto curve on the same (linear) input in both. Every full-size render (`render_run_recipe_fullres_png`, batch exports, keep-processed) goes through `_render_recipe_fullres`. `merge.py`'s `n_skipped_missing_file` mislabel is read only by the deprioritised desktop GUI — left in the Minor list.
+
 ## 2026-11-14 (Builder, branch `claude/sweet-feynman-3stkp2`) — v0.506.39 from a random-chain editor-op fuzz.
 
 - **Baseline:** 8806 passed / 7 skipped (xdist `-n 4`, BLAS capped, 19m14s).
