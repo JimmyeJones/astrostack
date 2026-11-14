@@ -21,12 +21,17 @@ from seestack.edit.registry import (
 
 
 def _with_nan_filled(rgb: np.ndarray, fn):
-    """Run ``fn`` on a NaN-free copy (uncovered → per-channel median), restore NaN."""
-    out = as_rgb(rgb).copy()
-    mask = finite_mask(out)
+    """Run ``fn`` on a NaN-free copy (uncovered → per-channel median), restore NaN.
+
+    ``fn`` is handed a private copy it may overwrite. Exactly **one** copy is
+    made: the coverage mask is read off it before it is filled. (It used to copy
+    the picture twice — once to read the mask from and once to fill — which on a
+    full-resolution export is a whole extra canvas held through every detail op;
+    ``tests/test_edit_op_memory.py``.)"""
+    filled = as_rgb(rgb).copy()
+    mask = finite_mask(filled)
     if not mask.any():
-        return out
-    filled = out.copy()
+        return filled
     for c in range(3):
         chan = filled[..., c]
         med = float(np.nanmedian(chan)) if np.isfinite(chan).any() else 0.0
@@ -351,12 +356,18 @@ def _sharpen(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         # per-channel Gaussian blur is deterministic and identical in effect:
         # sharp = img + amount·(img − blur), matching skimage's mode="nearest".
         from scipy.ndimage import gaussian_filter
-        src = np.clip(img, 0.0, 1.0)
+        # ``img`` is ``_with_nan_filled``'s private copy, so it is clipped in
+        # place and the result clipped in place too: one canvas for the result
+        # and one plane at a time for the blur, instead of four whole canvases
+        # (clip, result, clip again, and an ``astype`` that copies a float32
+        # array to float32). Byte-identical — the same arithmetic, in the same
+        # order, on the same dtype.
+        src = np.clip(img, 0.0, 1.0, out=img)
         out = np.empty_like(src)
         for c in range(3):
             blurred = gaussian_filter(src[..., c], sigma=radius, mode="nearest")
             out[..., c] = src[..., c] + amount * (src[..., c] - blurred)
-        return np.clip(out, 0.0, 1.0).astype(np.float32)
+        return np.clip(out, 0.0, 1.0, out=out)
 
     return _with_nan_filled(rgb, run)
 

@@ -109,17 +109,26 @@ def _boost_nebula(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray
         return out
 
     bg = (1.0 - star_mask(out, size_px=size, ctx=ctx))[..., None]  # 1 on background
-    clipped = np.clip(out, 0.0, 1.0)
-    lum = luminance(clipped)[..., None]
+    # One working canvas carried through every step in place, and a masked
+    # write-back instead of a boolean gather: the expression form held up to
+    # nine whole canvases at once (``tests/test_edit_op_memory.py``), on an op a
+    # full-resolution export runs at the picture's own size. Byte-identical —
+    # the same float32 arithmetic in the same order (IEEE multiply/add commute).
+    work = np.clip(out, 0.0, 1.0)
+    lum = luminance(work)[..., None]
     # Gamma lift brightens midtones; a mild saturation boost adds colour.
     gamma = max(0.2, 1.0 - 0.6 * amount)
-    brightened = clipped ** gamma
-    saturated = lum + (1.0 + 0.5 * amount) * (brightened - lum)
-    target = np.clip(saturated, 0.0, 1.0)
+    np.power(work, np.float32(gamma), out=work)          # brightened
+    work -= lum
+    work *= np.float32(1.0 + 0.5 * amount)
+    work += lum                                          # saturated
+    np.clip(work, 0.0, 1.0, out=work)                    # target
 
     w = bg * amount  # only touch background, scaled by strength
-    blended = out * (1.0 - w) + target * w
-    out[cover] = blended[cover]
+    work *= w                                            # target · w
+    blended = out * (1.0 - w)
+    blended += work
+    np.copyto(out, blended, where=cover[..., None])
     return out
 
 
