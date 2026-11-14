@@ -1,5 +1,10 @@
 # Process notes & QA sweep records
 
+## 2026-11-14 (Builder, branch `claude/sweet-feynman-ql3z4c`) — nothing ungated to build; dogfood `--build --mosaic --big --dithered --editor` CLEAN.
+
+- **Baseline.** Suite 8830 passed / 7 skipped on `0447a304` (xdist `-n 4`, BLAS capped, 14m24s). Bugs unchanged (every open entry gated on the owner or a diagnostic result); the three Features entries are declined or gated. Re-read without finding a fault: `_carry_hand_saved_recipe` / `_recrop_for_new_canvas` (only `geometry.crop` carries a positional param, so it is the only op a grown canvas needs re-aimed), the proxy `EditContext`s of the suggestion / histogram / loupe endpoints (all carry coverage, or freeze the whole-proxy field deltas), and `capture_nights` (solar-longitude bucketing, so a DST change cannot split a night).
+- **Dogfood, flags not combined before.** Exit 0. Scale diff: 0 of 16 canvas-independent answers moved (`trim_fraction` 0.079 → 0.067 and the framing level are the documented honest movers). Auto trim 7.9 % on the 2×2, 30.7 % on the dithered shape against its recorded 30.3 % apron. Field, mosaic, full-size and dithered editor drives each re-rendered every op with Undo/Redo and the taste chips working. Nothing overflowing, no console errors, no 500 in `server.log`.
+
 ## 2026-11-14 (Scout, branch `claude/sweet-euler-r0r7nj`) — QA rotation sweep (1), new angle — the whole one-click Auto recipe, preview vs `_render_recipe_fullres`, at the owner's canvas scale (proxy step 5), both of Auto's noise branches, after v0.506.40's curve freeze: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8830 passed / 7 skipped on `9830c39a` (xdist `-n 4`, BLAS capped). No open PRs. Inbox: the
