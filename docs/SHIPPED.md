@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-11-15 (Builder, branch `claude/sweet-feynman-ldo8r3`)
+
+### v0.506.42 — a straightened picture kept without North up downloads as the picture on screen
+
+**What.** A regression from v0.506.37. That release made History's "Adjust → keep processed" save (North up off) of
+a recipe that rotates record the recipe's own turn in `preview_north_up_deg`, because the stored bytes carry it.
+`pipeline.render_run_full_res_png` — the one renderer behind the **Full-res PNG** button and the **whole-library
+pictures archive** — still read *any* non-zero recorded angle as "a past North-up save baked a turn" and rendered
+North-up. Reproduced on a master 150° from North: a recipe turned 50° and kept without North up showed a 135 px
+preview and downloaded a 157 px picture turned all 150° North-up. **Fix.** New `_stored_bytes_carry_north_up`:
+with a saved recipe to replay, only an angle beyond the recipe's own `geometry.recipe_rotation_deg` (compared
+modulo 360° within the Rotate op's 1e-3° threshold) means North up was baked in; no recipe, or an unreadable one,
+keeps today's reading. A keep-processed *North-up* save of a part-turned recipe records the master's whole angle
+and still downloads North-up. The other readers of the column were checked: the share/wallpaper/preview turns take
+a remainder (`already_deg`), and the native-source gate, the trim backfill, the load-size estimate and the Sky
+map's turned grid all decline on a non-zero angle or a rotate recipe's `UNKNOWN` crop — conservative, not wrong.
+
+**Tests (+4).** `tests/webapp/test_north_up_after_recipe_rotate.py`: the download after a third- and a
+fully-straightened keep-processed save equals the recipe's own render, with and without `north_up`; a North-up
+save of a part-turned recipe still downloads North-up; the helper's cases (incl. two turns summing past a half
+turn). The third-turned download and the helper test fail before. No config, schema, API-shape or on-disk change.
+
 ## 2026-11-14 (Builder, branch `claude/sweet-feynman-n4gakj`)
 
 ### v0.506.41 — the editor export holds fewer whole-canvas copies per op
