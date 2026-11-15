@@ -2917,6 +2917,34 @@ def render_run_recipe_fullres_png(
     return buf.getvalue()
 
 
+def _stored_bytes_carry_north_up(baked_deg: float, recipe_dict: dict | None) -> bool:
+    """Whether a run's stored preview carries a **North-up** turn beyond what
+    re-rendering ``recipe_dict`` reproduces by itself.
+
+    ``baked_deg`` is :func:`~webapp.preview_orient.baked_north_up_deg`: how far
+    the stored bytes sit from the canvas grid. With no recipe to replay any
+    non-zero angle is a North-up save. With one, the recipe's own enabled
+    Rotate ops (:func:`~seestack.edit.ops.geometry.recipe_rotation_deg`) account
+    for that much of it — a keep-processed save without North up records exactly
+    that — and only an angle beyond it means North up was asked for. Compared
+    modulo 360° within the Rotate op's own 1e-3° no-op threshold.
+    """
+    baked = float(baked_deg or 0.0)
+    if not baked:
+        return False
+    if recipe_dict is None:
+        return True
+    try:
+        from seestack.edit.ops.geometry import recipe_rotation_deg
+        from seestack.edit.recipe import recipe_from_dict
+
+        own = recipe_rotation_deg(recipe_from_dict(recipe_dict))
+    except Exception:  # noqa: BLE001 — an unreadable recipe: today's reading
+        return True
+    # Turns compose modulo a whole turn, so 150° and -210° are the same bytes.
+    return abs((baked - own + 180.0) % 360.0 - 180.0) >= 1e-3
+
+
 def render_run_full_res_png(
     run, recipe_json: str | None, *,  # noqa: ANN001 — a StackRunRow, detached from the DB
     north_up: bool = False, max_long_edge: int = 8000, trim_border: bool = False,
@@ -2964,7 +2992,15 @@ def render_run_full_res_png(
     # the stored bytes carry one, whether or not the caller asked for it — and
     # asking for it as well is the same render, not a second rotation, because
     # both mean "the run's own full North-up correction".
-    render_north_up = bool(north_up) or bool(baked_north_up_deg(run))
+    #
+    # Not *every* recorded angle is a North-up turn, though: History's "Adjust →
+    # keep processed" save of a recipe that rotates records the recipe's own turn
+    # (v0.506.37), because that is how far those bytes sit from the canvas grid.
+    # This render replays that recipe, so it already carries that turn — reading
+    # it as "North up was baked" turned a picture straightened by hand all the way
+    # North-up, a download that no longer matched the picture on screen.
+    render_north_up = bool(north_up) or _stored_bytes_carry_north_up(
+        baked_north_up_deg(run), recipe_dict)
 
     if recipe_dict is not None:
         return render_run_recipe_fullres_png(

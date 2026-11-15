@@ -1,5 +1,12 @@
 # Process notes & QA sweep records
 
+## 2026-11-15 (Builder, branch `claude/sweet-feynman-ldo8r3`) — v0.506.42, a regression from v0.506.37 found by running a probe the Scout had left read-only.
+
+- **Baseline.** Suite 8830 passed / 7 skipped on `c3fad508` (xdist `-n 4`, BLAS capped, 18m10s). Bugs unchanged (every open entry gated on the owner or a diagnostic result); the Features entries are declined or gated.
+- **Probe.** The Scout's 2026-11-14 sweep (1) listed "the saved-recipe branch of the archive's North-up turn (`render_run_recipe_fullres_png`, still read only)" as not yet run. Run through the real History save rather than the renderer alone: master 150° from North, a Rotate of 50° added to the saved Auto recipe, `POST …/preview {keep_processed, north_up: false}` → `preview_north_up_deg` 50 (v0.506.37), stored preview 135 px; `GET …/full-res-png` came back 157 px — the full North-up turn. Cause: `render_run_full_res_png` treats any recorded angle as a North-up save, a premise v0.506.37 broke. Fixed (v0.506.42).
+- **Every other reader of `preview_north_up_deg` checked by reading:** share/wallpaper/preview `?north_up` take a remainder via `already_deg` (right under v0.506.37's semantics); `_native_picture_gate`, the unedited-trim backfill (`pipeline` ~3086/3142), `full_res_load_decimates` and the Sky map / annotation turned grid decline on a non-zero angle or on a rotate recipe's `UNKNOWN` crop — conservative, not wrong. `recovered_north_up_deg` (NULL column only) needs an exact North-up size match, so an editor-rotated export is not misread.
+- **Lesson:** a change to what a column *means* (v0.506.37: "the turn the bytes carry" instead of "the North-up turn") needs every reader grepped, not just the one the bug was reported against.
+
 ## 2026-11-15 (Builder, branch `claude/sweet-feynman-qbqvng`) — nothing ungated to build; per-op preview↔export parity at the parameter extremes, and every op on degenerate canvases, both CLEAN.
 
 - **Baseline.** Suite 8830 passed / 7 skipped on `866396ca` (xdist `-n 4`, BLAS capped, 18m17s). Bugs unchanged (every open entry gated on the owner or a diagnostic result); the three Features entries are declined or gated. `merge.MergeResult.n_skipped_missing_file` (Minor list) re-checked: only the deprioritised desktop GUI reads it — left alone.

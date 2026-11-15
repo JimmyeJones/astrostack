@@ -245,3 +245,93 @@ def test_keep_processed_north_up_save_without_a_wcs_records_the_recipes_turn(
                     json={"keep_processed": True, "north_up": True})
     assert r.status_code == 200
     assert _run_row(solved_library, safe, run_id).preview_north_up_deg == pytest.approx(25.0)
+
+
+def _saved_recipe(data_root, safe: str, run_id: int) -> dict:
+    from seestack.io.library import Library
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return json.loads(proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}"))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+@pytest.mark.parametrize("fraction", [1.0 / 3.0, 1.0])
+def test_full_res_download_of_a_straightened_keep_processed_save_is_not_turned_north_up(
+        client, solved_library, fraction):
+    """The keep-processed save without North up records the recipe's own turn
+    (v0.506.37). The Full-res PNG download (and the pictures archive, which
+    shares ``render_run_full_res_png``) read *any* recorded angle as "a North-up
+    save baked a turn" and turned the picture the rest of the way North-up: a
+    third-straightened 135 px preview downloaded as a 157 px North-up picture.
+    It must be the recipe's render, exactly — the picture on screen, bigger."""
+    from seestack.render.thumbnail import stack_north_up_deg
+    from webapp.pipeline import render_run_recipe_fullres_png
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, _preview = _register_run(solved_library, safe, rot_deg=30.0)
+    assert _auto_edit(solved_library, safe, run_id) is not None
+    fits_path = _run_row(solved_library, safe, run_id).fits_path
+    angle = stack_north_up_deg(fits_path)
+    assert angle is not None and abs(angle) > 5
+    _add_rotate_to_saved_recipe(solved_library, safe, run_id, angle * fraction)
+    r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                    json={"keep_processed": True, "north_up": False})
+    assert r.status_code == 200
+    recipe = _saved_recipe(solved_library, safe, run_id)
+
+    got = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    assert got.status_code == 200
+    assert got.content == render_run_recipe_fullres_png(fits_path, recipe, north_up=False)
+
+    # Asking for North up still lands it North-up — only the rest of the turn.
+    got_n = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png",
+                       params={"north_up": True})
+    assert got_n.status_code == 200
+    assert got_n.content == render_run_recipe_fullres_png(fits_path, recipe, north_up=True)
+
+
+def test_full_res_download_after_a_north_up_save_of_a_part_turned_recipe_stays_north_up(
+        client, solved_library):
+    """The other half: a keep-processed save *with* North up of a recipe that
+    turned a third of the way records the master's whole angle, and the
+    download must still carry the North-up turn without being asked."""
+    from seestack.render.thumbnail import stack_north_up_deg
+    from webapp.pipeline import render_run_recipe_fullres_png
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, _preview = _register_run(solved_library, safe, rot_deg=30.0)
+    assert _auto_edit(solved_library, safe, run_id) is not None
+    fits_path = _run_row(solved_library, safe, run_id).fits_path
+    angle = stack_north_up_deg(fits_path)
+    _add_rotate_to_saved_recipe(solved_library, safe, run_id, angle / 3.0)
+    r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                    json={"keep_processed": True, "north_up": True})
+    assert r.status_code == 200
+    recipe = _saved_recipe(solved_library, safe, run_id)
+    got = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/full-res-png")
+    assert got.status_code == 200
+    north = render_run_recipe_fullres_png(fits_path, recipe, north_up=True)
+    assert north != render_run_recipe_fullres_png(fits_path, recipe, north_up=False)
+    assert got.content == north
+
+
+def test_stored_bytes_carry_north_up_reads_the_recipes_own_turn():
+    from webapp.pipeline import _stored_bytes_carry_north_up
+
+    assert _stored_bytes_carry_north_up(0.0, None) is False
+    assert _stored_bytes_carry_north_up(40.0, None) is True
+    assert _stored_bytes_carry_north_up(40.0, _recipe(0.0)) is True
+    assert _stored_bytes_carry_north_up(40.0, _recipe(40.0)) is False
+    assert _stored_bytes_carry_north_up(40.0, _recipe(13.0)) is True
+    # Two turns summing past a half turn: 100° + 90° is the -170° recorded.
+    two = _recipe(100.0)
+    two["ops"].append(dict(two["ops"][-1], params={"angle": 90.0, "expand": True}))
+    assert _stored_bytes_carry_north_up(-170.0, two) is False
+    assert _stored_bytes_carry_north_up(40.0, {"ops": "not a list"}) is True
