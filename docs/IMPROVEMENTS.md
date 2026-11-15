@@ -143,30 +143,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   is a dataset root with `snapdir=visible`, two snapshots of 8 subs (`M 42_sub`, `NGC 7000_mosaic_sub`) plan and scan
   as one **`.zfs`** target of 16 — both objects, every sub once per snapshot, growing each day; `incoming/` unchanged.
 
-- **🟠 (Scout 2026-11-15, QA rotation sweep (2)) — a mosaic panel shot ~9× shallower than the rest is never
-  levelled: `level_by_coverage`'s structure guard reads its honest grain as "structure", so its whole sky step
-  survives the stack *and* Auto.** *(Pillar: image quality + editor — PRIORITY 1/4; size **S–M**; hot path, so
-  see the fix note. Confidence: **reproduced** through the real `level_by_coverage` and the full `auto_recipe`
-  export; the size of a real panel's residual offset after the per-frame flatten is **unmeasured**.)*
-  `_region_sky_mask` refuses any level whose retained sky σ exceeds `max_level_sigma` = `_RESCUE_MAX_SIGMA_RATIO`
-  (3.0) × the **canvas's** retained σ — a whole-canvas number, set by the deep panels. Grain goes as 1/√depth, so
-  every level ≥ 9× shallower than the bulk is refused, falls to the neighbour fill, and keeps its own offset.
-  The levels this pass bins are *depth* levels, so "every region is meant to be equally grainy" (its own
-  docstring) is false by construction here; v0.470.0 already gave the grain-band caller `sigma_allowance` =
-  √(deep/thin) for exactly this reason and left every levelling caller at 1.0. Repro (5-panel 600×3000 strip,
-  panels 30 subs, panel 2 at *k* subs with a sky offset of *n*·σ_deep, then `level_by_coverage(rgb, cov,
-  frame_coverage=cov)`): k = 20/12/8/6/5/4 → residual ≤ 0.7 σ_deep for n = 5 and 20 (levelled; k = 4 via the
-  rescue); **k = 3 or 2 → residual 4.0–4.3 σ for n = 5, 19.2–19.5 σ for n = 20** (log: "1 filled from neighbouring
-  levels"). The same canvas through Auto's export: thin-panel display sky 0.074 at n = 0 (control), **0.394 at
-  n = 5, 0.719 at n = 20** against 0.15–0.17 on the deep panels — a bright rectangle; `background.final_gradient`
-  masks it as an object and leaves it. `measure_seam_residual` returns `None` on that canvas (the level is
-  unreadable to it too), so the seam card stays silent rather than lying. Shape it hits: a panel added to a deep
-  mosaic on one night — the grown-mosaic case FOCUS calls the open frontier. **Fix:** in `level_by_coverage`, give
-  each level `sigma_allowance = √(dominant depth / level depth)` from `frame_coverage` (the band path's rule), in
-  both the refusal and the rescue. Runs at stack time on every stack (`stacker` §4.4), so prove byte-identity on
-  the existing mosaic fixtures wherever no level was refused, and keep a level filled by real nebulosity refused
-  (its spread exceeds 3× its *own* expected grain). Regression test: the k = 3, n = 20 strip must level to < 1 σ.
-
 - **🟡 (Builder 2026-10-30, the ⭐ 2026-10-28 entry's part (4)) — the "darker ring just inside" the ragged border is
   made by the stacker's per-frame sky flatten: on a vignetted sub, `Background2D` leaves a dark rim along every
   sub's own edge, and the canvas border is where only sub edges land.** *(Pillar: image quality / trust —
@@ -3187,6 +3163,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.506.43 **A mosaic panel shot ~9× shallower than the rest is levelled again — `level_by_coverage` judges each depth level's structure guard against its own expected grain (new `_depth_sigma_allowance` = √(bulk/level), `_bulk_depth`, `_level_sky_mask` / `_region_sky_mask` `sigma_allowance`); a k = 3-of-30 panel's 20σ sky step 20.0 → 0.02σ** — Builder 2026-11-15, the Scout's 2026-11-15 🟠; SHIPPED.md.
 - ✅ v0.506.42 **The Full-res PNG download / pictures archive of a picture straightened in the editor and kept via "Adjust → keep processed" without North up is no longer turned the rest of the way North-up — v0.506.37's recorded recipe turn was read as a North-up save (`pipeline.render_run_full_res_png`, new `_stored_bytes_carry_north_up`, `recipe_rotation_deg`, `preview_north_up_deg`)** — Builder 2026-11-15, regression from v0.506.37; SHIPPED.md.
 - ✅ v0.506.41 **The editor export holds fewer whole-canvas copies per op — Sharpen 6.4×→3.1×, Saturation 4.7×→2.7×, Boost nebula 9.4×→4.4× the picture, the NaN-fill wrapper copies once (denoise 9.1×→8.2×), and the loop releases the loaded master after the first op (`detail._with_nan_filled`, `detail._sharpen`, `tone._saturation`, `stars._boost_nebula`, `pipeline._render_recipe_fullres`); byte-identical output** — Builder 2026-11-14 per-op memory probe; SHIPPED.md.
 - ✅ v0.506.40 **The editor export applies the auto-contrast curve the live preview showed — the gated midtone lift (`suggest_tone_curve`, noisy `_sky_mode`) took opposite branches on proxy and full canvas, leaving a mosaic export 0.028 brighter/darker than the preview (`webapp/pipeline._preview_curve_fits`, `proxy.proxy_step`, frozen `EditContext.fit`)** — Builder 2026-11-14 taste-profile parity probe; SHIPPED.md.

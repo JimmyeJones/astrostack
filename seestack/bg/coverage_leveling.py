@@ -554,10 +554,51 @@ def _level_sky_mask(
     level: int,
     object_sigma: float,
     dilate_object_mask_px: int,
+    sigma_allowance: float = 1.0,
 ) -> tuple[np.ndarray, bool] | None:
     """One coverage level's sky pixels + whether a rescue found them."""
     return _region_sky_mask(ctx, (ctx.cov_int == level) & ctx.valid_pix,
-                            object_sigma, dilate_object_mask_px)
+                            object_sigma, dilate_object_mask_px,
+                            sigma_allowance)
+
+
+def _bulk_depth(ctx: _LevelContext) -> float:
+    """The depth most of the covered canvas is at — the **median** coverage
+    level over every valid pixel, read off the level histogram already taken.
+
+    The same "bulk" :func:`_grain_from_depth_bands` compares against, and for
+    the same reasons: not the mode, which on a dither ramp lands wherever the
+    dither piled up (including on the shallowest panel), and not the mean, which
+    a ragged fringe drags down.
+    """
+    if not ctx.region_counts or ctx.n_valid <= 0:
+        return float("nan")
+    half = 0.5 * float(ctx.n_valid)
+    acc = 0
+    for level in sorted(ctx.region_counts):
+        acc += ctx.region_counts[level]
+        if acc >= half:
+            return float(level)
+    return float(max(ctx.region_counts))
+
+
+def _depth_sigma_allowance(level: int, bulk: float) -> float:
+    """How much grainier a level shot at ``level`` frames is *expected* to be
+    than the canvas's bulk — ``√(bulk / level)``, never below 1.
+
+    Grain falls as 1/√depth, so a level shot at a ninth of the bulk's depth
+    carries three times its sky σ by physics alone. :func:`_region_sky_mask`'s
+    structure guard judges a region against the **canvas's** retained sky σ —
+    set by the deep panels — so without this a level ≥ 9× shallower than the
+    bulk read its own honest grain as "structure", was refused, and kept its
+    whole sky offset (a bright rectangle through the stack *and* Auto). With it
+    the guard is still 3× the level's *own* expected grain, so a level genuinely
+    filled by nebulosity is refused exactly as before. Levels at or deeper than
+    the bulk get 1.0 — byte-for-byte the old yardstick.
+    """
+    if level <= 0 or not np.isfinite(bulk) or bulk <= level:
+        return 1.0
+    return math.sqrt(bulk / float(level))
 
 
 @dataclass(frozen=True)
@@ -1243,12 +1284,18 @@ def level_by_coverage(
     offsets: dict[int, list[float]] = {}  # level -> [R_off, G_off, B_off]
     sky_counts: dict[int, int] = {}
     n_rescued = 0
+    # The structure guard is judged against each level's *own* expected grain:
+    # these are depth levels, so a level shot shallower than the bulk is
+    # legitimately grainier (see :func:`_depth_sigma_allowance`).
+    bulk = _bulk_depth(ctx)
     for level in big_levels:
         # A starved level is re-thresholded against its own statistics, and a
         # level too structured to be sky is refused outright — both handled by
-        # ``_level_sky_mask``, so the leveling pass and the seam-residual check
-        # can never disagree about which levels are measurable.
-        found = _level_sky_mask(ctx, level, object_sigma, dilate_object_mask_px)
+        # ``_level_sky_mask``. The seam-residual check reads levels through the
+        # same function at the canvas yardstick (allowance 1.0): a thin level
+        # this pass now levels is one it stays silent on, never one it misreads.
+        found = _level_sky_mask(ctx, level, object_sigma, dilate_object_mask_px,
+                                _depth_sigma_allowance(int(level), bulk))
         if found is None:
             # Unmeasurable: left to the interpolated fill below, which shifts it
             # by its neighbours' offset and so preserves whatever structure
