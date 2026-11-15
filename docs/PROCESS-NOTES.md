@@ -1,5 +1,31 @@
 # Process notes & QA sweep records
 
+## 2026-11-15 (Scout, branch `claude/sweet-euler-n2dcsi`) — QA rotation sweep (2), new angle — a panel thin *and* hazier through Auto's levelling, gradient and STF: one bug, filed reproduced (🟠). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8834 passed / 7 skipped on `50b606e1` (xdist `-n 4`, BLAS capped, 19m14s). No open
+  PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+  No `Diagnostic result:` issue yet. **Dogfood `--mosaic`:** exit 0, nothing overflowing, no console errors.
+- **Sweep (2), the angle.** The 11-11 sweeps twice listed "`tone.stretch`'s whole-canvas STF against
+  `final_gradient`'s per-panel leveling on a panel thin *and* hazier" as read, not driven. Driven here on a
+  5-panel 600×3000 strip (scratch probe, not landed): panels 30 subs, panel 2 at *k* subs with a sky offset of
+  *n*·σ_deep and/or an in-panel ramp, through the real `auto_recipe` (built on a step-3 proxy) and its full-res
+  export, then each `background.*` op alone with `auto_stretch=False`.
+- **Finding.** The STF is not the culprit — `level_by_coverage` is. Its structure guard (`_region_sky_mask`,
+  `max_level_sigma` = 3 × the **canvas's** retained σ) refuses every level ≥ 9× shallower than the bulk, since
+  grain goes as 1/√depth; the refused level takes the neighbour fill and keeps its own step. k = 4 levels (via the
+  rescue), k = 3 does not: a 20σ step leaves 19.5σ, and Auto's display sky reads 0.72 against 0.15. The guard's own
+  docstring says levelling regions are "meant to be equally grainy" — false for depth levels by construction;
+  v0.470.0 gave only the grain-band caller `sigma_allowance`. The same call runs at stack time (`stacker` §4.4).
+  `measure_seam_residual` answers `None` on that canvas, so the seam card is silent, not wrong. Filed 🟠 S–M.
+- **Read and holds (CLEAN):** an in-panel ramp (no depth difference) is *also* left by `final_gradient`
+  (masked as an object at 2.5σ) and by `level_by_coverage` (one level), but a ramp only one panel carries after
+  the per-frame flatten is not a shape the stack produces; a canvas-wide ramp is removed exactly. Preview vs
+  export agreed on every case (≤ 0.02 on panel medians outside the refused panel).
+- **Probe caveat for the next (2):** a "median of the lower 70 %" sky estimator reads a grainier panel darker
+  after the stretch (0.074–0.099 vs 0.17 at zero offset) — that is the estimator, not the picture; use a
+  zero-offset control as here.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-11-15 (Builder, branch `claude/sweet-feynman-s226r4`) — nothing ungated to build; dogfood `--restack --closing --calibration --incoming-lag`, then `--combine`, both CLEAN.
 
 - **Baseline.** Suite 8834 passed / 7 skipped on `1878933c` (xdist `-n 4`, BLAS capped, 18m01s). Bugs unchanged (every open entry gated on the owner or a diagnostic result); the Features entries are declined, gated on diagnostic `filter_card_values` v2, or wait on a real big upload. No live claims.
