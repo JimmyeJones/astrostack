@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-11-15 (Builder, branch `claude/sweet-feynman-llrk1n`) — nothing ungated to build; the long-listed `trim-suggestion` / `crop-health` on a strided coverage map, driven: CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8844 passed / 7 skipped on `4f38f729` (xdist `-n 4`, BLAS capped, 19m29s). No open
+  PRs. Inbox: the same four (#878, #880, #903, #1015), owner-gated; no `Diagnostic result:` issue yet.
+- **The angle** (listed "not yet run in a sweep (1)" since 2026-10-21): `_trim_rect_for_run`'s strided path —
+  `largest_covered_rect` on the `[::step]` frame-count map (`_TRIM_MAX_DIM` 512 → step 8–12 at mosaic scale), then
+  `_full_res_trim_rect` (`sampled_rect_to_full_res` + `shrink_rect_to_covered` through a FITS memmap) — against
+  `largest_covered_rect` run on the full-res map itself. Synthetic S30 footprints (1080×1920, 12 % overlap, ±8 px
+  dither, NaN outside), scratch probe not landed: 2×2, 3×3, 2×2 with one panel 10× shallower, 3×3 rotated 7°, 2×3
+  rotated −23° with two thin panels, and a 1×1 dithered field.
+- **Result.** Kept area strided vs full-res: 0.9486 / 0.9521, 0.963 / 0.9664, 0.9582 / 0.9626, 0.5769 / 0.5761,
+  0.1259 / 0.1262; the dithered single field answers `None` both ways. **Zero NaN pixels inside any strided crop.**
+  The strided answer gives up at most 0.4 % of the canvas — the rounding-inward the docstring promises.
+- **Considered, not filed:** the −23° 2×3 keeps 12.6 %, but its even-depth control keeps the same 12.7 % — that is
+  the largest axis-aligned rectangle inside a whole tilted grid, not the depth rule; and a Seestar mosaic grid is laid
+  out in RA/Dec, so a grid tilted on a North-up canvas is not the owner's shape. Same for the 7° case (57.6 %).
+
 ## 2026-11-15 (Scout, branch `claude/sweet-euler-n2dcsi`) — QA rotation sweep (2), new angle — a panel thin *and* hazier through Auto's levelling, gradient and STF: one bug, filed reproduced (🟠). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8834 passed / 7 skipped on `50b606e1` (xdist `-n 4`, BLAS capped, 19m14s). No open
