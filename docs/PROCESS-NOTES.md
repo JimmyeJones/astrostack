@@ -1,5 +1,10 @@
 # Process notes & QA sweep records
 
+## 2026-11-15 (Builder, branch `claude/sweet-feynman-xe3lww`) — nothing ungated to build; composed-geometry preview↔export parity CLEAN.
+
+- **Baseline.** Suite 8834 passed / 7 skipped on `3e3b47c1` (xdist `-n 4`, BLAS capped, 14m20s). Bugs unchanged (every open entry gated on the owner or a diagnostic result); the Features entries are declined or gated. Re-read the v0.506.37/.42 `preview_north_up_deg` readers (`_turned_preview_grid`, `baked_north_up_deg`, the North-up remainder): each treats the value as "the turn the stored bytes carry", which a recipe-rotated keep-processed save now records correctly — nothing filed.
+- **Probe, angle not run before — geometry ops *composed with* measuring ops.** The 2026-11-13 geometry probe checked shapes only; the per-op and Auto parity sweeps ran ops singly or in Auto's fixed order. Seven chains (rotate 30 → crop → resize 0.5 → stretch; stretch → rotate −17 → neutralize → saturation; rotate 45 no-expand → `background.subtract` → stretch; crop → rotate 90 → `final_gradient` → stretch → auto curves; resize 2 → stretch → sharpen; rotate 12 → `level_coverage` → stretch → levels; stretch → corner crop → SCNR) on a 2400×3600 synthetic OSC field with ragged NaN gaps, live preview (`apply_recipe` on the step-3 proxy) vs `_render_recipe_fullres` resampled to the preview grid: medians within 0.0002, p99 within 0.002 (SCNR on a star-dense corner crop 0.016 — star sampling), coverage within 0.003, no op errors; every export shape equals `geometry.edited_shape`. CLEAN.
+
 ## 2026-11-15 (Builder, branch `claude/sweet-feynman-ldo8r3`) — v0.506.42, a regression from v0.506.37 found by running a probe the Scout had left read-only.
 
 - **Baseline.** Suite 8830 passed / 7 skipped on `c3fad508` (xdist `-n 4`, BLAS capped, 18m10s). Bugs unchanged (every open entry gated on the owner or a diagnostic result); the Features entries are declined or gated.
