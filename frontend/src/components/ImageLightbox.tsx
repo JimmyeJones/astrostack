@@ -317,12 +317,20 @@ export function ImageLightbox({
       styles={{ body: { height: "100dvh", background: "#000" } }}
     >
       <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
-        {/* Toolbar */}
+        {/* Toolbar. Anchored top-right and allowed to wrap onto a second row
+            inside the screen: as one unbreakable row it grew leftwards past
+            the edge on a phone, so Zoom in / Zoom out (and on a 320 px phone
+            Reset and Download too) sat off-screen where no tap could reach
+            them — measured on the Gallery's run viewer, which adds Share, the
+            QR, Universe, the slideshow and Wallpaper to the row. */}
         <Group
           gap={4}
-          wrap="nowrap"
+          wrap="wrap"
+          justify="flex-end"
+          data-testid="lightbox-toolbar"
           style={{
             position: "absolute", top: 10, right: 10, zIndex: 5,
+            maxWidth: "calc(100% - 20px)",
             background: "rgba(12,14,22,0.72)", borderRadius: 8, padding: "4px 6px",
           }}
         >
@@ -468,7 +476,7 @@ export function ImageLightbox({
 
         <Text
           size="xs" c="dimmed"
-          style={{ position: "absolute", bottom: 10, left: 0, right: 0, textAlign: "center" }}
+          style={{ position: "absolute", bottom: 10, left: 0, right: 0, padding: "0 10px", textAlign: "center" }}
         >
           {src && overlaySrc && overlayNote ? (
             <Text component="span" size="xs" c="cyan.4" display="block" mb={4} px="sm">

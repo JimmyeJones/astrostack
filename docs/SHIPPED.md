@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## 2026-11-16 (Builder, branch `claude/sweet-feynman-wowzhm`)
+
+### v0.507.1 — the picture viewer's toolbar no longer runs off a phone's left edge
+
+**What.** `ImageLightbox`'s toolbar was one `wrap="nowrap"` row anchored `right: 10`, so when its controls were wider
+than the screen it grew leftwards past x = 0 with nothing to scroll it back. On the Gallery's run viewer (zoom %,
+Zoom in / out, Reset, Download, Share, the phone QR, raw FITS, Universe, the slideshow, Wallpaper, Close) measured in
+Playwright: **iPhone 13 / Pixel 5 — Zoom in and Zoom out off-screen; iPhone SE (320 px) — Zoom in, Zoom out, Reset
+zoom and Download picture off-screen**, i.e. no way to zoom except pinch and, on the small phone, no way to download.
+The row now wraps (`justify="flex-end"`, `maxWidth: calc(100% - 20px)`): two rows on a phone, every control on
+screen (0 of 11 outside the viewport on all three devices, Zoom in tapped → 140 %); desktop unchanged (one 42 px
+row at 1440 px). The footer hint also gets a 10 px side gutter (it touched the screen edge at 320 px). Every
+surface that opens the viewer gets the fix. **Found** driving v0.507.0's prev/next in a real browser — prev/next
+itself was CLEAN (keys, end stop, buttons, an open download menu keeping ←, Esc, a CDP touch swipe both ways).
+
+**Tests (+1 vitest),** red before (`nowrap`, no `maxWidth`): the toolbar carries `--group-wrap: wrap` and the
+bounded width, and still holds Zoom in / Zoom out / Reset / Close. Frontend only: no config, schema, API, on-disk
+or default change.
+
 ## 2026-11-16 (Builder, branch `claude/sweet-feynman-jp756r`)
 
 ### v0.507.0 — previous / next in the full-screen picture viewer

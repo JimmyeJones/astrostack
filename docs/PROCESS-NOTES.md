@@ -1,5 +1,16 @@
 # Process notes & QA sweep records
 
+## 2026-11-16 (Builder, branch `claude/sweet-feynman-wowzhm`) — v0.507.1: the picture viewer's toolbar ran off a phone's left edge (found driving v0.507.0 in a real browser).
+
+- **Baseline / PRs.** Suite 8844 passed / 7 skipped on `f5d7386c` (xdist `-n 4`, BLAS capped, 17m26s). No open PRs.
+  Nothing ungated in Bugs/Features. v0.507.0 (prev/next in `ImageLightbox`) had shipped with jsdom tests only, so it
+  was driven for real: `--build --serve --no-probe` plus two extra stacks for a 3-picture Gallery. Prev/next CLEAN.
+- **The finding, and why the dogfood probe never saw it.** The viewer's toolbar is an absolutely positioned
+  right-anchored `nowrap` row; on a phone it overflows *leftwards* inside an `overflow: hidden` full-screen modal, so
+  the page's scroll width never grows and the overflow probe (which measures page horizontal overflow) reads it as
+  fine. **Probe gap worth closing:** for an open modal, list each control's `getBoundingClientRect()` and flag any
+  with `left < 0` or `right > innerWidth` — the scratch check here (11 controls, three devices) is that probe.
+
 ## 2026-11-16 (Builder, branch `claude/sweet-feynman-yngszo`) — nothing ungated to build; dogfood `--build --deep --editor`: CLEAN.
 
 - **Baseline / PRs.** Suite 8844 passed / 7 skipped on `765dc533` (xdist `-n 4`, BLAS capped, 17m27s). No open PRs.
