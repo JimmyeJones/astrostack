@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-11-16 (Builder, branch `claude/sweet-feynman-fgpm2j`) — nothing ungated to build; dogfood `--build --mosaic --dithered --editor --big`: CLEAN.
+
+- **Baseline / backlog.** Suite 8844 passed / 7 skipped on `ce283ef6` (xdist `-n 4`, BLAS capped, 17m30s). Every
+  Bugs entry is gated on the owner or a diagnostic; the Features entries are declined or gated; no open PRs; the
+  beginner-feature cadence was met today (v0.507.0).
+- **Dogfood, exit 0.** Tiled mosaic: Auto trims 7.9 % (bar 15 %); the dithered continuum's apron 30.7 % against the
+  recorded 30.3 % (no move). The big canvas offers the full-size check, its window follows the navigator, the box
+  hugs the window. All 21 Add-menu ops re-render; one live taste chip tapped and the profile reset. Target-page,
+  Dashboard and Tonight paragraphs agree with themselves. Tallest page `/life-list [Still to shoot]` 14,513 px on a
+  phone — the recorded non-bug (v0.492.2), +21 px from the 14,492 baseline.
+- **Read, not changed — `Compare.tsx` and v0.507.2's pending-URL guess.** The Gallery guess is safe because a
+  per-picture turn returns the stored bytes when there is nothing to turn. Compare's turn is a *pair* decision
+  (`compareNorthUpOffer`: both sides must be oriented), so a side that could turn is left un-turned when its
+  partner cannot. Guessing "turned" while the annotations are pending would draw such a pair turned and then
+  un-turn it: the same flash, swapped for one that is wrong. And the page loads once rather than stepping. Leave it.
+
 ## 2026-11-16 (Builder, branch `claude/sweet-feynman-skh2on`) — v0.507.2; the long-listed "Gallery lightbox prev/next over two runs of one target" angle, read and driven in vitest.
 
 - **Baseline / backlog.** Every Bugs entry gated on the owner or a diagnostic result; the three Features entries
