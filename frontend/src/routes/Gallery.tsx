@@ -607,6 +607,15 @@ export function GalleryView() {
   const viewingCanNorthUp =
     typeof viewingAnnotations.data?.north_up_deg === "number";
   const viewingTurned = northUp && viewingCanNorthUp;
+  // While that answer is still on its way, someone who chose North up is shown
+  // the turned URL rather than the plain one. The server hands the stored bytes
+  // back untouched when there is nothing to turn, so the guess can only be
+  // right; the plain URL instead drew the picture the wrong way up and then
+  // spun it a moment later — on every picture ← / → stepped to. Only the
+  // picture (and the tint laid over it) take the guess: the download links
+  // wait for the real answer.
+  const viewingShowTurned = northUp
+    && (viewingCanNorthUp || (!!viewing?.has_fits && viewingAnnotations.isPending));
   // What the big view is actually showing, and therefore what the PNG download
   // hands over. The turn is its own helper rather than a flag on
   // `stackArtifactUrl` on purpose: the bare artifact URLs stay WCS-aligned for
@@ -614,7 +623,7 @@ export function GalleryView() {
   const viewingNorthUpSrc = viewing
     ? api.stackPreviewNorthUpUrl(viewing.safe, viewing.run_id) : "";
   const viewingSrc = !viewing ? ""
-    : viewingTurned ? viewingNorthUpSrc : viewing.preview_url;
+    : viewingShowTurned ? viewingNorthUpSrc : viewing.preview_url;
   const viewingPngHref = !viewing ? undefined
     : viewingTurned ? viewingNorthUpSrc
       : api.stackArtifactUrl(viewing.safe, viewing.run_id, "preview");
@@ -941,7 +950,7 @@ export function GalleryView() {
         rawHref={viewing?.has_fits
           ? api.stackArtifactUrl(viewing.safe, viewing.run_id, "fits") : undefined}
         overlaySrc={viewing && showRemoved && viewingHasRemoved
-          ? api.stackRejectionOverlayUrl(viewing.safe, viewing.run_id, viewingTurned)
+          ? api.stackRejectionOverlayUrl(viewing.safe, viewing.run_id, viewingShowTurned)
           : null}
         overlayNote={removedOverlayCaption(viewingInfo.data?.rejection)}
         toolbarExtra={viewing?.has_preview
