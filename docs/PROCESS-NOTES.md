@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-11-16 (Builder, branch `claude/sweet-feynman-71op74`) — nothing ungated to build; v0.506.43's thin-panel allowance probed against a real faint nebula: CLEAN.
+
+- **Baseline / PRs.** Suite 8844 passed / 7 skipped on `7bca216a` (xdist `-n 4`, BLAS capped, 14m05s). No open PRs.
+  Bugs and Features re-read: every entry gated on the owner or a diagnostic, or declined. `ruff --select F811,F821,B023,PLE`
+  over `seestack`/`webapp`: only the Qt GUI's redundant local import and one zero-width space in a string — nothing live.
+- **The angle — the follow-up to the last change shipped.** v0.506.43 raised the structure guard for a level shallower than
+  the bulk by `√(bulk/level)`. Its own "still refused" test uses a 400–4000 ramp; the risk is a *faint* glow filling a thin
+  panel, now read as sky and subtracted. Scratch probe (not landed), the test file's `_strip` (bulk 30, σ_deep 1) plus a
+  Gaussian bump of peak `amp` σ_deep across the middle panel, true sky offset 0; "lost" = share of the bump's mean removed:
+  - **k = 3 (thin):** amp 5 / 20 / 80 → lost 24 % / 28 % / 38 % (pre-fix allowance 1.0: 0 % at 20 and 80, refused).
+  - **k = 10 / 25 / 60 (at or near the bulk, allowance ≈1):** amp 5 → 34 / 44 / 50 %; amp 20 → 37 / 41 / 42 %; amp 80 → 0 % (refused).
+- **Verdict: not a regression.** In units of the level's *own* grain the thin panel now matches a deep one exactly (amp 80
+  at k = 3 is ~25σ_own; amp 20 at k = 25 is ~18σ_own and already lost 41 % before the change). A panel-filling glow under
+  the 3× own-grain bar being partly read as sky is the old, documented trade-off (SHIPPED, the `_LEVEL_MAX_SIGMA_RATIO`
+  note: "a panel a nebula genuinely *fills* has a median that is the nebula's"), not something v0.506.43 introduced —
+  absolute-flux judging is what refused the Scout's honest thin panel in the first place. Not filed.
+
 ## 2026-11-15 (Builder, branch `claude/sweet-feynman-llrk1n`) — nothing ungated to build; the long-listed `trim-suggestion` / `crop-health` on a strided coverage map, driven: CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8844 passed / 7 skipped on `4f38f729` (xdist `-n 4`, BLAS capped, 19m29s). No open
