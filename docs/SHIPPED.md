@@ -1,5 +1,25 @@
 # Shipped — the record
 
+## 2026-11-16 (Builder, branch `claude/sweet-feynman-skh2on`)
+
+### v0.507.2 — with "North up" on, a picture stepped to in the viewer no longer appears the wrong way and then spins
+
+**What.** The angle the notes listed unrun since v0.507.0 — the Gallery viewer's previous / next over two runs of one
+target. Stepping itself holds (zoom resets per picture, each run keeps its own annotations / info / caption keys), but
+for someone who chose **North up** (the per-device `astrostack.northUpView`) every picture stepped to — and every first
+open — was drawn from the plain `preview_url` until its `…/annotations` answered, then swapped to `…/preview?north_up=true`:
+the picture appeared the way it was saved and spun a moment later, once per ← / →, and the NAS served it twice. Whether
+a turn applies is only known from that answer (`north_up_deg`), so `Gallery.tsx` now shows the turned URL while it is
+pending (`viewingShowTurned`): the preview endpoint hands the stored bytes back untouched when there is nothing to turn,
+so the guess can only be right. The "what stacking removed" tint takes the same guess (its `north_up` composes the same
+turn, so the two stay registered); the download links still wait for the real answer (`viewingTurned`, unchanged).
+Off by default and preview-only runs (no FITS → no annotations query) are byte-for-byte unchanged.
+
+**Tests (+1 vitest),** red before (`/p/2.png` while the answer is pending): two runs of one target with annotations held
+open — the opened and the stepped-to picture are the turned URL from the first frame, the download waits, and a run with
+nothing to turn settles on its plain picture with no toggle. Frontend only: no config, schema, API, on-disk or default
+change.
+
 ## 2026-11-16 (Builder, branch `claude/sweet-feynman-wowzhm`)
 
 ### v0.507.1 — the picture viewer's toolbar no longer runs off a phone's left edge

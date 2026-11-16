@@ -1476,4 +1476,57 @@ describe("Gallery — previous / next in the full-screen viewer", () => {
       .some((el) => /3 of 3/.test(el.textContent ?? ""))).toBe(true));
     await waitFor(() => expect(screen.queryByLabelText("Next picture")).not.toBeInTheDocument());
   });
+
+  // With "North up" chosen, the picture stepped to must not first appear the way
+  // it was saved and then spin once its annotations arrive. Two runs of one
+  // target, each answering only when the test says so.
+  it("with North up on, a stepped-to picture is never drawn the wrong way first", async () => {
+    window.localStorage.setItem("astrostack.northUpView", "1");
+    try {
+      vi.spyOn(client.api, "getGallery").mockResolvedValue({
+        items: [
+          { ...item(2), has_preview: true, preview_url: "/p/2.png",
+            timestamp_utc: "2026-05-03T00:00:00.000000+00:00" },
+          { ...item(1), has_preview: true, preview_url: "/p/1.png",
+            timestamp_utc: "2026-05-01T00:00:00.000000+00:00" },
+        ],
+      });
+      vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+      vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+      vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({} as never);
+      vi.spyOn(client.api, "identifyTarget").mockResolvedValue(null as never);
+      const answer = (north_up_deg: number | null) => ({
+        width: 100, height: 80, objects: [], scale_bar: null, north_up_deg,
+      });
+      const pending: Record<number, (v: unknown) => void> = {};
+      vi.spyOn(client.api, "stackAnnotations").mockImplementation(
+        (_safe: string, id: number) => new Promise((res) => { pending[id] = res; }) as never);
+
+      renderGallery();
+      await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+      fireEvent.click(screen.getAllByRole("img")[0]);
+      const shown = () => screen.getByRole("dialog").querySelector("img")!;
+      await screen.findByRole("dialog");
+      await waitFor(() => expect(pending[2]).toBeDefined());
+      // Still asking: already the turned picture, never the plain one.
+      expect(shown()).toHaveAttribute("src", "/api/targets/M_42/stack-runs/2/preview?north_up=true");
+      pending[2](answer(118.5));
+      await screen.findByTestId("north-up-view");
+      expect(shown()).toHaveAttribute("src", "/api/targets/M_42/stack-runs/2/preview?north_up=true");
+
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      await waitFor(() => expect(pending[1]).toBeDefined());
+      expect(shown()).toHaveAttribute("src", "/api/targets/M_42/stack-runs/1/preview?north_up=true");
+      // The downloads wait for the real answer rather than taking the guess.
+      fireEvent.click(screen.getByLabelText("Download picture"));
+      expect((await screen.findByText("Quick preview PNG (up to 1024px)")).closest("a"))
+        .toHaveAttribute("href", "/api/targets/M_42/stack-runs/1/preview");
+      // Nothing to turn on this one: the plain picture, the same pixels.
+      pending[1](answer(null));
+      await waitFor(() => expect(shown()).toHaveAttribute("src", "/p/1.png"));
+      expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
+    } finally {
+      window.localStorage.clear();
+    }
+  });
 });

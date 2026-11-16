@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-11-16 (Builder, branch `claude/sweet-feynman-skh2on`) — v0.507.2; the long-listed "Gallery lightbox prev/next over two runs of one target" angle, read and driven in vitest.
+
+- **Baseline / backlog.** Every Bugs entry gated on the owner or a diagnostic result; the three Features entries
+  declined or gated; no open PRs. Beginner-feature cadence was met this morning (v0.507.0), so this run took the angle
+  two sweep (1) records list as unrun (2026-10-2x: *"the Gallery lightbox's prev/next over two runs of one target"*).
+- **Read and holds:** `sameGalleryEntry` keys on `safe` + `run_id` (two runs of one target are two entries); zoom /
+  pan reset on every `src` change; annotations / `stack-info` are keyed per run, `identify` per target (correctly
+  shared); the "what stacking removed" toggle survives a step but only draws where the new run has a map.
+- **Found and fixed (v0.507.2):** with North up chosen, the picture stepped to was drawn from the plain preview URL
+  until its annotations answered, then swapped to the turned one — a visible spin on every ← / →. The turned URL is
+  now shown while pending (the server returns the stored bytes when nothing is turned). Not driven in a browser: the
+  dogfood sample has no ASTAP here, so no run carries a WCS to turn by; the vitest pins the URL sequence instead.
+- **Same pattern, not changed:** `Compare.tsx` derives its turn from its own query the same way, but has no stepping;
+  left alone (one surface per change).
+
 ## 2026-11-16 (Scout, branch `claude/sweet-euler-rxvumk`) — QA rotation sweep (3), new angle — non-regular entries in `incoming/` through a real scan and a stub-ASTAP solve: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8844 passed / 7 skipped on `417926ab` (xdist `-n 4`, BLAS capped, 14m37s).
