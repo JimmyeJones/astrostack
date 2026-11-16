@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActionIcon, Group, Menu, Modal, Text, Tooltip } from "@mantine/core";
 import {
-  IconArrowsMaximize, IconDatabase, IconPhotoDown, IconZoomIn, IconZoomOut,
+  IconArrowsMaximize, IconChevronLeft, IconChevronRight, IconDatabase, IconPhotoDown,
+  IconZoomIn, IconZoomOut,
 } from "@tabler/icons-react";
 import { announceFullResDownload, fullResPngLabel } from "../fullres";
+import { keyBelongsElsewhere, swipeStep } from "../lightboxNav";
 import { SharePictureButton } from "./SharePictureButton";
 import { ScanToPhoneButton } from "./ScanToPhoneButton";
 
@@ -54,7 +56,7 @@ export function computePinch(
 export function ImageLightbox({
   src, title, downloadHref, jpegHref, fullResHref, fullResCanvas, rawHref, rawLabel,
   shareFilename, shareTitle, shareText, toolbarExtra, overlaySrc, overlayNote,
-  onClose,
+  onPrev, onNext, position, onClose,
 }: {
   src: string | null;
   title?: string;
@@ -108,6 +110,15 @@ export function ImageLightbox({
   shareFilename?: string;
   shareTitle?: string;
   shareText?: string;
+  /** Step to the neighbouring picture without closing the viewer — the page
+   * that opened it owns the list, so it passes these (and `position`, e.g.
+   * "3 of 12"); an end of the list passes `undefined` and that arrow is not
+   * drawn. Offered as edge buttons, the ←/→ keys and, on a phone, a sideways
+   * swipe on the un-zoomed picture. A surface showing one picture passes
+   * neither and the viewer looks exactly as it always has. */
+  onPrev?: () => void;
+  onNext?: () => void;
+  position?: string;
   onClose: () => void;
 }) {
   const [t, setT] = useState<Transform>(RESET);
@@ -121,6 +132,26 @@ export function ImageLightbox({
   const pinch = useRef<
     { startDist: number; startScale: number; imgX: number; imgY: number } | null
   >(null);
+  // Where a one-finger touch on the *un-zoomed* picture began — a candidate
+  // swipe. Cleared the moment a second finger lands (that is a pinch).
+  const swipe = useRef<{ x: number; y: number } | null>(null);
+  const navigable = !!(onPrev || onNext);
+
+  // ←/→ step through the pictures. Bound on the window rather than the surface
+  // so it works without first clicking the picture; ignored when the key
+  // belongs to something else (an open download menu walks its items with the
+  // arrows) or a modifier is held (browser back/forward is Alt+←).
+  useEffect(() => {
+    if (src == null || !navigable) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (keyBelongsElsewhere(e.target)) return;
+      if (e.key === "ArrowLeft" && onPrev) { e.preventDefault(); onPrev(); }
+      else if (e.key === "ArrowRight" && onNext) { e.preventDefault(); onNext(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [src, navigable, onPrev, onNext]);
 
   // Reset view whenever a new image is opened (or it closes).
   useEffect(() => {
@@ -129,6 +160,7 @@ export function ImageLightbox({
     pointers.current.clear();
     pan.current = null;
     pinch.current = null;
+    swipe.current = null;
   }, [src]);
 
   /** Cursor position relative to the surface centre (the transform origin). */
@@ -198,11 +230,14 @@ export function ImageLightbox({
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     e.currentTarget.setPointerCapture?.(e.pointerId);
     if (pointers.current.size >= 2) {
+      swipe.current = null;
       setDragging(true);
       startPinch(t);
     } else if (t.scale > MIN_SCALE) {
       setDragging(true);
       startPan(e.clientX, e.clientY, t);
+    } else if (navigable) {
+      swipe.current = { x: e.clientX, y: e.clientY };
     }
   };
 
@@ -230,6 +265,16 @@ export function ImageLightbox({
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = swipe.current;
+    // Where the finger last was — the tracked point `onPointerMove` keeps up
+    // to date (a real swipe always moves before it lifts).
+    const end = pointers.current.get(e.pointerId);
+    if (start && end && e.type === "pointerup" && pointers.current.size === 1) {
+      swipe.current = null;
+      const step = swipeStep(end.x - start.x, end.y - start.y);
+      if (step < 0 && onPrev) onPrev();
+      else if (step > 0 && onNext) onNext();
+    }
     pointers.current.delete(e.pointerId);
     pinch.current = null;
     if (pointers.current.size === 1 && t.scale > MIN_SCALE) {
@@ -398,6 +443,29 @@ export function ImageLightbox({
           ) : null}
         </div>
 
+        {/* Previous / next. Siblings of the zoom surface (not children), so a
+            click on one never starts a pan or a double-tap zoom. */}
+        {onPrev ? (
+          <Tooltip label="Previous picture (←)">
+            <ActionIcon
+              size="xl" radius="xl" variant="filled" color="dark" onClick={onPrev}
+              aria-label="Previous picture"
+              style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)",
+                zIndex: 4, opacity: 0.8 }}
+            ><IconChevronLeft size={26} /></ActionIcon>
+          </Tooltip>
+        ) : null}
+        {onNext ? (
+          <Tooltip label="Next picture (→)">
+            <ActionIcon
+              size="xl" radius="xl" variant="filled" color="dark" onClick={onNext}
+              aria-label="Next picture"
+              style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+                zIndex: 4, opacity: 0.8 }}
+            ><IconChevronRight size={26} /></ActionIcon>
+          </Tooltip>
+        ) : null}
+
         <Text
           size="xs" c="dimmed"
           style={{ position: "absolute", bottom: 10, left: 0, right: 0, textAlign: "center" }}
@@ -407,7 +475,13 @@ export function ImageLightbox({
               {overlayNote}
             </Text>
           ) : null}
-          Scroll or pinch to zoom · drag to pan · double-tap to reset · Esc to close
+          {position ? (
+            <Text component="span" size="xs" c="gray.4" data-testid="lightbox-position">
+              {position} ·{" "}
+            </Text>
+          ) : null}
+          Scroll or pinch to zoom · drag to pan · double-tap to reset
+          {navigable ? " · ← → or swipe for the next picture" : ""} · Esc to close
         </Text>
       </div>
     </Modal>

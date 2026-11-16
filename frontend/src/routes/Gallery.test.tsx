@@ -1436,3 +1436,44 @@ describe("Gallery card — the settings list vs what the stack did", () => {
       .toEqual(["Final gradient removal", "Sigma clip"]);
   });
 });
+
+describe("Gallery — previous / next in the full-screen viewer", () => {
+  it("walks the grid as drawn, a Moon still included, and stops at the ends", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [
+        { ...item(2), has_preview: true, preview_url: "/p/2.png",
+          timestamp_utc: "2026-05-03T00:00:00.000000+00:00" },
+        { ...item(1), has_preview: true, preview_url: "/p/1.png",
+          timestamp_utc: "2026-05-01T00:00:00.000000+00:00" },
+      ],
+      videos: [still("Lunar_video", "2026-05-02T00:00:00+00:00")],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 100, height: 80, objects: [], scale_bar: null, north_up_deg: null,
+    } as never);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({} as never);
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(null as never);
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    // Newest first: run 2, then the Moon still, then run 1.
+    fireEvent.click(screen.getAllByRole("img")[0]);
+    expect(await screen.findByAltText("M_42 · m2")).toBeInTheDocument();
+    expect(screen.getByTestId("lightbox-position")).toHaveTextContent("1 of 3");
+    expect(screen.queryByLabelText("Previous picture")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Next picture"));
+    expect(await screen.findByAltText("Moon · clip.mp4")).toBeInTheDocument();
+    // (Switching kind swaps viewers, so the run's one may still be fading out.)
+    await waitFor(() => expect(screen.getAllByTestId("lightbox-position")
+      .some((el) => /2 of 3/.test(el.textContent ?? ""))).toBe(true));
+
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(await screen.findByAltText("M_42 · m1")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByTestId("lightbox-position")
+      .some((el) => /3 of 3/.test(el.textContent ?? ""))).toBe(true));
+    await waitFor(() => expect(screen.queryByLabelText("Next picture")).not.toBeInTheDocument());
+  });
+});

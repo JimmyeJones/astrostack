@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ImageLightbox, computePinch } from "./ImageLightbox";
 import { ScanToPhoneButton } from "./ScanToPhoneButton";
 import { FULL_RES_PNG_MAX_LONG_EDGE } from "../fullres";
@@ -332,5 +332,91 @@ describe("computePinch", () => {
 
   it("clamps very large spreads to the max zoom", () => {
     expect(computePinch(2, 10, 100000, 0, 0, 0, 0).scale).toBe(12);
+  });
+});
+
+describe("ImageLightbox — previous / next", () => {
+  // jsdom has no PointerEvent, so `fireEvent.pointer*` would otherwise build a
+  // bare Event with no coordinates — and a swipe is nothing but coordinates.
+  const realPointerEvent = (window as { PointerEvent?: unknown }).PointerEvent;
+  beforeAll(() => {
+    class PointerEventShim extends MouseEvent {
+      pointerId: number;
+      constructor(type: string, init: PointerEventInit = {}) {
+        super(type, init);
+        this.pointerId = init.pointerId ?? 0;
+      }
+    }
+    (window as { PointerEvent?: unknown }).PointerEvent = PointerEventShim;
+  });
+  afterAll(() => {
+    (window as { PointerEvent?: unknown }).PointerEvent = realPointerEvent;
+  });
+
+  it("looks exactly as before on a surface that shows one picture", () => {
+    renderLightbox();
+    expect(screen.queryByLabelText("Previous picture")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Next picture")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("lightbox-position")).not.toBeInTheDocument();
+    expect(screen.queryByText(/swipe for the next picture/)).not.toBeInTheDocument();
+  });
+
+  it("offers edge buttons, the position and the hint, and draws no arrow past an end", () => {
+    const onNext = vi.fn();
+    renderLightbox({ onNext, position: "1 of 4" });
+    expect(screen.queryByLabelText("Previous picture")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Next picture"));
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("lightbox-position")).toHaveTextContent("1 of 4");
+    expect(screen.getByText(/swipe for the next picture/)).toBeInTheDocument();
+  });
+
+  it("steps with the arrow keys, but not with a modifier held", () => {
+    const onPrev = vi.fn();
+    const onNext = vi.fn();
+    renderLightbox({ onPrev, onNext });
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(onPrev).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the arrow keys alone while the viewer is closed", () => {
+    const onNext = vi.fn();
+    renderLightbox({ src: null, onNext });
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it("a sideways swipe on the un-zoomed picture steps; a short drag does not", () => {
+    const onPrev = vi.fn();
+    const onNext = vi.fn();
+    renderLightbox({ onPrev, onNext });
+    const s = surfaceFor();
+    fireEvent.pointerDown(s, { clientX: 300, clientY: 200, pointerId: 1 });
+    fireEvent.pointerMove(s, { clientX: 150, clientY: 210, pointerId: 1 });
+    fireEvent.pointerUp(s, { clientX: 150, clientY: 210, pointerId: 1 });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    fireEvent.pointerDown(s, { clientX: 100, clientY: 200, pointerId: 2 });
+    fireEvent.pointerMove(s, { clientX: 260, clientY: 190, pointerId: 2 });
+    fireEvent.pointerUp(s, { clientX: 260, clientY: 190, pointerId: 2 });
+    expect(onPrev).toHaveBeenCalledTimes(1);
+    fireEvent.pointerDown(s, { clientX: 100, clientY: 200, pointerId: 3 });
+    fireEvent.pointerMove(s, { clientX: 120, clientY: 200, pointerId: 3 });
+    fireEvent.pointerUp(s, { clientX: 120, clientY: 200, pointerId: 3 });
+    expect(onPrev).toHaveBeenCalledTimes(1);
+    expect(onNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("a drag on a zoomed picture pans and never changes the picture", () => {
+    const onNext = vi.fn();
+    renderLightbox({ onNext });
+    const s = surfaceFor();
+    wheel(s, -100);
+    fireEvent.pointerDown(s, { clientX: 300, clientY: 200, pointerId: 1 });
+    fireEvent.pointerMove(s, { clientX: 100, clientY: 200, pointerId: 1 });
+    fireEvent.pointerUp(s, { clientX: 100, clientY: 200, pointerId: 1 });
+    expect(onNext).not.toHaveBeenCalled();
   });
 });

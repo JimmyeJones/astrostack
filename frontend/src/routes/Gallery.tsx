@@ -46,6 +46,7 @@ import {
 } from "../components/videoFraming";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { runSlideKey, showFromHref, videoSlideKey } from "../showAndTell";
+import { lightboxNeighbours } from "../lightboxNav";
 import { HintAnchor } from "../components/HintAnchor";
 import {
   WEIGHTING_UNUSED_LABEL, minMaxIgnoresWeighting, weightingUnusedNote,
@@ -113,6 +114,17 @@ export function filterByMethod(items: GalleryItem[], filter: MethodFilter): Gall
 export type GalleryEntry =
   | { kind: "run"; run: GalleryItem }
   | { kind: "video"; video: VideoStill };
+
+/** The same grid card? Used to find the open picture's neighbours. */
+export function sameGalleryEntry(a: GalleryEntry, b: GalleryEntry): boolean {
+  if (a.kind === "run" && b.kind === "run") {
+    return a.run.safe === b.run.safe && a.run.run_id === b.run.run_id;
+  }
+  if (a.kind === "video" && b.kind === "video") {
+    return a.video.capture_id === b.video.capture_id;
+  }
+  return false;
+}
 
 // Sortable instant for either kind of entry. Both timestamps are UTC ISO 8601
 // but a stack run's carries microseconds and a video still's doesn't, so compare
@@ -731,6 +743,23 @@ export function GalleryView() {
     ? filterVideoStills(allStills, search)
     : [];
   const entries = mergeGalleryEntries(items, stills, sort);
+  // Previous / next in the viewer walk the grid exactly as it is drawn — the
+  // same search, filters and sort — so the arrow lands on the card beside the
+  // one he opened, a Moon still included (it opens in its own viewer below).
+  const openEntry: GalleryEntry | null = viewing
+    ? { kind: "run", run: viewing }
+    : viewingStill ? { kind: "video", video: viewingStill } : null;
+  const nav = lightboxNeighbours(entries, openEntry, sameGalleryEntry);
+  const openGalleryEntry = (e: GalleryEntry | null) => {
+    if (!e) return;
+    setViewing(e.kind === "run" ? e.run : null);
+    setViewingStill(e.kind === "video" ? e.video : null);
+  };
+  const navProps = nav ? {
+    onPrev: nav.prev ? () => openGalleryEntry(nav.prev) : undefined,
+    onNext: nav.next ? () => openGalleryEntry(nav.next) : undefined,
+    position: nav.position,
+  } : {};
   // Only offer the Cleanest sort once it's a meaningful comparison: more than one
   // image and at least one carries a measured σ (pre-v0.48 runs have none).
   const anyNoise = allItems.some((it) => hasNoise(it.noise_sigma));
@@ -964,6 +993,7 @@ export function GalleryView() {
               };
             })()
           : {})}
+        {...navProps}
         onClose={() => setViewing(null)}
       />
 
@@ -1003,6 +1033,7 @@ export function GalleryView() {
               return { shareFilename: filename, shareTitle: title, shareText: text };
             })()
           : {})}
+        {...navProps}
         onClose={() => setViewingStill(null)}
       />
     </Stack>
