@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-11-16 (Scout, branch `claude/sweet-euler-rxvumk`) — QA rotation sweep (3), new angle — non-regular entries in `incoming/` through a real scan and a stub-ASTAP solve: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8844 passed / 7 skipped on `417926ab` (xdist `-n 4`, BLAS capped, 14m37s).
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. No open PRs. **Dogfood `--build --mosaic`:** exit 0, nothing overflowing,
+  no console errors; the Target-page paragraph agrees with itself (thin top-right panel on map, readiness and next move).
+- **Sweep (3), new angle.** Every earlier (3) sweep fed the binaries regular files (cut short, pre-sized, unreadable,
+  in a read-only tree); none asked what the scan and the solve do with entries that are *not* regular files. Scratch
+  probe (deleted): `incoming/` with a normal `M_42_sub` (3 subs), a sub there that is a symlink to a FITS outside
+  `incoming/`, a night folder `M_31_sub` that is a symlink to a folder outside it, a dangling `.fit` symlink, a
+  directory and a FIFO each named like a sub, `M_42_sub/self -> .` and `incoming/loop -> incoming`; then the real
+  `scan_and_organize` (twice more as rescans) and `solve_one` with the readonly-guard's littering stub ASTAP.
+  Results: scan 0.3 s, no hang; the dangling / directory / FIFO entries are dropped by `p.is_file()` and never
+  registered, so they never reach the solver (driving `solve_one` on the dangling one directly → a clean
+  `FileNotFoundError` naming the sub; on the FIFO directly it blocks — unreachable through the scan, not filed); the
+  symlinked sub and the symlinked night folder register and solve via the scratch copy, with the outside tree
+  byte-for-byte unchanged (no sidecars); `self -> .` is not followed; rescans add nothing.
+- **Read, not filed:** `incoming/loop -> incoming` is taken as a Seestar container (`_looks_like_seestar_container`)
+  and mints a duplicate target `loop` holding the same subs again. A loop back to the drop folder cannot be made
+  over the SMB share the owner copies through, and nothing suggests one exists — the #878 double-registration LEAD
+  stays gated on `twin_target_overcount` v1, not on this.
+- **Rotation: (3) done → next sweep is (4)** (the webapp routers; "not yet run" there: `HEAD` / `Range` on the
+  file-serving GETs).
+
 ## 2026-11-16 (Builder, branch `claude/sweet-feynman-wowzhm`) — v0.507.1: the picture viewer's toolbar ran off a phone's left edge (found driving v0.507.0 in a real browser).
 
 - **Baseline / PRs.** Suite 8844 passed / 7 skipped on `f5d7386c` (xdist `-n 4`, BLAS capped, 17m26s). No open PRs.
