@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-11-16 (Builder, branch `claude/sweet-feynman-yngszo`) — nothing ungated to build; dogfood `--build --deep --editor`: CLEAN.
+
+- **Baseline / PRs.** Suite 8844 passed / 7 skipped on `765dc533` (xdist `-n 4`, BLAS capped, 17m27s). No open PRs.
+  Bugs, Features and the Autonomy & friendliness LEADs re-read: every entry gated on the owner, a diagnostic, or a recorded stand-down.
+- **Why `--deep`.** It was the stalest flag — last recorded pass 2026-10-14 (v0.495.5), ~40 versions back, and the only
+  one that holds the owner's *frame count*. Paired with `--editor` so the editor drive ran in the same pass.
+- **Numbers, against the 2026-10-14 baseline.** `[deep] rows rendered: 301 of 1200 · DOM nodes 7,535 · first paint 1,222 ms`
+  (was 301 / 7,578 / 1,685 ms); foot *"Showing the first 300 of 1,200 subs. / Show all 1,200"*; scroll-to-foot grew it to
+  **601 rows / 14,478 nodes** (the `IntersectionObserver` path); no console errors, no failed requests. Page heights at the
+  standing baseline (`[phone] /life-list [Still to shoot]` 14,513 px — the recorded not-a-bug, SHIPPED v0.492.2).
+- **Editor drive.** Add menu offers all 21 ops, each re-rendered the preview; Undo/Redo applied; Auto's "What Auto did"
+  paragraph names its measured inputs (sky ~0.003, 4.14 px stars) and tuned values; the taste chips moved Auto and the two
+  marked at-limit chips said so; taste profile reset. Nothing overflowing, no console errors.
+- **Read as one paragraph.** The first-run notice board carries one note (ASTAP not set up, right for this box); `/tonight`'s
+  week plan names the deep target every night, the flag's documented side effect, not a finding. Not filed: nothing.
+
 ## 2026-11-16 (Builder, branch `claude/sweet-feynman-71op74`) — nothing ungated to build; v0.506.43's thin-panel allowance probed against a real faint nebula: CLEAN.
 
 - **Baseline / PRs.** Suite 8844 passed / 7 skipped on `7bca216a` (xdist `-n 4`, BLAS capped, 14m05s). No open PRs.
