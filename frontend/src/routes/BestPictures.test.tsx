@@ -297,3 +297,29 @@ describe("BestPicturesView — the caption a shared picture carries", () => {
       restore();
     });
 });
+
+describe("BestPicturesView — previous / next in the full-screen viewer", () => {
+  it("steps through the wall in its ranked order", async () => {
+    mockGallery();
+    vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
+      items: [
+        pic({ safe: "m31", target_name: "M31", run_id: 1, output_basename: "best" }),
+        pic({ safe: "m42", target_name: "M42", run_id: 7, output_basename: "second",
+          preview_url: "/api/targets/m42/stack-runs/7/preview" }),
+      ],
+    });
+    renderWall();
+    const imgs = await screen.findAllByRole("img");
+    fireEvent.click(imgs[0]);
+    expect(await screen.findByAltText("M31 · best")).toBeInTheDocument();
+    expect(screen.getByTestId("lightbox-position")).toHaveTextContent("1 of 2");
+
+    fireEvent.click(screen.getByLabelText("Next picture"));
+    expect(await screen.findByAltText("M42 · second")).toBeInTheDocument();
+    expect(screen.getByTestId("lightbox-position")).toHaveTextContent("2 of 2");
+    expect(screen.queryByLabelText("Next picture")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(await screen.findByAltText("M31 · best")).toBeInTheDocument();
+  });
+});

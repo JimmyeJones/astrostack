@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-11-16 (Builder, branch `claude/sweet-feynman-jp756r`)
+
+### v0.507.0 — previous / next in the full-screen picture viewer
+
+**What.** A beginner opening his pictures from the Gallery or "My best pictures" got one picture per
+open: to see the next he had to close the viewer and click the next card — the one thing every photo viewer on
+his phone does that this one did not (the 2026-10-28 Scout found `ImageLightbox` had no prev/next while looking
+for it). `ImageLightbox` takes optional `onPrev` / `onNext` / `position`; given them it draws round edge arrows
+("Previous picture" / "Next picture"), steps on ←/→ (window-bound, so no click first; ignored with a modifier held —
+Alt+← is browser back — and when the key belongs to a text field or an open download menu, which walks its items
+with the arrows), and on a phone a one-finger sideways flick ≥ 60 px on the **un-zoomed** picture (a zoomed drag
+still pans; a mostly-vertical or short movement never changes picture). The footer reads "3 of 12 · … · ← → or
+swipe for the next picture". The ends stop rather than wrap. **Gallery:** walks `entries` exactly as drawn (same
+search, filters, sort), a Moon/Sun still included — stepping across kinds swaps the run viewer for the still
+viewer (`sameGalleryEntry`). **My best pictures:** the ranked order. The History page and the editor show one
+picture and pass nothing, so they look exactly as before. Pure halves in `frontend/src/lightboxNav.ts`.
+
+**Tests (+16 vitest).** `lightboxNav.test.ts` (neighbours/ends/identity/lone or vanished picture; swipe
+thresholds incl. NaN; key ownership); `ImageLightbox.test.tsx` (unchanged look without the props; buttons,
+position, hint, no arrow past an end; keys incl. Alt and a closed viewer; swipe vs short drag with a PointerEvent
+shim — jsdom has none, so its pointer events carry no coordinates; a zoomed drag never steps); a Gallery walk
+run → Moon still → run stopping at the end; a Best-pictures walk forward and back. Frontend only: no config,
+schema, API, on-disk or default change.
+
 ## 2026-11-15 (Builder, branch `claude/sweet-feynman-g97h42`)
 
 ### v0.506.43 — a mosaic panel shot ~9× shallower than the rest is levelled

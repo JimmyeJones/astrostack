@@ -10,6 +10,7 @@ import { api, type BestPicture } from "../api/client";
 import { formatCaptureNights } from "../format";
 import { sharePictureText } from "../share";
 import { ImageLightbox } from "../components/ImageLightbox";
+import { lightboxNeighbours } from "../lightboxNav";
 import { storedPreviewScaleBar } from "../components/AnnotatedImage";
 import { postCaptionForRun } from "../components/postCaption";
 import { WallpaperMenu } from "../components/WallpaperMenu";
@@ -242,6 +243,16 @@ export function BestPicturesView() {
               };
             })()
           : {})}
+        {...(() => {
+          // Previous / next walk the wall in its ranked order.
+          const nav = lightboxNeighbours(items, viewing,
+            (a, b) => a.safe === b.safe && a.run_id === b.run_id);
+          return nav ? {
+            onPrev: nav.prev ? () => setViewing(nav.prev) : undefined,
+            onNext: nav.next ? () => setViewing(nav.next) : undefined,
+            position: nav.position,
+          } : {};
+        })()}
         onClose={() => setViewing(null)}
       />
     </Stack>
