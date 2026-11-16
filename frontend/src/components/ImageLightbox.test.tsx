@@ -253,6 +253,21 @@ describe("ImageLightbox", () => {
     expect(screen.getByRole("button", { name: "Wallpaper" })).toBeInTheDocument();
   });
 
+  it("lets the toolbar wrap inside the screen rather than run off a phone's left edge", () => {
+    // One unbreakable right-anchored row grew leftwards past x = 0 on a phone
+    // (the Gallery's run viewer carries a dozen controls), leaving Zoom in /
+    // Zoom out — and on a 320 px phone Reset and Download — untappable.
+    // jsdom has no layout, so pin the two properties that keep it on screen.
+    renderLightbox({ toolbarExtra: <button type="button">Wallpaper</button> });
+    const bar = screen.getByTestId("lightbox-toolbar");
+    expect(bar.style.getPropertyValue("--group-wrap")).toBe("wrap");
+    expect(bar.style.maxWidth).toBe("calc(100% - 20px)");
+    // Every control is still in it, Close included.
+    for (const name of ["Zoom in", "Zoom out", "Reset zoom", "Close"]) {
+      expect(bar.contains(screen.getByRole("button", { name }))).toBe(true);
+    }
+  });
+
   it("does not crash on a pointermove that arrives after pointerup", () => {
     // Regression: the pan updater used to read drag.current inside setState,
     // which could run after pointerup had nulled it → crash.
