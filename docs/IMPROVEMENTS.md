@@ -1687,27 +1687,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   setup before their own subs will solve, so the tick wants to stay the setup's, with the frame count as an
   extra reassurance line at most.
 
-- **🟡 HALF (a) IS ALREADY BUILT — don't re-pick it (Builder 2026-09-02, checked in the code while sizing it).**
-  The **"Save this map"** button exists on `routes/Sky.tsx` (top-right of the My-map panel, `href={api.myMapUrl()}`
-  with a dated `download={myMapFilename()}` → `astrostack-my-map-YYYY-MM-DD.png`), exactly as this entry
-  specifies, with its own exported filename helper and tests. **Only half (b) — the Dashboard preview card — is
-  open**, and it is the half whose own Care note collides with the standing IA priority ("don't append one more
-  always-on card"), so it needs a *grouping* to live inside rather than a slot at the top. Sized and left.
-
-  *(Original spec follows.)* **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the
-  owner *save* their
-  universe map, and put it where they'd think to look for it.** *(Pillar: enjoy + share — PRIORITY 3.
-  Size: S. Confidence: high — the picture already exists at a stable URL.)* "My map" is a pride object:
-  the one image that says "here's everywhere I've pointed my scope this year". Right now it only exists
-  inside the Sky page. Two cheap additions: (a) a **"Save this map"** button beside the mode switch —
-  the PNG is already served whole at `/api/sky/my-map.png`, so this is a download link with a nice
-  filename (`astrostack_my_sky_<date>.png`), not new rendering; and (b) a small **preview card on the
-  Dashboard** ("Where you've been · N pictures") that links into the Sky page's My-map mode, so a
-  beginner meets it instead of having to find a third segmented-control option. Careful with (b): the
-  standing IA item says the Dashboard is already busy — put it *inside* an existing grouping rather than
-  appending one more always-on card, and only show it once there are, say, three or more mapped pictures
-  (below that the map is mostly empty sky and reads as a bug rather than a milestone).
-
 - **NEW IDEA (Builder 2026-08-27, spotted while fixing the two "dataclass tolerates, Pydantic doesn't" list
   endpoints in v0.277.5) — a tiny test that pins the *rule* rather than the four instances: every list endpoint
   that reads a per-item file off disk degrades per item.** *(Pillar: trust / maintainability — PRIORITY 3.
@@ -3185,6 +3164,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
 - ✅ v0.507.4 **The owner's "cluttered again" (2026-11-17) gets a mechanical guard: every route has a ceiling on the card/note/banner kinds and `<Alert>` sites it renders, which can only go down; AGENTS.md §1 gains "Recursive organization" (≤ 5 top-level groups, one notice board per page); a ⭐ declutter entry takes the worst pages a slice at a time** (`tests/test_ui_clutter_budget.py`)
+- ✅ (closed 2026-11-17, no version) **"Save this map" + a Dashboard pointer into My map — both halves were already built: (a) the Sky page's Save button, (b) v0.306.3's "See it on My map →" line under the stat grid** — entry cut whole to `SHIPPED.md` 2026-11-17.
 - ✅ v0.507.3 **The Dashboard sample card's "Remove" (and at 320 px "Open sample") no longer sits off a phone's right edge once the sample is stacked, and the Auto-grade dialog's Sensitivity field no longer pokes out of it on a 320 px phone (`SampleImageCard` actions `maxWidth`, `AutoGradeModal` `maw`); the dogfood probe now reports any control drawn past an edge or a clipping box (`dogfood_probe.mjs` `offEdgeControls`)** — Builder 2026-11-17, the probe gap v0.507.1 recorded; SHIPPED.md.
 - ✅ v0.507.2 **With "North up" on, a picture opened or stepped to in the Gallery viewer is no longer drawn the way it was saved and then spun once its annotations answer — the turned URL is shown while that answer is pending (`Gallery.tsx` `viewingShowTurned`; downloads still wait)** — Builder 2026-11-16, the unrun v0.507.0 prev/next-over-two-runs angle; SHIPPED.md.
 - ✅ v0.507.1 **The full-screen picture viewer's toolbar no longer runs off a phone's left edge — Zoom in / Zoom out (and on a 320 px phone Reset and Download) were untappable; the row now wraps inside the screen (`ImageLightbox` toolbar `wrap`, `maxWidth`)** — Builder 2026-11-16, found driving v0.507.0 on a phone; SHIPPED.md.
