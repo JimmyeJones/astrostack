@@ -1,143 +1,39 @@
-import {
-  ActionIcon, Alert, Box, Button, Card, Center, Group, Image, Loader, Menu, Paper,
-  SimpleGrid, Stack, Text, Title, Tooltip,
-} from "@mantine/core";
-import {
-  IconActivity, IconClock, IconLayoutGrid, IconPhoto, IconPhotoDown, IconStack2, IconStars,
-} from "@tabler/icons-react";
+import { Center, Loader, Stack, Title } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { announceFullResDownload, fullResPngLabel } from "../fullres";
-import { formatDiskSize, formatIntegration, pictureDateLabel } from "../format";
-import { loadDismissedSig, saveDismissedSig } from "../dismissal";
-import { settingsLink } from "../settingsSections";
-import { astapReadiness, astapReadinessSignature } from "../components/dashboard/astapReadiness";
-import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
-import { ContinueTonightCard } from "../components/ContinueTonightCard";
-import { FirstImageCard } from "../components/dashboard/FirstImageCard";
-import { FirstLookStrip } from "../components/dashboard/FirstLookStrip";
-import { MissingFilesNote } from "../components/dashboard/MissingFilesNote";
-import { IncomingLagNote } from "../components/dashboard/IncomingLagNote";
-import { StuckImportNote } from "../components/dashboard/StuckImportNote";
-import { NewSubsWaitingNote } from "../components/dashboard/NewSubsWaitingNote";
-import { OverTrimmedNote } from "../components/dashboard/OverTrimmedNote";
-import { StackFailuresNote } from "../components/dashboard/StackFailuresNote";
-import { PointHereTonightCard } from "../components/dashboard/PointHereTonightCard";
-import { AutoEditOffNote } from "../components/dashboard/AutoEditOffNote";
-import { AutoStackOffNote } from "../components/dashboard/AutoStackOffNote";
-import { UnexportedEditsNote } from "../components/dashboard/UnexportedEditsNote";
-import { FrameCountBadge } from "../components/target/FrameCountBadge";
-import { ImagingCalendarCard } from "../components/ImagingCalendarCard";
-import { LastNightCard } from "../components/LastNightCard";
-import { OffNightCard } from "../components/OffNightCard";
-import { LibraryProgressCard } from "../components/LibraryProgressCard";
 import { QueryError } from "../components/QueryError";
-import { SampleImageCard } from "../components/SampleImageCard";
-import { SuggestTargetsCard } from "../components/SuggestTargetsCard";
-import { VideoCapturesCard } from "../components/VideoCapturesCard";
-import { BestPicturesStrip } from "../components/BestPicturesStrip";
-import { ImagingLogButton } from "../components/ImagingLogButton";
-import { ClosingSeasonNote } from "../components/ClosingSeasonNote";
-import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
-import { lifeListLine } from "../components/lifeListLine";
-import { describeSkyCoverage } from "../components/skyCoverage";
-import { InsightTabs } from "../components/InsightTabs";
+import { AtAGlance } from "../components/dashboard/AtAGlance";
+import { DashboardInsights } from "../components/dashboard/DashboardInsights";
+import { DashboardNotices } from "../components/dashboard/DashboardNotices";
+import { GettingStarted } from "../components/dashboard/GettingStarted";
+import { YourPictures } from "../components/dashboard/YourPictures";
 
-// Dismissal of the first-run readiness banners, keyed to the *specific* problem
-// so dismissing one never suppresses a genuinely different (or returning) one:
-// we store the current readiness *signature* rather than a bare boolean, and a
-// banner reappears whenever the live signature differs from the dismissed one.
-// A banner also self-clears once the problem is fixed (readiness → ready → no
-// signature). localStorage-only and defensively guarded so a disabled/broken
-// store never breaks the page.
-const ASTAP_DISMISS_KEY = "astrostack.dashboard.astapBannerDismissed";
-const FOLDER_DISMISS_KEY = "astrostack.dashboard.folderBannerDismissed";
-
-// Trigger a picture download without navigating: the recent-stack card is itself
-// a <Link>, so we can't nest a download <a> inside it. Programmatically click a
-// transient anchor instead (the endpoint serves a Content-Disposition attachment,
-// so this saves the PNG rather than opening it).
-export function triggerPictureDownload(href: string): void {
-  const a = document.createElement("a");
-  a.href = href;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
+// Kept importable from here: the recent-picture download helper predates the
+// split of this page into its groups.
+export { triggerPictureDownload } from "../components/dashboard/YourPictures";
 
 /**
- * One number on the stat row. When the question it answers has an obvious next
- * screen (`to`), the whole tile becomes a link to it — "2 active jobs" should not
- * send a beginner hunting in the sidebar for the Jobs page. Deliberately styled
- * identically either way: this should read as "the number is a link", not as new
- * chrome, and the tiles with no single right destination ("Integration",
- * "Frames") stay plain rather than being given an arbitrary one.
+ * The home page, in **five top-level groups** — the owner's "recursive
+ * organization" rule (AGENTS.md §1, 2026-11-17), checked by
+ * `Dashboard.test.tsx` ("five groups"):
+ *
+ * 1. **Notices** — one prioritised board for every setup problem, fault and
+ *    offer; the top two inline, the rest folded behind "N more notes".
+ * 2. **Getting started** — the first-run map and the sample image (both
+ *    self-hide on an established install).
+ * 3. **At a glance** — the stat tiles, then the sky-coverage and life-list lines.
+ * 4. **Your pictures** — newest and best, as two tabs of one section.
+ * 5. **Insights** — tonight / recent / progress, as tabs.
+ *
+ * Each group lives in `components/dashboard/`. **A new Dashboard feature joins
+ * one of these groups**: a warning goes on the notice board, a number into At a
+ * glance, an analysis card into an Insights tab. It never goes onto this page as
+ * a block of its own.
  */
-function StatCard({ icon, label, value, sub, to }: {
-  icon: React.ReactNode; label: string; value: string; sub?: string; to?: string;
-}) {
-  const body = (
-    <Group gap="sm" wrap="nowrap">
-      <Center w={40} h={40} bg="dark.6" style={{ borderRadius: 8, flexShrink: 0 }}>
-        {icon}
-      </Center>
-      <div style={{ minWidth: 0 }}>
-        <Text size="xs" c="dimmed">{label}</Text>
-        <Text fw={700} size="lg" lh={1.2}>{value}</Text>
-        {sub ? <Text size="xs" c="dimmed">{sub}</Text> : null}
-      </div>
-    </Group>
-  );
-  if (!to) {
-    return <Paper withBorder p="md" radius="md">{body}</Paper>;
-  }
-  return (
-    <Paper
-      withBorder p="md" radius="md" component={Link} to={to}
-      // An <a> would otherwise take the browser's link colour and underline —
-      // the tile must look exactly like its plain siblings.
-      style={{ color: "inherit", textDecoration: "none" }}
-      aria-label={`${label}: ${value}`}
-    >
-      {body}
-    </Paper>
-  );
-}
-
 export function Dashboard() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["stats"], queryFn: api.getStats, refetchInterval: 10_000,
   });
-  const system = useQuery({ queryKey: ["system"], queryFn: api.getSystem, staleTime: 60_000 });
-  // "How much of the sky have you actually seen?" — a pride stat that lived one
-  // nav click and one mode switch away, under My map. It's measured server-side
-  // off each run's own WCS and cached against the same "did a picture change?"
-  // fingerprint the map uses, so saying it here costs one cheap request and no
-  // new machinery. Same key as the map's own query, so the two share a cache —
-  // and the same helper, verbatim, so the two sentences can never drift.
-  const coverage = useQuery({
-    queryKey: ["sky-coverage"], queryFn: () => api.skyCoverage(), staleTime: 60_000,
-  });
-  // "42 of the 110 Messier objects" — the counts half of the life list, which
-  // already exists as a page nothing on the home screen ever points at. The
-  // counts-only route so the Dashboard doesn't pull ~160 catalog rows (and the
-  // per-target preview stat behind their thumbnails) for one sentence; its own
-  // query key for the same reason — sharing the page's would make the page's
-  // full fetch the thing that fills this cache.
-  const lifeList = useQuery({
-    queryKey: ["life-list-counts"], queryFn: () => api.lifeListCounts(),
-    staleTime: 60_000,
-  });
-  const [astapDismissedSig, setAstapDismissedSig] = useState(() => loadDismissedSig(ASTAP_DISMISS_KEY));
-  const [folderDismissedSig, setFolderDismissedSig] = useState(() => loadDismissedSig(FOLDER_DISMISS_KEY));
-
-  const solve = astapReadiness(system.data?.astap);
-  const folders = folderReadiness(system.data?.folders);
-  const astapSig = astapReadinessSignature(solve);
-  const folderSig = folderReadinessSignature(folders);
 
   if (isError && !data) {
     return <QueryError error={error} onRetry={() => refetch()} />;
@@ -146,377 +42,16 @@ export function Dashboard() {
     return <Center h={300}><Loader /></Center>;
   }
 
-  const accept = data.acceptance_rate == null ? "—" : `${Math.round(data.acceptance_rate * 100)}%`;
-  // Rendered from the raw byte counts so this tile agrees with the Storage
-  // page's headroom note; the decimal `*_gb` fields are the fallback for an
-  // older backend that doesn't send bytes.
-  const free = data.disk.free_bytes != null
-    ? formatDiskSize(data.disk.free_bytes)
-    : data.disk.free_gb != null ? `${data.disk.free_gb} GB` : "—";
-  const total = data.disk.total_bytes != null
-    ? formatDiskSize(data.disk.total_bytes)
-    : data.disk.total_gb != null ? `${data.disk.total_gb} GB` : null;
-  const usedSub = total ? `of ${total}` : undefined;
-  const coverageLine = coverage.data
-    ? describeSkyCoverage(coverage.data.deg2, coverage.data.sky_fraction,
-                          coverage.data.n_pictures, coverage.data.summed_deg2)
-    : "";
-  const lifeLine = lifeListLine(lifeList.data);
-
   return (
-    <Stack>
-      {/* Every setup problem this page can raise, in one prioritised area (IA
-          slice (e); the same board the Target page uses). Both notes are
-          self-hiding and separately dismissable, so the board measures which of
-          them actually speaks and folds any surplus behind one line. A later
-          Dashboard warning should join this board rather than become one more
-          always-on banner. */}
-      <NoticeBoard
-        data-testid="dashboard-notes"
-        items={[
-          { key: "folders", priority: NOTICE_PRIORITY.blocking,
-            node: !folders.ready && folderSig !== folderDismissedSig ? (
-              <Alert color="yellow" variant="light"
-                withCloseButton
-                onClose={() => {
-                  if (folderSig) { setFolderDismissedSig(folderSig); saveDismissedSig(FOLDER_DISMISS_KEY, folderSig); }
-                }}
-                title={folders.kind === "incoming"
-                  ? (folders.problem === "missing"
-                    ? "Your incoming folder doesn't exist yet"
-                    : "Your incoming folder isn't writable")
-                  : (folders.problem === "missing"
-                    ? "Your library folder doesn't exist yet"
-                    : "Your library folder isn't writable")}>
-                <Text size="sm">
-                  {folders.kind === "incoming"
-                    ? (folders.problem === "missing"
-                      ? "The folder you drop frames into can't be found — \"Scan incoming\" will "
-                        + "find nothing until it exists. Check the folder is mounted and the path "
-                        + "is right."
-                      : "The folder you drop frames into is read-only, so scanning it may fail. "
-                        + "Check the folder's permissions or the path.")
-                    : (folders.problem === "missing"
-                      ? "The folder your stacks and library are written to can't be found — "
-                        + "processing will fail until it exists. Check the folder is mounted and "
-                        + "the path is right."
-                      : "The folder your stacks and library are written to is read-only, so "
-                        + "processing can't save its results. Check the folder's permissions or "
-                        + "the path.")}
-                </Text>
-                <Button component={Link} to={settingsLink("folders")} size="xs" variant="light" color="yellow" mt="xs">
-                  Fix in Settings
-                </Button>
-              </Alert>
-            ) : null },
-          { key: "astap", priority: NOTICE_PRIORITY.warning,
-            node: !solve.ready && astapSig !== astapDismissedSig ? (
-              <Alert color="yellow" variant="light"
-                withCloseButton
-                onClose={() => {
-                  if (astapSig) { setAstapDismissedSig(astapSig); saveDismissedSig(ASTAP_DISMISS_KEY, astapSig); }
-                }}
-                title={solve.kind === "astap" && solve.cannotRun
-                  ? "ASTAP is there but can't be started"
-                  : solve.kind === "astap"
-                  ? "Plate-solving isn't set up yet"
-                  : "Plate-solving needs a star database"}>
-                <Text size="sm">
-                  {solve.kind === "astap" && solve.cannotRun
-                    ? "Solving gives every frame sky coordinates, and it's required before you "
-                      + "can stack anything. ASTAP (the plate-solver) was found, but it won't "
-                      + "start — check the file is executable and built for this machine."
-                    : solve.kind === "astap"
-                    ? "Solving gives every frame sky coordinates, and it's required before you "
-                      + "can stack anything. ASTAP (the plate-solver) wasn't found, so set it up "
-                      + "before you drop in frames."
-                    : "ASTAP was found, but it has no star database to match against — solving "
-                      + "needs one, and solving is required before you can stack. Add a star "
-                      + "database before you drop in frames."}
-                </Text>
-                <Button component={Link} to={settingsLink("plate-solving")} size="xs" variant="light" color="yellow" mt="xs">
-                  Fix in Settings
-                </Button>
-              </Alert>
-            ) : null },
-          // A live storage fault, and one the app is otherwise silent about:
-          // the frames are all still listed, so nothing looks wrong until a
-          // walk-away stack comes out thin. Ranked with the other warnings and
-          // below the blocking folder problem, which is the same fault's
-          // louder cousin. Self-hiding at zero.
-          { key: "missing-files", priority: NOTICE_PRIORITY.warning,
-            node: <MissingFilesNote /> },
-          // The one serial worker holding the import back. Same rung and the
-          // same shape of silence as its neighbour above: nothing looks wrong —
-          // every target keeps the frame count it had — while the last nights
-          // of shooting simply are not in the library. Self-hiding on a healthy
-          // queue, which is every ordinary minute.
-          { key: "stuck-import", priority: NOTICE_PRIORITY.warning,
-            node: <StuckImportNote /> },
-          // The same silence, measured from the other end: files in `incoming/`
-          // the library has no row for, whether or not anything was ever queued.
-          // Ranked just below the queue note because when both fire they are the
-          // same event and the queued job is the more actionable half — it names
-          // what is holding the worker. Self-hiding at zero and while a night is
-          // still arriving, which is every ordinary install.
-          { key: "incoming-lag", priority: NOTICE_PRIORITY.warning,
-            node: <IncomingLagNote /> },
-          // A target that stopped producing pictures. Same rung as the other
-          // warnings: nothing is corrupt, but the walk-away workflow the owner
-          // relies on has quietly stopped delivering for that target, and the
-          // engine's refusal names the one setting that would fix it. Self-hiding
-          // at zero, which is every healthy install.
-          { key: "stack-failures", priority: NOTICE_PRIORITY.warning,
-            node: <StackFailuresNote /> },
-          // Advisory, and the reason this board exists: work of the user's that
-          // the app isn't showing anywhere. Self-hiding at zero, so on an
-          // ordinary install it costs nothing and the board folds nothing.
-          { key: "unexported-edits", priority: NOTICE_PRIORITY.advisory,
-            node: <UnexportedEditsNote /> },
-          // Not a fault — an offer. `auto_stack` ships on, but an install that
-          // has ever run carries an explicit `false` no upgrade may overwrite
-          // (§9), so the whole walk-away chain waits on one switch nothing in
-          // the app ever mentioned. Speaks only on a night that was captured and
-          // stacked nothing, and never again once dismissed.
-          { key: "auto-stack-off", priority: NOTICE_PRIORITY.advisory,
-            node: <AutoStackOffNote /> },
-          // The same offer for the step *after* stacking. Ranked just below its
-          // sibling because the two are sequential: with auto-stack off there is
-          // nothing to finish, and this note stays silent until the scan really
-          // has stacked something and left it as a linear master.
-          { key: "auto-edit-off", priority: NOTICE_PRIORITY.advisory,
-            node: <AutoEditOffNote /> },
-          // The same shape for the other direction: not work of theirs the app
-          // isn't showing, but light of theirs the picture doesn't have yet.
-          // The Target page has said this per target since v0.90.0; with
-          // auto-stack off and a target per object, the library-wide question
-          // ("which one do I open?") had no answer anywhere. Self-hiding at
-          // zero, so a fully-stacked library costs nothing and folds nothing.
-          { key: "new-subs-waiting", priority: NOTICE_PRIORITY.advisory,
-            node: <NewSubsWaitingNote /> },
-          // Not an offer but a *fault*, so it outranks the two above: an older
-          // build's border trim is still cropping finished pictures to a sliver,
-          // because the crop it chose lives in each run's saved recipe and
-          // nothing re-derives that. The per-picture note is in the editor; this
-          // is the "which ones?" the owner had no surface for after upgrading.
-          { key: "over-trimmed", priority: NOTICE_PRIORITY.warning,
-            node: <OverTrimmedNote /> },
-          // An offer with a deadline, which is why it is here at all rather than
-          // only on the planner: a target whose season ends this week is gone
-          // for a year if the next clear night goes elsewhere. Ranked with the
-          // other offers — nothing is broken — and deliberately narrow: only the
-          // last week or so speaks here (`CLOSING_URGENT_WEEKS`), the rest of
-          // the season stays on Tonight's own card. Self-hiding most of the year.
-          { key: "closing-season", priority: NOTICE_PRIORITY.advisory,
-            node: <ClosingSeasonNote /> },
-        ]}
-      />
-
+    <Stack data-testid="dashboard">
+      {/* Above the title on purpose: a blocking setup problem is the first
+          thing the page says. */}
+      <DashboardNotices />
       <Title order={2}>Dashboard</Title>
-
-      {/* The positive first-run map: four plain steps from a folder of subs to a
-          finished picture, each ticking itself off. Self-hides on an established
-          install (every step already done on first render) and once dismissed.
-          Kept above the fold on purpose: it is what orients a brand-new library. */}
-      <FirstImageCard />
-
-      <SampleImageCard />
-
-      <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }}>
-        <StatCard icon={<IconStars size={22} color="var(--mantine-color-violet-4)" />}
-          label="Targets" value={String(data.n_targets)}
-          sub={`${data.n_targets_with_stacks} stacked`} to="/library" />
-        <StatCard icon={<IconClock size={22} color="var(--mantine-color-violet-4)" />}
-          label="Integration" value={formatIntegration(data.integration_hours * 3600)} />
-        <StatCard icon={<IconPhoto size={22} color="var(--mantine-color-violet-4)" />}
-          label="Frames" value={String(data.n_frames)}
-          sub={`${data.n_frames_accepted} kept · ${accept}`} />
-        <StatCard icon={<IconStack2 size={22} color="var(--mantine-color-violet-4)" />}
-          label="Stacks" value={String(data.n_stack_runs)} to="/gallery" />
-        <StatCard icon={<IconActivity size={22} color="var(--mantine-color-violet-4)" />}
-          label="Active jobs" value={String(data.active_jobs)} to="/jobs" />
-        <StatCard icon={<IconLayoutGrid size={22} color="var(--mantine-color-violet-4)" />}
-          label="Free disk" value={free} sub={usedSub} to="/storage" />
-      </SimpleGrid>
-
-      {/* One quiet line rather than another card: it belongs with the counts
-          above it, and the busy-page rule says a new fact joins a grouping
-          instead of becoming one more block. Self-hides until a finished
-          picture actually carries a position, so a fresh install sees nothing
-          and no number is invented. */}
-      {coverageLine ? (
-        <Text size="sm" c="dimmed" mt={-4} data-testid="sky-coverage-line">
-          {coverageLine}{" "}
-          <Text component={Link} to="/sky?view=mine" size="sm" c="violet" span>
-            See it on My map →
-          </Text>
-        </Text>
-      ) : null}
-
-      {/* The life list's own number, in the same quiet-line grouping as the
-          coverage read-out above rather than a seventh stat tile or an eighth
-          card — the busy-page rule again. Self-hides until at least one famous
-          object is captured, so a fresh install sees nothing and nobody meets a
-          0-of-110 scoreboard before they have made a picture. */}
-      {lifeLine ? (
-        <Text size="sm" c="dimmed" mt={coverageLine ? -8 : -4}
-          data-testid="life-list-line">
-          {lifeLine}{" "}
-          <Text component={Link} to="/life-list" size="sm" c="violet" span>
-            See your life list →
-          </Text>
-        </Text>
-      ) : null}
-
-      <Group justify="space-between" mt="sm">
-        <Title order={4}>Recent stacks</Title>
-        <Group gap="lg">
-          <ImagingLogButton nStacks={data.n_stack_runs} />
-          <Text component={Link} to="/gallery" size="sm" c="violet">View gallery →</Text>
-        </Group>
-      </Group>
-
-      {data.recent_stacks.length === 0 ? (
-        <Card withBorder padding="xl">
-          <Stack align="center" gap="sm">
-            <IconStack2 size={40} color="var(--mantine-color-dark-3)" />
-            <Text c="dimmed">No stacks yet. Stack a target to see it here.</Text>
-            <Text component={Link} to="/library" size="sm" c="violet">Go to Library →</Text>
-          </Stack>
-        </Card>
-      ) : (
-        <SimpleGrid cols={{ base: 1, xs: 2, sm: 3, lg: 4 }}>
-          {data.recent_stacks.map((s) => (
-            <Card key={`${s.safe}-${s.run_id}`} withBorder padding="sm" radius="md"
-              component={Link} to={`/targets/${s.safe}/history`}>
-              <Card.Section>
-                {s.has_preview ? (
-                  <Box style={{ position: "relative" }}>
-                    <Image src={s.preview_url} h={140} alt={s.target_name} />
-                    {/* The card is a <Link>; a wrapper stops every click inside
-                        the menu (trigger *and* the portalled dropdown, which
-                        bubbles through the React tree) from navigating. Guarding
-                        here rather than on the trigger keeps the trigger's onClick
-                        free for Mantine's open-menu handler. */}
-                    <Box
-                      style={{ position: "absolute", top: 6, right: 6 }}
-                      onClick={(e) => { e.stopPropagation(); }}
-                    >
-                      <Menu shadow="md" position="bottom-end" withinPortal>
-                        <Menu.Target>
-                          <Tooltip label="Download this picture (PNG or JPEG)">
-                            <ActionIcon
-                              variant="filled" color="dark" radius="xl"
-                              aria-label={`Download picture of ${s.target_name}`}
-                              style={{ opacity: 0.85 }}
-                            >
-                              <IconPhotoDown size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-                        </Menu.Target>
-                        <Menu.Dropdown>
-                          {s.has_fits ? (
-                            <Menu.Item onClick={() => {
-                              announceFullResDownload(s.canvas_w, s.canvas_h);
-                              triggerPictureDownload(api.stackFullResPngUrl(s.safe, s.run_id));
-                            }}>
-                              {fullResPngLabel(s.canvas_w, s.canvas_h)}
-                            </Menu.Item>
-                          ) : null}
-                          <Menu.Item onClick={() => triggerPictureDownload(
-                            api.stackArtifactUrl(s.safe, s.run_id, "preview"))}>
-                            {s.has_fits ? "Quick preview PNG (up to 1024px)" : "PNG (best quality)"}
-                          </Menu.Item>
-                          <Menu.Item onClick={() => triggerPictureDownload(
-                            api.stackArtifactUrl(s.safe, s.run_id, "jpeg"))}>
-                            JPEG (smaller — best for sharing)
-                          </Menu.Item>
-                        </Menu.Dropdown>
-                      </Menu>
-                    </Box>
-                  </Box>
-                ) : (
-                  <Center h={140} bg="dark.6">
-                    <IconStack2 size={36} color="var(--mantine-color-dark-3)" />
-                  </Center>
-                )}
-              </Card.Section>
-              <Text fw={600} mt="xs" lineClamp={1}>{s.target_name}</Text>
-              <Group justify="space-between" mt={4}>
-                <FrameCountBadge
-                  nFramesUsed={s.n_frames_used}
-                  fieldFulls={s.field_fulls}
-                  color="violet"
-                />
-                {/* The picture's date, and *which* date it is. This used to be
-                    a bare stamp — and it was the run's own, i.e. when the stack
-                    ran, which anyone reads as the night they shot it. On a
-                    re-stack of a back catalogue that is out by years, on the
-                    app's front page. It now prefers the night the subs were
-                    taken, and says "Stacked" when that is all the run knows.
-                    (A raw `slice(0, 10)` before that printed the *UTC* calendar
-                    day, tomorrow's date for an evening stack west of UTC.) */}
-                <Text size="xs" c="dimmed">
-                  {pictureDateLabel(
-                    s.capture_night_start, s.capture_night_end, s.timestamp_utc,
-                    s.capture_nights)}
-                </Text>
-              </Group>
-            </Card>
-          ))}
-        </SimpleGrid>
-      )}
-
-      {/* The pictures the app itself rates highest, right under the newest ones —
-          both are "your pictures", so they belong together above the analysis. */}
-      <BestPicturesStrip />
-
-      {/* Everything that *describes* the library rather than showing it, grouped
-          instead of stacked (IA slice (e), reusing the Target page's `InsightTabs`
-          from slice (b)). Seven full-width cards used to sit one below another
-          between the stat row and the pictures; they are all still here, still one
-          click away, but only one group is on screen at a time — and a group whose
-          cards have nothing to say gets no tab at all. A later Dashboard card
-          should join a group here rather than become an eighth stacked card. */}
-      <InsightTabs
-        data-testid="dashboard-insights"
-        groups={[
-          { key: "tonight", label: "Tonight", node: (
-            <>
-              {/* "Point here right now": of the targets already started, which is
-                  best-placed at this moment *and* would gain most from another
-                  hour. Self-hides when there's nothing to recommend. */}
-              <PointHereTonightCard />
-              <ContinueTonightCard />
-              <SuggestTargetsCard />
-            </>
-          ) },
-          { key: "recent", label: "Recent", node: (
-            <>
-              {/* Before the recap of what came in: what it *looks* like. The
-                  sharpest sub of the target that has subs but no picture yet —
-                  the "did tonight work?" glance, which until now only the
-                  Target hub answered. Self-hides once every target has a
-                  picture, so a settled library sees nothing. */}
-              <FirstLookStrip />
-              {/* "Was last night off for you?" — the morning-after heads-up when
-                  the newest night's stars came out fatter than this owner's own
-                  usual (dew, focus, or just seeing). Sits beside the recap of
-                  what came in, because that is the same glance; self-hides on a
-                  normal night and on a library with no "usual" yet. */}
-              <OffNightCard />
-              <LastNightCard />
-              <VideoCapturesCard />
-            </>
-          ) },
-          { key: "progress", label: "Progress", node: (
-            <>
-              <LibraryProgressCard />
-              <ImagingCalendarCard />
-            </>
-          ) },
-        ]}
-      />
+      <GettingStarted />
+      <AtAGlance data={data} />
+      <YourPictures stats={data} />
+      <DashboardInsights />
     </Stack>
   );
 }

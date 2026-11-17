@@ -1,5 +1,34 @@
 # Shipped — the record
 
+## 2026-11-17 (Builder, branch `claude/fervent-bohr-kq9zs1`)
+
+### v0.507.7 — Dashboard, declutter slice 2: five top-level groups, and the newest and best pictures share one section
+
+**What.** Second slice of the ⭐ declutter entry (owner, 2026-11-17: "simplicity is sometimes best — or at least
+recursive organization"), on `Dashboard.tsx`. **Nothing removed**; every card is where it was or one tab-click away:
+- **"Your pictures"** — *Recent stacks* and *My best pictures* were two headed sections one below the other, both
+  answering "show me my pictures". They are now one section with **Newest** / **Best** tabs (`YourPictures`, reusing
+  `InsightTabs`). Newest opens first, as the old page led with it; the imaging-log, "View gallery →" and (under Best)
+  "View all my best pictures →" links are all kept. Until there are two finished pictures to rank there is no tab strip
+  at all (`BestPicturesStrip showTitle={false}`).
+- **"Getting started"** — the first-run map (`FirstImageCard`) and the sample-image card were two separate top-level
+  blocks; they are one group now (`GettingStarted`), and both still self-hide on an established install.
+- The page is now exactly five groups, each its own component in `components/dashboard/`: `DashboardNotices` (the one
+  notice board, with the two setup `<Alert>`s), `GettingStarted`, `AtAGlance` (stat tiles + sky-coverage and life-list
+  lines), `YourPictures`, `DashboardInsights` (Tonight / Recent / Progress tabs). `routes/Dashboard.tsx` is ~60 lines and
+  says in its docstring which group a new feature joins.
+
+**Measured.** Top-level groups: notices, first-image card, sample card, stats + two lines, recent stacks, best pictures,
+insight tabs → **5** (7 on a fresh install with a stacked sample, 6 on an established one with ≥ 2 pictures).
+`tests/test_ui_clutter_budget.py` for `Dashboard.tsx`: 23 card kinds + 2 `<Alert>` → **0 + 0** (ceiling lowered to
+`(0, 0)`: nothing can be dropped straight onto the page any more). Dogfood `--build --mosaic`: nothing overflowing, no
+console errors; the desktop screenshot shows the Newest/Best strip with both sample pictures.
+
+**Tests.** `Dashboard.test.tsx`: new "puts no more than five groups at the top of the page, and nothing beside them"
+(fails if any element other than the title sits beside the five `data-dashboard-group`s), "shows the newest and the
+best pictures as two tabs of one section" and "has no picture tabs until there is a best-pictures wall to show"; the IA
+test now finds "Your pictures". All four red on the old page. Frontend only; no API, setting, schema or default change.
+
 ## 2026-11-17 (Builder, branch `claude/fervent-bohr-i5rwft`)
 
 ### v0.507.6 — Target page, declutter slice 1: the object card joins the insight tabs, and the title row stops carrying frame tools

@@ -223,7 +223,7 @@ describe("Dashboard information architecture (IA slice (e))", () => {
 
     renderDashboard();
 
-    const pictures = await screen.findByText("Recent stacks");
+    const pictures = await screen.findByText("Your pictures");
     const insights = await screen.findByTestId("dashboard-insights");
     // The user's own pictures come *before* everything that merely describes the
     // library — the whole point of the slice.
@@ -426,6 +426,88 @@ describe("Dashboard information architecture (IA slice (e))", () => {
 
     await waitFor(() => expect(client.api.getNewSubsWaiting).toHaveBeenCalled());
     expect(screen.queryByTestId("new-subs-waiting-note")).not.toBeInTheDocument();
+  });
+});
+
+describe("Dashboard recursive organization (owner, 2026-11-17)", () => {
+  function twoStacks(): DashboardStats {
+    const run = (safe: string, name: string, id: number) => ({
+      safe, target_name: name, run_id: id, output_basename: `${safe}_stack`,
+      timestamp_utc: "2026-07-14T00:00:00Z", n_frames_used: 100,
+      has_preview: true, has_fits: true, preview_url: `/api/targets/${safe}/stack-runs/${id}/preview`,
+    });
+    return {
+      ...mkStats(), n_targets: 2, n_stack_runs: 2, n_targets_with_stacks: 2,
+      recent_stacks: [run("m31", "M31", 7), run("m42", "M42", 8)],
+    };
+  }
+
+  function best(): client.BestPicture {
+    return {
+      safe: "m42", target_name: "Orion best", run_id: 8, output_basename: "m42_stack",
+      timestamp_utc: "2026-07-14T00:00:00Z", n_frames_used: 500,
+      canvas_w: 480, canvas_h: 320, total_exposure_s: 12240, noise_sigma: 0.02,
+      has_preview: true, has_fits: false, has_tiff: false,
+      preview_url: "/api/targets/m42/stack-runs/8/preview", score: 1,
+    };
+  }
+
+  it("puts no more than five groups at the top of the page, and nothing beside them", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(twoStacks());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({ found: false }));
+    vi.spyOn(client.api, "getLastNight").mockResolvedValue(null);
+
+    renderDashboard();
+
+    const page = await screen.findByTestId("dashboard");
+    const top = Array.from(page.children);
+    // The page title is the only top-level element that is not one of the groups:
+    // a card, note or banner dropped straight onto the page fails here. Put it
+    // inside a group instead (see `routes/Dashboard.tsx`).
+    const loose = top.filter((el) => !el.hasAttribute("data-dashboard-group") && el.tagName !== "H2");
+    expect(loose.map((el) => el.outerHTML.slice(0, 80))).toEqual([]);
+    expect(top.map((el) => el.getAttribute("data-dashboard-group")).filter(Boolean))
+      .toEqual(["notices", "getting-started", "glance", "pictures", "insights"]);
+  });
+
+  it("shows the newest and the best pictures as two tabs of one section", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(twoStacks());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
+      items: [best(), { ...best(), safe: "m31", target_name: "Andromeda best", run_id: 7 }],
+    });
+
+    renderDashboard();
+
+    const pictures = await screen.findByTestId("dashboard-pictures");
+    await waitFor(() =>
+      expect(Array.from(pictures.querySelectorAll('[role="tab"]')).map((t) => t.textContent))
+        .toEqual(["Newest", "Best"]));
+    // One heading for both, not the two stacked sections there used to be.
+    expect(screen.getByText("Your pictures")).toBeInTheDocument();
+    expect(screen.queryByText("Recent stacks")).not.toBeInTheDocument();
+    expect(screen.queryByText("My best pictures")).not.toBeInTheDocument();
+    // Newest opens first, as the old page led with it; Best is one click away
+    // and still links to the full wall.
+    expect(screen.getByText("M31")).toBeVisible();
+    expect(screen.getByText("Orion best")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "Best" }));
+    await waitFor(() => expect(screen.getByText("Orion best")).toBeVisible());
+    expect(screen.getByText("View all my best pictures →")).toHaveAttribute("href", "/best");
+    expect(screen.getByText("View gallery →")).toHaveAttribute("href", "/gallery");
+  });
+
+  it("has no picture tabs until there is a best-pictures wall to show", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(twoStacks());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    const spy = vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({ items: [] });
+
+    renderDashboard();
+
+    const pictures = await screen.findByTestId("dashboard-pictures");
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    await waitFor(() => expect(pictures.querySelectorAll('[role="tab"]')).toHaveLength(0));
+    expect(screen.getByText("M31")).toBeVisible();
   });
 });
 
