@@ -143,6 +143,19 @@ Take at most **one** layout slice per run, only on a page **measured** long with
 data that makes it long (`scripts/agent-dogfood.sh`), and state before/after in the
 commit.
 
+**Recursive organization — the shape every page takes** *(owner, 2026-11-17: "the app is
+starting to get pretty cluttered again — remember simplicity is sometimes best — or at least
+recursive organization")*. A page shows **at most five things at the top level**, each with a
+one-line summary; everything else lives *inside* one of them (a collapsed section, a tab, or a
+nested route), and the same rule applies again one level down. A page's notices share **one
+notice board** that shows the most important one or two and folds the rest behind "N more".
+A new feature names the existing group it goes into; it does not get a top-level spot of its
+own. **This is enforced by `tests/test_ui_clutter_budget.py`**: every route has a ceiling on
+the card/note/banner kinds and `<Alert>` sites it renders. A change that raises a count fails
+(nest it instead); a change that lowers one lowers the ceiling in the same commit. Raising a
+ceiling needs the owner's sign-off. Renaming a component to dodge the count is the clutter
+the test exists to stop.
+
 **Before starting a Bugs entry,** read its gate or stand-down: many open entries are
 gated on something only the owner's data can supply, or carry a measured decision.
 **Do not blind-flip a threshold or a default on the on-by-default hot path, and do not

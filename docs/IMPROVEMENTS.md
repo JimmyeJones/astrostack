@@ -1012,6 +1012,27 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   not proximity alone. (Recorded here so the guard isn't forgotten when the merge
   lands.)
 
+### ⭐ Declutter — recursive organization (owner ask, PRIORITY 3)
+
+- **⭐ OWNER-ASKED (2026-11-17) — declutter: "simplicity is sometimes best — or at least recursive
+  organization".** Measured on 2026-11-17 by `tests/test_ui_clutter_budget.py`, as distinct card/note/banner
+  kinds plus `<Alert>` sites per route file. The worst: **Target 30 + 13**, **Dashboard 23 + 2**, **Stack form
+  2 + 40 alerts**, **Editor 6 + 16**, **Jobs 2 + 10**. These are only what the route file itself renders; its
+  child components add more. **The work**, one slice per run, worst page first (Target, then Dashboard, then
+  the Stack form's alerts):
+  - Give the page **≤ 5 top-level groups**, each with a one-line summary, as AGENTS.md §1 "Recursive
+    organization" describes. Nest everything else: collapsed sections, tabs, or nested routes
+    (`/library/<target>/…`).
+  - Put **every note onto one notice board** that shows the top one or two and folds the rest behind "N more".
+  - **NOTHING MAY BE REMOVED.** Every feature stays reachable within two clicks of where it was, and the
+    commit says where each moved.
+  - Measure before and after with `scripts/agent-dogfood.sh --mosaic --big` (visible cards above the fold at
+    the owner's scale), and lower that route's `BUDGET` ceiling in the same commit.
+  - Watch the Target page's child components (`frontend/src/components/target/`): the budget counts only
+    the route file, so a slice that moves a card into a child without nesting it has not reduced anything.
+  Size **L** overall, **M** per slice. It is PRIORITY 3 (friendliness) on a direct owner ask, so it takes the
+  ⭐ beginner-feature slot until the Target page and Dashboard are each down to five top-level groups.
+
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 
 The editor is where a good stack becomes a good *picture*, and it has real
