@@ -17,6 +17,8 @@ import { backgroundModeLabel, backgroundModeNudge } from "../backgroundModeNudge
 import { AutoDrizzleNote } from "../components/AutoDrizzleNote";
 import { HintIcon } from "../components/HintIcon";
 import { SampleTourNote } from "../components/SampleTourNote";
+import { NOTICE_PRIORITY } from "../components/NoticeBoard";
+import { JUST_DONE_PRIORITY, StackNoticeBoard } from "../components/stack/StackNoticeBoard";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import {
   biasSizeWarning, darkScalingBlockedNote, exposureMismatch, flatBayerWarning,
@@ -1108,82 +1110,96 @@ export function StackView() {
 
       <SampleTourNote step="stack" safe={safe} />
 
-      {(reuseRunId && reuse.data) || wantReel ? (
-        <Alert color="blue" variant="light" py={6} px="sm">
-          <Text size="xs">
-            {reuseRunId && reuse.data
-              ? `Settings pre-filled from run #${reuseRunId}. Adjust anything, then start a fresh stack.`
-              : "Adjust anything, then start a fresh stack."}
-            {wantReel
-              ? " “Save a ‘watch it appear’ clip” is switched on under Advanced options,"
-                + " so this run builds your night-by-night clip."
-              : ""}
-          </Text>
-        </Alert>
-      ) : null}
-
-      {noSolved ? (
-        <Alert color="yellow" title="No plate-solved frames yet" icon={<IconTelescope size={18} />}>
-          <Stack gap="xs" align="flex-start">
-            <Text size="sm">
-              Stacking needs at least one accepted frame with a successful plate-solve to align
-              against. Run plate-solving first, then come back to stack.
-            </Text>
-            <Button
-              size="xs" variant="light"
-              leftSection={<IconTelescope size={14} />}
-              onClick={() => qcSolve.mutate()}
-              loading={qcSolve.isPending}
-            >
-              Run QC + plate-solve
-            </Button>
-          </Stack>
-        </Alert>
-      ) : null}
-
-      {mixedRejected !== null ? (
-        <Alert color="teal" variant="light" icon={<IconCheck size={18} />}
-          title="Rejected the odd-target frames">
-          <Text size="sm">
-            Rejected {mixedRejected.length} sub{mixedRejected.length === 1 ? "" : "s"} that
-            didn't match the main pointing — the batch is a single target now, so this
-            stack won't waste itself on part of the data.
-          </Text>
-          <Button mt="xs" size="xs" variant="light" color="teal"
-            leftSection={<IconArrowBackUp size={14} />}
-            loading={undoMixed.isPending}
-            onClick={() => undoMixed.mutate(mixedRejected)}>
-            Undo — re-accept {mixedRejected.length} frame{mixedRejected.length === 1 ? "" : "s"}
-          </Button>
-        </Alert>
-      ) : mixedPointings ? (
-        <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
-          title={`This batch looks like ${mixedPointings.pointings} different targets`}>
-          <Text size="sm">
-            {mixedPointings.majority} of your accepted, plate-solved subs point at
-            one place and {mixedPointings.others} point about{" "}
-            {Math.round(mixedPointings.separationDeg)}° away — that usually means two
-            different targets' frames landed in the same folder (or some subs
-            plate-solved to the wrong place). If you stack now, only the frames
-            matching the reference pointing are combined and the other{" "}
-            {mixedPointings.others === 1 ? "one is" : `${mixedPointings.others} are`}{" "}
-            silently dropped, so you'd waste a stack on part of the data. Reject the
-            odd frames to keep just the main pointing, or{" "}
-            <Text component={Link} to={`/targets/${safe}`} c="blue" inherit>
-              open the Frames table
-            </Text>{" "}
-            to split them into their own target.
-          </Text>
-          {mixedPointings.minorityIds.length ? (
-            <Button mt="xs" size="xs" variant="light" color="orange"
-              loading={rejectMixed.isPending}
-              onClick={() => rejectMixed.mutate(mixedPointings.minorityIds)}>
-              Reject the {mixedPointings.minorityIds.length} odd-target frame
-              {mixedPointings.minorityIds.length === 1 ? "" : "s"}
-            </Button>
-          ) : null}
-        </Alert>
-      ) : null}
+      {/* The page's notice board (v0.507.8): what stops or skews this stack before
+          you start — no plate-solved frames, a mixed batch — plus the "pre-filled
+          from run #N" context line. Top one or two inline, the rest one click away. */}
+      <StackNoticeBoard
+        data-testid="stack-page-notes"
+        items={[
+          noSolved ? {
+            key: "no-solved", priority: NOTICE_PRIORITY.blocking, color: "yellow",
+            title: "No plate-solved frames yet", icon: <IconTelescope size={18} />,
+            body: (
+              <Stack gap="xs" align="flex-start">
+                <Text size="sm">
+                  Stacking needs at least one accepted frame with a successful plate-solve to align
+                  against. Run plate-solving first, then come back to stack.
+                </Text>
+                <Button
+                  size="xs" variant="light"
+                  leftSection={<IconTelescope size={14} />}
+                  onClick={() => qcSolve.mutate()}
+                  loading={qcSolve.isPending}
+                >
+                  Run QC + plate-solve
+                </Button>
+              </Stack>
+            ),
+          } : null,
+          mixedRejected !== null ? {
+            key: "mixed-rejected", priority: JUST_DONE_PRIORITY, color: "teal",
+            title: "Rejected the odd-target frames", icon: <IconCheck size={18} />,
+            body: (
+              <Text size="sm">
+                Rejected {mixedRejected.length} sub{mixedRejected.length === 1 ? "" : "s"} that
+                didn't match the main pointing — the batch is a single target now, so this
+                stack won't waste itself on part of the data.
+              </Text>
+            ),
+            extra: (
+              <Button mt="xs" size="xs" variant="light" color="teal"
+                leftSection={<IconArrowBackUp size={14} />}
+                loading={undoMixed.isPending}
+                onClick={() => undoMixed.mutate(mixedRejected)}>
+                Undo — re-accept {mixedRejected.length} frame{mixedRejected.length === 1 ? "" : "s"}
+              </Button>
+            ),
+          } : mixedPointings ? {
+            key: "mixed-pointings", priority: NOTICE_PRIORITY.warning, color: "orange",
+            title: `This batch looks like ${mixedPointings.pointings} different targets`,
+            icon: <IconAlertTriangle size={18} />,
+            body: (
+              <Text size="sm">
+                {mixedPointings.majority} of your accepted, plate-solved subs point at
+                one place and {mixedPointings.others} point about{" "}
+                {Math.round(mixedPointings.separationDeg)}° away — that usually means two
+                different targets' frames landed in the same folder (or some subs
+                plate-solved to the wrong place). If you stack now, only the frames
+                matching the reference pointing are combined and the other{" "}
+                {mixedPointings.others === 1 ? "one is" : `${mixedPointings.others} are`}{" "}
+                silently dropped, so you'd waste a stack on part of the data. Reject the
+                odd frames to keep just the main pointing, or{" "}
+                <Text component={Link} to={`/targets/${safe}`} c="blue" inherit>
+                  open the Frames table
+                </Text>{" "}
+                to split them into their own target.
+              </Text>
+            ),
+            extra: mixedPointings.minorityIds.length ? (
+              <Button mt="xs" size="xs" variant="light" color="orange"
+                loading={rejectMixed.isPending}
+                onClick={() => rejectMixed.mutate(mixedPointings.minorityIds)}>
+                Reject the {mixedPointings.minorityIds.length} odd-target frame
+                {mixedPointings.minorityIds.length === 1 ? "" : "s"}
+              </Button>
+            ) : null,
+          } : null,
+          (reuseRunId && reuse.data) || wantReel ? {
+            key: "prefilled", priority: NOTICE_PRIORITY.info, color: "blue",
+            text: (
+              <>
+                {reuseRunId && reuse.data
+                  ? `Settings pre-filled from run #${reuseRunId}. Adjust anything, then start a fresh stack.`
+                  : "Adjust anything, then start a fresh stack."}
+                {wantReel
+                  ? " “Save a ‘watch it appear’ clip” is switched on under Advanced options,"
+                    + " so this run builds your night-by-night clip."
+                  : ""}
+              </>
+            ),
+          } : null,
+        ]}
+      />
 
       <Paper withBorder p="lg">
         <Stack>
@@ -1248,77 +1264,6 @@ export function StackView() {
                     disabled={flatOpts.length === 0}
                   />
                 </Group>
-                {/* Before "does it fit?": is it made of the right thing at all?
-                    One alert for every slot rather than four, because this fires
-                    on a mistake that is rare — and when it does fire it is the
-                    most damaging pick on the form, so it goes first. Orange, not
-                    red: red on this form means "stacking will fail", and this
-                    stack will *succeed* — that is the whole problem with it. */}
-                {contentWarnings.length ? (
-                  <Alert color="orange" variant="light" py={6} px="sm"
-                    icon={<IconAlertTriangle size={16} />}>
-                    {contentWarnings.map((w) => (
-                      <Text size="xs" key={w}>{w}</Text>
-                    ))}
-                  </Alert>
-                ) : null}
-                {darkSizeWarning ? (
-                  <Alert color="red" variant="light" py={6} px="sm">
-                    <Text size="xs">{darkSizeWarning}</Text>
-                  </Alert>
-                ) : null}
-                {flatSizeWarning ? (
-                  <Alert color="red" variant="light" py={6} px="sm">
-                    <Text size="xs">{flatSizeWarning}</Text>
-                  </Alert>
-                ) : null}
-                {!flatSizeWarning && flatBayerWarn ? (
-                  <Alert color="red" variant="light" py={6} px="sm">
-                    <Text size="xs">{flatBayerWarn}</Text>
-                  </Alert>
-                ) : null}
-                {darkWarning ? (
-                  <Alert color="yellow" variant="light" py={6} px="sm">
-                    <Text size="xs">{darkWarning}</Text>
-                    {values.bias_master_id && !values.scale_dark_to_light ? (
-                      <Button size="compact-xs" variant="light" color="yellow" mt={6}
-                        onClick={() => set("scale_dark_to_light", true)}>
-                        Scale this dark to your subs' exposure
-                      </Button>
-                    ) : scaleNudgeBiasId ? (
-                      <Button size="compact-xs" variant="light" color="yellow" mt={6}
-                        onClick={() => {
-                          set("bias_master_id", scaleNudgeBiasId);
-                          set("scale_dark_to_light", true);
-                        }}>
-                        Select your master bias and scale the dark
-                      </Button>
-                    ) : null}
-                  </Alert>
-                ) : null}
-                {darkScaledNote ? (
-                  <Alert color="teal" variant="light" py={6} px="sm">
-                    <Text size="xs">{darkScaledNote}</Text>
-                  </Alert>
-                ) : null}
-                {/* Only worth saying when scaling was actually asked for — a
-                    bias that can't scale the dark is otherwise just an inert
-                    pick, which the "already contains the bias" note covers. */}
-                {values.scale_dark_to_light && darkScalingBlocked ? (
-                  <Alert color="yellow" variant="light" py={6} px="sm">
-                    <Text size="xs">{darkScalingBlocked}</Text>
-                  </Alert>
-                ) : null}
-                {darkTempWarning ? (
-                  <Alert color="yellow" variant="light" py={6} px="sm">
-                    <Text size="xs">{darkTempWarning}</Text>
-                  </Alert>
-                ) : null}
-                {darkGainWarning ? (
-                  <Alert color="yellow" variant="light" py={6} px="sm">
-                    <Text size="xs">{darkGainWarning}</Text>
-                  </Alert>
-                ) : null}
                 {values.flat_master_id && darkOpts.length > 0 ? (
                   <Select
                     label="Flat-dark (optional)"
@@ -1327,16 +1272,6 @@ export function StackView() {
                     data={flatDarkOpts} value={asStr(values.flat_dark_master_id)}
                     onChange={(v) => set("flat_dark_master_id", v)}
                   />
-                ) : null}
-                {flatDarkSizeWarn ? (
-                  <Alert color="yellow" variant="light" py={6} px="sm">
-                    <Text size="xs">{flatDarkSizeWarn}</Text>
-                  </Alert>
-                ) : null}
-                {flatDarkWarning ? (
-                  <Alert color="yellow" variant="light" py={6} px="sm">
-                    <Text size="xs">{flatDarkWarning}</Text>
-                  </Alert>
                 ) : null}
                 {biasOpts.length > 0 ? (
                   <Select
@@ -1347,21 +1282,86 @@ export function StackView() {
                     onChange={(v) => set("bias_master_id", v)}
                   />
                 ) : null}
-                {biasSizeWarn ? (
-                  <Alert color="red" variant="light" py={6} px="sm">
-                    <Text size="xs">{biasSizeWarn}</Text>
-                  </Alert>
-                ) : null}
-                {biasIgnoredForLights ? (
-                  <Alert color="yellow" variant="light" py={6} px="sm">
-                    <Text size="xs">
-                      Your master dark already contains the bias pedestal, so this
-                      bias won't be subtracted from the lights again (that would
-                      double-subtract it). Clear the dark to use bias-only
-                      calibration.
-                    </Text>
-                  </Alert>
-                ) : null}
+                {/* The calibration group's own notice board, under its pickers.
+                    Red on this form means "stacking will fail", so those rank
+                    first. The content warning ("is it made of the right thing at
+                    all?") ranks with them and leads: it fires on a mistake that is
+                    rare but is the most damaging pick on the form — orange, not
+                    red, because that stack will *succeed*, which is the whole
+                    problem with it. */}
+                <StackNoticeBoard
+                  data-testid="stack-calibration-notes"
+                  items={[
+                    contentWarnings.length ? {
+                      key: "cal-content", priority: NOTICE_PRIORITY.blocking, color: "orange",
+                      icon: <IconAlertTriangle size={16} />,
+                      body: contentWarnings.map((w) => <Text size="xs" key={w}>{w}</Text>),
+                    } : null,
+                    darkSizeWarning ? {
+                      key: "cal-dark-size", priority: NOTICE_PRIORITY.blocking, color: "red",
+                      text: darkSizeWarning,
+                    } : null,
+                    flatSizeWarning ? {
+                      key: "cal-flat-size", priority: NOTICE_PRIORITY.blocking, color: "red",
+                      text: flatSizeWarning,
+                    } : null,
+                    !flatSizeWarning && flatBayerWarn ? {
+                      key: "cal-flat-bayer", priority: NOTICE_PRIORITY.blocking, color: "red",
+                      text: flatBayerWarn,
+                    } : null,
+                    biasSizeWarn ? {
+                      key: "cal-bias-size", priority: NOTICE_PRIORITY.blocking, color: "red",
+                      text: biasSizeWarn,
+                    } : null,
+                    darkWarning ? {
+                      key: "cal-dark-exposure", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                      text: darkWarning,
+                      fix: values.bias_master_id && !values.scale_dark_to_light ? {
+                        label: "Scale this dark to your subs' exposure", color: "yellow",
+                        onClick: () => set("scale_dark_to_light", true),
+                      } : scaleNudgeBiasId ? {
+                        label: "Select your master bias and scale the dark", color: "yellow",
+                        onClick: () => {
+                          set("bias_master_id", scaleNudgeBiasId);
+                          set("scale_dark_to_light", true);
+                        },
+                      } : null,
+                    } : null,
+                    darkScaledNote ? {
+                      key: "cal-dark-scaled", priority: NOTICE_PRIORITY.info, color: "teal",
+                      text: darkScaledNote,
+                    } : null,
+                    // Only worth saying when scaling was actually asked for — a
+                    // bias that can't scale the dark is otherwise just an inert
+                    // pick, which the "already contains the bias" note covers.
+                    values.scale_dark_to_light && darkScalingBlocked ? {
+                      key: "cal-scaling-blocked", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                      text: darkScalingBlocked,
+                    } : null,
+                    darkTempWarning ? {
+                      key: "cal-dark-temp", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                      text: darkTempWarning,
+                    } : null,
+                    darkGainWarning ? {
+                      key: "cal-dark-gain", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                      text: darkGainWarning,
+                    } : null,
+                    flatDarkSizeWarn ? {
+                      key: "cal-flat-dark-size", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                      text: flatDarkSizeWarn,
+                    } : null,
+                    flatDarkWarning ? {
+                      key: "cal-flat-dark", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                      text: flatDarkWarning,
+                    } : null,
+                    biasIgnoredForLights ? {
+                      key: "cal-bias-ignored", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                      text: "Your master dark already contains the bias pedestal, so this bias "
+                        + "won't be subtracted from the lights again (that would double-subtract "
+                        + "it). Clear the dark to use bias-only calibration.",
+                    } : null,
+                  ]}
+                />
               </Stack>
             ) : (
               <Text size="xs" c="dimmed">
@@ -1391,219 +1391,158 @@ export function StackView() {
             </Accordion.Item>
           </Accordion>
 
-          {autoRejectMethodNote ? (
-            <Alert color="blue" variant="light" py={6} px="sm">
-              <Text size="xs">{autoRejectMethodNote}</Text>
-              <Text size="xs" c="dimmed" mt={4}>
-                The sigma-clip and min/max switches are greyed out while Auto is
-                on — turn it off to pick the method yourself. Your κ and k
-                settings are still used either way.
-              </Text>
-            </Alert>
-          ) : null}
-
-          {rejectionBlindNudge ? (
-            <Alert color="yellow" variant="light" py={6} px="sm">
-              <Text size="xs">{rejectionBlindNudge.text}</Text>
-              {rejectionBlindNudge.fix ? (
-                <Button size="compact-xs" variant="light" color="yellow" mt={6}
-                  onClick={() => set(rejectionBlindNudge.fix!.key, true)}>
-                  {rejectionBlindNudge.fix.label}
-                </Button>
-              ) : null}
-            </Alert>
-          ) : null}
-
-          {sigmaClipWarning ? (
-            <Alert color="yellow" variant="light" py={6} px="sm">
-              <Text size="xs">{sigmaClipWarning}</Text>
-              <Button size="compact-xs" variant="light" color="yellow" mt={6}
-                onClick={() => set("sigma_clip", false)}>
-                Turn off sigma clipping
-              </Button>
-            </Alert>
-          ) : null}
-
-          {sigmaKappaLargeHint ? (
-            <Alert color="blue" variant="light" py={6} px="sm">
-              <Text size="xs">{sigmaKappaLargeHint}</Text>
-              <Button size="compact-xs" variant="light" mt={6}
-                onClick={() => set("sigma_kappa", SIGMA_KAPPA_TIGHTER)}>
-                Tighten κ to {SIGMA_KAPPA_TIGHTER}
-              </Button>
-            </Alert>
-          ) : null}
-
-          {streakNoRejectionAdvice ? (
-            <Alert color="yellow" variant="light" py={6} px="sm">
-              <Text size="xs">{streakNoRejectionAdvice.text}</Text>
-              {streakNoRejectionAdvice.fix ? (
-                <Button size="compact-xs" variant="light" color="yellow" mt={6}
-                  onClick={() => set(streakNoRejectionAdvice.fix!.key, true)}>
-                  {streakNoRejectionAdvice.fix.label}
-                </Button>
-              ) : null}
-            </Alert>
-          ) : null}
-
-          {minMaxRejectHint ? (
-            <Alert color="blue" variant="light" py={6} px="sm">
-              <Text size="xs">{minMaxRejectHint}</Text>
-              <Button size="compact-xs" variant="light" mt={6}
-                onClick={() => set("min_max_reject", true)}>
-                Turn on min/max rejection
-              </Button>
-            </Alert>
-          ) : null}
-
-          {minMaxKTooHighHint ? (
-            <Alert color="yellow" variant="light" py={6} px="sm">
-              <Text size="xs">{minMaxKTooHighHint}</Text>
-              <Button size="compact-xs" variant="light" mt={6}
-                onClick={() => set("min_max_reject_count", minMaxKSuggested)}>
-                Lower k to {minMaxKSuggested}
-              </Button>
-            </Alert>
-          ) : null}
-
-          {minMaxKForStreaksHint ? (
-            <Alert color="blue" variant="light" py={6} px="sm">
-              <Text size="xs">{minMaxKForStreaksHint}</Text>
-              <Button size="compact-xs" variant="light" mt={6}
-                onClick={() => set("min_max_reject_count", streakKSuggested)}>
-                Set k = {streakKSuggested}
-              </Button>
-            </Alert>
-          ) : null}
-
-          {minMaxIgnoresWeightingHint ? (
-            <Alert color="yellow" variant="light" py={6} px="sm">
-              <Text size="xs">{minMaxIgnoresWeightingHint}</Text>
-              <Button size="compact-xs" variant="light" mt={6}
-                onClick={() => set("quality_weighted", false)}>
-                Turn off quality weighting
-              </Button>
-            </Alert>
-          ) : null}
-
-          {drizzleClipHint ? (
-            <Alert color="blue" variant="light" py={6} px="sm">
-              <Text size="xs">{drizzleClipHint}</Text>
-              <Button size="compact-xs" variant="light" mt={6}
-                onClick={() => set("drizzle_reject", true)}>
-                Turn on drizzle outlier rejection
-              </Button>
-            </Alert>
-          ) : null}
-
-          {transparencyHint ? (
-            <Alert color="blue" variant="light" py={6} px="sm">
-              <Text size="xs">{transparencyHint}</Text>
-              {!values.quality_weighted ? (
-                <Button size="compact-xs" variant="light" mt={6}
-                  onClick={() => set("quality_weighted", true)}>
-                  Turn on quality weighting
-                </Button>
-              ) : null}
-            </Alert>
-          ) : null}
-
-          {bgModeNudge ? (
-            <Alert color="blue" variant="light" py={6} px="sm">
-              <Text size="xs">{bgModeNudge.text}</Text>
-              <Button size="compact-xs" variant="light" mt={6}
-                onClick={() => set("background_mode", bgModeNudge.mode)}>
-                Use {backgroundModeLabel(bgModeNudge.mode, schema.data)} background flatten
-              </Button>
-            </Alert>
-          ) : null}
-
-          {qualityWeightNudge ? (
-            <Alert color="blue" variant="light" py={6} px="sm">
-              <Text size="xs">{qualityWeightNudge}</Text>
-              <Button size="compact-xs" variant="light" mt={6}
-                onClick={() => set("quality_weighted", true)}>
-                Turn on quality weighting
-              </Button>
-            </Alert>
-          ) : null}
-
-          {photometricNudge ? (
-            <Alert color="blue" variant="light" py={6} px="sm">
-              <Text size="xs">{photometricNudge}</Text>
-              <Button
-                mt={6}
-                size="xs"
-                variant="light"
-                onClick={() => set("photometric_normalize", true)}
-              >
-                Turn on photometric normalization
-              </Button>
-            </Alert>
-          ) : null}
-
-          {drizzleNudge ? (
-            <Alert color="blue" variant="light" py={6} px="sm">
-              <Text size="xs">{drizzleNudge}</Text>
-              <Button size="compact-xs" variant="light" mt={6}
-                onClick={() => set("drizzle", true)}>
-                Turn on Drizzle
-              </Button>
-            </Alert>
-          ) : null}
-
-          {drizzleTooFewHint ? (
-            <Alert color="yellow" variant="light" py={6} px="sm">
-              <Text size="xs">{drizzleTooFewHint}</Text>
-              <Button size="compact-xs" variant="light" color="yellow" mt={6}
-                onClick={() => set("drizzle", false)}>
-                Turn off Drizzle
-              </Button>
-            </Alert>
-          ) : null}
-
-          {gradeDropped !== null ? (
-            <Alert color="teal" variant="light" py={6} px="sm">
-              <Text size="xs">
-                Dropped {gradeDropped.length} outlier frame{gradeDropped.length === 1 ? "" : "s"} — they
-                won't be stacked.
-              </Text>
-              <Button
-                mt={6}
-                size="xs"
-                variant="light"
-                color="teal"
-                loading={undoGrade.isPending}
-                onClick={() => undoGrade.mutate(gradeDropped)}
-              >
-                Undo — re-accept {gradeDropped.length} frame{gradeDropped.length === 1 ? "" : "s"}
-              </Button>
-            </Alert>
-          ) : autoGradeHint ? (
-            <Alert color="yellow" variant="light" py={6} px="sm">
-              <Text size="xs">{autoGradeHint}</Text>
-              <Group gap="xs" mt={6}>
-                <Button
-                  size="xs"
-                  variant="light"
-                  color="yellow"
-                  loading={applyGrade.isPending}
-                  onClick={() => applyGrade.mutate()}
-                >
-                  Drop {autoGradeCount} outlier frame{autoGradeCount === 1 ? "" : "s"}
-                </Button>
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  color="yellow"
-                  component={Link}
-                  to={`/targets/${safe}`}
-                >
-                  Review Auto-grade
-                </Button>
-              </Group>
-            </Alert>
-          ) : null}
+          {/* The settings-advice board (v0.507.8): every "this option fights that
+              one" warning and "you could also…" nudge for the form above, ranked —
+              a warning outranks a nudge — with the top one or two inline and the
+              rest behind "N more notes". Each still carries its one-click fix. */}
+          <StackNoticeBoard
+            data-testid="stack-advice-notes"
+            items={[
+              autoRejectMethodNote ? {
+                key: "auto-reject-method", priority: NOTICE_PRIORITY.info, color: "blue",
+                text: autoRejectMethodNote,
+                extra: (
+                  <Text size="xs" c="dimmed" mt={4}>
+                    The sigma-clip and min/max switches are greyed out while Auto is
+                    on — turn it off to pick the method yourself. Your κ and k
+                    settings are still used either way.
+                  </Text>
+                ),
+              } : null,
+              rejectionBlindNudge ? {
+                key: "rejection-blind", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                text: rejectionBlindNudge.text,
+                fix: rejectionBlindNudge.fix ? {
+                  label: rejectionBlindNudge.fix.label, color: "yellow",
+                  onClick: () => set(rejectionBlindNudge.fix!.key, true),
+                } : null,
+              } : null,
+              sigmaClipWarning ? {
+                key: "sigma-clip", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                text: sigmaClipWarning,
+                fix: { label: "Turn off sigma clipping", color: "yellow",
+                  onClick: () => set("sigma_clip", false) },
+              } : null,
+              sigmaKappaLargeHint ? {
+                key: "sigma-kappa", priority: NOTICE_PRIORITY.advisory, color: "blue",
+                text: sigmaKappaLargeHint,
+                fix: { label: `Tighten κ to ${SIGMA_KAPPA_TIGHTER}`,
+                  onClick: () => set("sigma_kappa", SIGMA_KAPPA_TIGHTER) },
+              } : null,
+              streakNoRejectionAdvice ? {
+                key: "streak-no-rejection", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                text: streakNoRejectionAdvice.text,
+                fix: streakNoRejectionAdvice.fix ? {
+                  label: streakNoRejectionAdvice.fix.label, color: "yellow",
+                  onClick: () => set(streakNoRejectionAdvice.fix!.key, true),
+                } : null,
+              } : null,
+              minMaxRejectHint ? {
+                key: "min-max", priority: NOTICE_PRIORITY.advisory, color: "blue",
+                text: minMaxRejectHint,
+                fix: { label: "Turn on min/max rejection",
+                  onClick: () => set("min_max_reject", true) },
+              } : null,
+              minMaxKTooHighHint ? {
+                key: "min-max-k-high", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                text: minMaxKTooHighHint,
+                fix: { label: `Lower k to ${minMaxKSuggested}`,
+                  onClick: () => set("min_max_reject_count", minMaxKSuggested) },
+              } : null,
+              minMaxKForStreaksHint ? {
+                key: "min-max-k-streaks", priority: NOTICE_PRIORITY.advisory, color: "blue",
+                text: minMaxKForStreaksHint,
+                fix: { label: `Set k = ${streakKSuggested}`,
+                  onClick: () => set("min_max_reject_count", streakKSuggested) },
+              } : null,
+              minMaxIgnoresWeightingHint ? {
+                key: "min-max-weighting", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                text: minMaxIgnoresWeightingHint,
+                fix: { label: "Turn off quality weighting",
+                  onClick: () => set("quality_weighted", false) },
+              } : null,
+              drizzleClipHint ? {
+                key: "drizzle-clip", priority: NOTICE_PRIORITY.advisory, color: "blue",
+                text: drizzleClipHint,
+                fix: { label: "Turn on drizzle outlier rejection",
+                  onClick: () => set("drizzle_reject", true) },
+              } : null,
+              transparencyHint ? {
+                key: "transparency", priority: NOTICE_PRIORITY.advisory, color: "blue",
+                text: transparencyHint,
+                fix: !values.quality_weighted ? { label: "Turn on quality weighting",
+                  onClick: () => set("quality_weighted", true) } : null,
+              } : null,
+              bgModeNudge ? {
+                key: "background-mode", priority: NOTICE_PRIORITY.advisory, color: "blue",
+                text: bgModeNudge.text,
+                fix: { label: `Use ${backgroundModeLabel(bgModeNudge.mode, schema.data)} background flatten`,
+                  onClick: () => set("background_mode", bgModeNudge.mode) },
+              } : null,
+              qualityWeightNudge ? {
+                key: "quality-weight", priority: NOTICE_PRIORITY.advisory, color: "blue",
+                text: qualityWeightNudge,
+                fix: { label: "Turn on quality weighting",
+                  onClick: () => set("quality_weighted", true) },
+              } : null,
+              photometricNudge ? {
+                key: "photometric", priority: NOTICE_PRIORITY.advisory, color: "blue",
+                text: photometricNudge,
+                fix: { label: "Turn on photometric normalization",
+                  onClick: () => set("photometric_normalize", true) },
+              } : null,
+              drizzleNudge ? {
+                key: "drizzle", priority: NOTICE_PRIORITY.advisory, color: "blue",
+                text: drizzleNudge,
+                fix: { label: "Turn on Drizzle", onClick: () => set("drizzle", true) },
+              } : null,
+              drizzleTooFewHint ? {
+                key: "drizzle-too-few", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                text: drizzleTooFewHint,
+                fix: { label: "Turn off Drizzle", color: "yellow",
+                  onClick: () => set("drizzle", false) },
+              } : null,
+              gradeDropped !== null ? {
+                key: "grade-dropped", priority: JUST_DONE_PRIORITY, color: "teal",
+                text: (
+                  <>
+                    Dropped {gradeDropped.length} outlier frame{gradeDropped.length === 1 ? "" : "s"} — they
+                    won't be stacked.
+                  </>
+                ),
+                fix: {
+                  label: `Undo — re-accept ${gradeDropped.length} frame${gradeDropped.length === 1 ? "" : "s"}`,
+                  color: "teal", loading: undoGrade.isPending,
+                  onClick: () => undoGrade.mutate(gradeDropped),
+                },
+              } : autoGradeHint ? {
+                key: "auto-grade", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                text: autoGradeHint,
+                extra: (
+                  <Group gap="xs" mt={6}>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      color="yellow"
+                      loading={applyGrade.isPending}
+                      onClick={() => applyGrade.mutate()}
+                    >
+                      Drop {autoGradeCount} outlier frame{autoGradeCount === 1 ? "" : "s"}
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="subtle"
+                      color="yellow"
+                      component={Link}
+                      to={`/targets/${safe}`}
+                    >
+                      Review Auto-grade
+                    </Button>
+                  </Group>
+                ),
+              } : null,
+            ]}
+          />
 
           {estimateOverBudget ? (
             <Alert color="red" variant="light" py={6} px="sm">
