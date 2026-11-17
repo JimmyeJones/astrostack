@@ -57,15 +57,27 @@ def _prescriptive_ids() -> list[str]:
 
 
 def _rendered_testids() -> set[str]:
-    """Every ``data-testid`` literal rendered by non-test frontend source."""
+    """Every ``data-testid`` literal rendered by non-test frontend source.
+
+    Also an ``AlertNotice``'s ``testId: "…"`` field: ``alertNoticeNode`` in
+    ``components/AlertNoticeBoard.tsx`` renders it as that note's
+    ``data-testid`` (pinned below), which is how the Target page's thin-stack
+    warning carries its id since v0.507.11.
+    """
     found: set[str] = set()
     for path in FRONTEND_SRC.rglob("*.tsx"):
         if ".test." in path.name:
             continue
-        found.update(
-            re.findall(r'data-testid="([a-z0-9-]+)"', path.read_text(encoding="utf-8"))
-        )
+        src = path.read_text(encoding="utf-8")
+        found.update(re.findall(r'data-testid="([a-z0-9-]+)"', src))
+        found.update(re.findall(r'\btestId: "([a-z0-9-]+)"', src))
     return found
+
+
+def test_alert_notice_test_id_is_rendered_as_data_testid() -> None:
+    """The ``testId:`` form above counts only while the board really renders it."""
+    board = (FRONTEND_SRC / "components" / "AlertNoticeBoard.tsx").read_text(encoding="utf-8")
+    assert "data-testid={n.testId}" in board
 
 
 def test_every_id_the_probe_reads_is_rendered_by_a_real_card() -> None:
