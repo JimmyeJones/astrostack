@@ -41,7 +41,7 @@ BUDGET: dict[str, tuple[int, int]] = {
     "SkySoFar.tsx": (6, 0),
     "Tonight.tsx": (5, 3),
     "Library.tsx": (5, 0),
-    "MoonSun.tsx": (3, 5),
+    "MoonSun.tsx": (3, 1),  # 5 → 1: each capture card's offers on one AlertNoticeBoard (capture-offers) (2026-11-17)
     "Gallery.tsx": (3, 3),
     "YourYear.tsx": (3, 0),
     "Settings.tsx": (2, 5),

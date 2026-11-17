@@ -432,6 +432,38 @@ describe("cropping the empty sky", () => {
     expect(screen.queryByText(/has changed since this picture was made/)).not.toBeInTheDocument();
   });
 
+  it("folds a card's third offer behind one line instead of stacking three boxes", async () => {
+    // An old picture can carry all three at once: wrong colours, empty sky and
+    // the sharpen offer. The wrong picture leads, one offer stays inline, the
+    // third waits one click away (owner, 2026-11-17: "recursive organization").
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({
+        result: result({
+          colour_stale: true, crop_available: true, crop_trim_fraction: 0.8,
+          sharpen_editable: true,
+        }),
+      })],
+    }));
+    renderView();
+    const board = await screen.findByTestId("capture-offers");
+    await waitFor(() => expect(within(board).getByText(/1 more note/)).toBeInTheDocument());
+    expect(within(board).getByRole("button", { name: /^Stack it again$/i })).toBeVisible();
+    expect(within(board).getByRole("button", { name: /^Crop it$/i })).toBeVisible();
+    expect(within(board).getByText(/Bring out surface detail/)).not.toBeVisible();
+    fireEvent.click(within(board).getByText(/1 more note/));
+    expect(within(board).getByText(/Bring out surface detail/)).toBeVisible();
+  });
+
+  it("shows a lone offer on its own, with nothing folded", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({ result: result({ crop_available: true, crop_trim_fraction: 0.8 }) })],
+    }));
+    renderView();
+    const board = await screen.findByTestId("capture-offers");
+    expect(within(board).getByRole("button", { name: /^Crop it$/i })).toBeVisible();
+    expect(within(board).queryByText(/more note/)).toBeNull();
+  });
+
   it("crops a finished still in place — no second stack of the capture", async () => {
     vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
       captures: [capture({

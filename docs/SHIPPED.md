@@ -1,5 +1,53 @@
 # Shipped — the record
 
+## 2026-11-17 (Builder, branch `claude/fervent-bohr-e4d7pd`)
+
+### v0.507.12 — Moon & Sun, declutter slice 7: one notice board per capture card; the ⭐ declutter entry closes
+
+**What.** Seventh slice of the ⭐ declutter entry, on `routes/MoonSun.tsx` (5 `<Alert>` sites). Each capture card
+could stack up to three violet boxes under its picture — the "colours came out wrong" re-stack offer (or, in its
+place, "this video has changed"), the "empty sky — Crop it" offer and the "Bring out surface detail" sharpen
+offer — on a page that lists every capture, so an old Moon picture opened onto a three-box wall per card. The four
+now go on one `AlertNoticeBoard` per card (`data-testid="capture-offers"`): the wrong-picture note
+(`NOTICE_PRIORITY.warning`) leads, the two offers (`advisory`) follow, and a third note folds behind "1 more note".
+Each keeps its icon, colour, wording and button; the sharpen offer's strength picker rides as the note's `extra`.
+**Nothing removed** — every button is one click away. The page's own "Not available yet" (no ffmpeg) stays an
+`<Alert>`: it replaces the whole list, so nothing stacks beside it.
+
+**Measured.** `tests/test_ui_clutter_budget.py` for `MoonSun.tsx`: 3 card kinds + 5 `<Alert>` sites → **3 + 1**
+(ceiling lowered to `(3, 1)`). **Why the ⭐ entry closes here:** it asked for Target and the Dashboard at five
+top-level groups (v0.507.6 / v0.507.7) and for no wall of alerts; after this slice no route holds more than five
+`<Alert>` sites, and the two that hold five were read rather than sliced — Stack's five each sit in a different
+place (the calibration nudge, the over-budget estimate, a failed or a finished job's result, the pinned-defaults
+note), and Settings' five sit in five different sections (the "could not load" page,
+the ASTAP status at the top, the restack nudge in Maintenance, the just-created token, the weighting hint under
+stack defaults), so none stacks on another. The ratchet test keeps every page from growing back.
+
+**Tests.** `MoonSun.test.tsx`: a card with all three offers shows the re-stack and the crop inline and the sharpen
+picker behind "1 more note", which opens it; a card with one offer shows it with nothing folded — both red on the
+old page. Frontend only; no API, setting, schema or default change.
+
+**The closed entry, verbatim:**
+
+- **⭐ OWNER-ASKED (2026-11-17) — declutter: "simplicity is sometimes best — or at least recursive
+  organization".** Measured on 2026-11-17 by `tests/test_ui_clutter_budget.py`, as distinct card/note/banner
+  kinds plus `<Alert>` sites per route file. The worst: **Target 30 + 13**, **Dashboard 23 + 2**, **Stack form
+  2 + 40 alerts**, **Editor 6 + 16**, **Jobs 2 + 10**. These are only what the route file itself renders; its
+  child components add more. **The work**, one slice per run, worst page first (Target, then Dashboard, then
+  the Stack form's alerts):
+  - Give the page **≤ 5 top-level groups**, each with a one-line summary, as AGENTS.md §1 "Recursive
+    organization" describes. Nest everything else: collapsed sections, tabs, or nested routes
+    (`/library/<target>/…`).
+  - Put **every note onto one notice board** that shows the top one or two and folds the rest behind "N more".
+  - **NOTHING MAY BE REMOVED.** Every feature stays reachable within two clicks of where it was, and the
+    commit says where each moved.
+  - Measure before and after with `scripts/agent-dogfood.sh --mosaic --big` (visible cards above the fold at
+    the owner's scale), and lower that route's `BUDGET` ceiling in the same commit.
+  - Watch the Target page's child components (`frontend/src/components/target/`): the budget counts only
+    the route file, so a slice that moves a card into a child without nesting it has not reduced anything.
+  Size **L** overall, **M** per slice. **Slice 1 = v0.507.6** (Target 6 → 5 groups, 30 → 17); **slice 2 = v0.507.7** (Dashboard 7 → 5 groups, 23 + 2 → 0 + 0); **slice 3 = v0.507.8** (Stack form 40 → 5 `<Alert>` sites, three notice boards via `StackNoticeBoard`); **slice 4 = v0.507.9** (Editor 16 → 2, three boards via the shared `AlertNoticeBoard`); **slice 5 = v0.507.10** (Jobs 10 → 0, three boards); **slice 6 = v0.507.11** (Target 13 → 0 via `alertNoticeNode` — its notes already folded on `target-notes`, so this one changed the drawing, not what a reader sees); next: no route holds more than 5 `<Alert>` sites now — measure MoonSun / Settings (5 each) with the data that fills them before slicing, or close this entry. It is PRIORITY 3 (friendliness) on a direct owner ask, so it takes the
+  ⭐ beginner-feature slot until the Target page and Dashboard are each down to five top-level groups.
+
 ## 2026-11-17 (Builder, branch `claude/fervent-bohr-gr597o`)
 
 ### v0.507.11 — Target, declutter slice 6: the route draws no `<Alert>` of its own
