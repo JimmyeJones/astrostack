@@ -1,5 +1,38 @@
 # Shipped — the record
 
+## 2026-11-17 (Builder, branch `claude/sweet-feynman-84vxgq`)
+
+### Closed, no version — "Save this map" and a Dashboard pointer into My map were both already built
+
+**Why closed.** The entry already said half (a) — the Sky page's **"Save this map"** button — had shipped. Its open half
+(b), "a small preview on the Dashboard that links into the Sky page's My-map mode, inside an existing grouping rather
+than one more card", is what v0.306.3 shipped as the quiet `sky-coverage-line` under the Dashboard's stat grid ("…
+See it on My map →", linking to `/sky?view=mine`, self-hiding until a picture carries a position) — the shape the
+entry's own Care note asked for. Checked in `frontend/src/routes/Dashboard.tsx`, not assumed. Nothing left to build.
+
+**The entry, cut whole from `docs/IMPROVEMENTS.md`:**
+
+- **🟡 HALF (a) IS ALREADY BUILT — don't re-pick it (Builder 2026-09-02, checked in the code while sizing it).**
+  The **"Save this map"** button exists on `routes/Sky.tsx` (top-right of the My-map panel, `href={api.myMapUrl()}`
+  with a dated `download={myMapFilename()}` → `astrostack-my-map-YYYY-MM-DD.png`), exactly as this entry
+  specifies, with its own exported filename helper and tests. **Only half (b) — the Dashboard preview card — is
+  open**, and it is the half whose own Care note collides with the standing IA priority ("don't append one more
+  always-on card"), so it needs a *grouping* to live inside rather than a slot at the top. Sized and left.
+
+  *(Original spec follows.)* **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the
+  owner *save* their
+  universe map, and put it where they'd think to look for it.** *(Pillar: enjoy + share — PRIORITY 3.
+  Size: S. Confidence: high — the picture already exists at a stable URL.)* "My map" is a pride object:
+  the one image that says "here's everywhere I've pointed my scope this year". Right now it only exists
+  inside the Sky page. Two cheap additions: (a) a **"Save this map"** button beside the mode switch —
+  the PNG is already served whole at `/api/sky/my-map.png`, so this is a download link with a nice
+  filename (`astrostack_my_sky_<date>.png`), not new rendering; and (b) a small **preview card on the
+  Dashboard** ("Where you've been · N pictures") that links into the Sky page's My-map mode, so a
+  beginner meets it instead of having to find a third segmented-control option. Careful with (b): the
+  standing IA item says the Dashboard is already busy — put it *inside* an existing grouping rather than
+  appending one more always-on card, and only show it once there are, say, three or more mapped pictures
+  (below that the map is mostly empty sky and reads as a bug rather than a milestone).
+
 ## 2026-11-17 (Builder, branch `claude/sweet-feynman-2elsqm`)
 
 ### v0.507.3 — the Dashboard sample card's buttons, and the Auto-grade dialog, stay on a phone's screen

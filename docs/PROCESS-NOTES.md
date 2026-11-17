@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-11-17 (Builder, branch `claude/sweet-feynman-84vxgq`) — no app change; v0.507.3's recorded remainder (dialogs the probe does not open) run at 320 / 375 px: CLEAN.
+
+- **Baseline / backlog.** Suite 8844 passed / 7 skipped on `baa8752e` (xdist `-n 4`, BLAS capped, 15m43s). Every Bugs
+  entry gated on the owner or a diagnostic; the Features entries declined or gated; no open PRs. One stale Ideas entry
+  closed (My map's Dashboard pointer, built as v0.306.3's `sky-coverage-line`) — `SHIPPED.md` 2026-11-17.
+- **Dogfood `--build --mosaic --calibration --serve`, CLEAN** (nothing overflowing, no `OFF-EDGE CONTROL`, no console
+  errors).
+- **Why this angle.** v0.507.3's note: "still unprobed by it: any dialog the probe does not open". Scratch Playwright
+  against the served app, 320 and 375 px: on 31 routes (every top-level page, both sample targets' page, history, stack
+  form and editor) every visible `[aria-haspopup]` trigger was opened and `offEdgeControls` plus the popup's own box run
+  — Library ×2, Storage, Tonight, Calibration, Live, Target ×2, History's Save/share menu ×2, Stack form, editor ×3
+  (Presets, Compare a look, …). Then the two `<Modal>`s not covered before: History's **"To phone"** QR dialog (16–304 px
+  at 320) and the editor's **"Keep this look?"** leave guard. All CLEAN.
+- **Read, not a bug (recorded so nobody re-chases it):** in Playwright, *Back* from an editor opened by a full page load
+  left with no "Keep this look?" — that is a cross-document Back, which `useBlocker` cannot see; the browser's own
+  `beforeunload` prompt does fire (Playwright's `dialog` event, type `beforeunload`; dismissing it keeps the page). An
+  in-app Back (editor reached by a link) shows the modal. Both exits behave as `UnsavedLookGuard`'s docstring says.
+- **Still not reached:** the Updates card's rollback dialog (needs a rollback on offer) and the Dashboard's "Finish them
+  all" confirm (saving the Auto recipe on both samples over the API left `/api/gallery/unexported-edits` at 0 —
+  likely the look the dogfood had already exported; not chased). Both are a text stack over a wrapping `Group` of two
+  buttons — no fixed width to overflow.
+
 ## 2026-11-17 (Builder, branch `claude/sweet-feynman-2elsqm`) — v0.507.3; v0.507.1's recorded probe gap (controls past an edge or a clipping box) run, fixed twice, and made permanent.
 
 - **Baseline / backlog.** Suite 8844 passed / 7 skipped on `5051e8c2` (xdist `-n 4`, BLAS capped, 15m58s). Every Bugs
