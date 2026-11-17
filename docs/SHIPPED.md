@@ -1,5 +1,34 @@
 # Shipped — the record
 
+## 2026-11-17 (Builder, branch `claude/fervent-bohr-i9m6zu`)
+
+### v0.507.8 — Stack form, declutter slice 3: three notice boards instead of a wall of alerts
+
+**What.** Third slice of the ⭐ declutter entry, on `routes/Stack.tsx`, whose notes were 40 separate always-on `<Alert>`
+sites — a target with an imperfect dark and a streaky night opened onto five or six coloured boxes above "Start
+stacking". Each group of the form now hands its notes to one board (`components/stack/StackNoticeBoard.tsx`, built on
+the shared `NoticeBoard`): the most important one or two stay inline, the rest fold behind "N more notes".
+**Nothing removed** — every note keeps its wording and its fix button, one click away at most:
+- **Page notes** (`stack-page-notes`, under the title): no plate-solved frames (blocking), a mixed-pointing batch or
+  its "Rejected the odd-target frames" + Undo, and the "pre-filled from run #N" line.
+- **Calibration notes** (`stack-calibration-notes`, at the foot of the Calibration group, now below *all* its pickers
+  rather than interleaved with them): the wrong-content warning and the red size / Bayer mismatches rank first, then
+  exposure, temperature, gain, flat-dark and bias notes.
+- **Settings advice** (`stack-advice-notes`, under Advanced options): the 17 rejection / drizzle / weighting /
+  background / auto-grade notes, a warning outranking a nudge.
+- The confirmation of a click just made (the auto-grade "Dropped N outlier frames" and the mixed-batch reject, each
+  with its Undo) takes `JUST_DONE_PRIORITY` and is never folded.
+- Unchanged and still inline: the memory over-budget alert (it replaces the estimate line), the job's failure and
+  dropped-frames alerts, the pinned-defaults note and the "Use recommended" calibration offer.
+
+**Measured.** `tests/test_ui_clutter_budget.py` for `Stack.tsx`: 2 card kinds + 40 `<Alert>` sites → **2 + 5** (ceiling
+lowered to `(2, 5)`).
+
+**Tests.** `StackNoticeBoard.test.tsx` (4: silent board renders nothing; a red and a warning inline with three nudges
+folded and back in one click; an Undo never folded; the fix button wired). `Stack.test.tsx`: the sigma-blind caution
+and its fix live on the advice board, the dark-temperature warning on the calibration board — both red on the old
+page. Frontend only; no API, setting, schema or default change.
+
 ## 2026-11-17 (Builder, branch `claude/fervent-bohr-kq9zs1`)
 
 ### v0.507.7 — Dashboard, declutter slice 2: five top-level groups, and the newest and best pictures share one section

@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { notifications } from "@mantine/notifications";
@@ -441,6 +441,9 @@ describe("StackView", () => {
     await waitFor(() =>
       expect(screen.getByText(/shot at 20°C but your subs are at 5°C/)).toBeInTheDocument());
     expect(screen.queryByText(/but your subs are 30s/)).not.toBeInTheDocument();
+    // …on the calibration group's own notice board, under its pickers.
+    expect(within(screen.getByTestId("stack-calibration-notes"))
+      .getByText(/shot at 20°C but your subs are at 5°C/)).toBeVisible();
   });
 
   it("warns when a chosen dark's gain differs from the subs' (nothing corrects that)", async () => {
@@ -1028,6 +1031,24 @@ describe("StackView", () => {
     await waitFor(() =>
       expect(screen.getByText(/can't actually drop a passing/)).toBeInTheDocument());
     expect(screen.getByText(/about 11 frames up/)).toBeInTheDocument();
+  });
+
+  it("puts the rejection advice on the form's settings-advice board, not a box of its own", async () => {
+    // Declutter slice 3 (owner, 2026-11-17): the form's ~40 always-on alerts now
+    // go through three notice boards. A note rendered outside them is the wall
+    // coming back one box at a time.
+    mockRejectionForm(6, {
+      method: "sigma-clip", n_frames: 6, lone_outlier_min_frames: 11, reaches: false,
+    });
+
+    renderStack();
+
+    const note = await screen.findByText(/can't actually drop a passing/);
+    expect(within(screen.getByTestId("stack-advice-notes")).getByText(/can't actually drop a passing/))
+      .toBe(note);
+    // Its one-click fix travels with it.
+    expect(within(screen.getByTestId("stack-advice-notes"))
+      .getByRole("button", { name: "Turn on Auto outlier removal" })).toBeInTheDocument();
   });
 
   it("turns on Auto outlier removal in one click from the caution, then hides it", async () => {
