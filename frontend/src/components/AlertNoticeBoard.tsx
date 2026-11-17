@@ -1,4 +1,4 @@
-import { Alert, Box, Button, Text } from "@mantine/core";
+import { Alert, Box, Button, type MantineSpacing, Text } from "@mantine/core";
 import type { ReactNode } from "react";
 import { NoticeBoard, NOTICE_PRIORITY } from "./NoticeBoard";
 
@@ -38,6 +38,9 @@ export type AlertNotice = {
   onClose?: () => void;
   /** ``data-testid`` on the note's own Alert, for a note tests look up by id. */
   testId?: string;
+  /** Padding for a titled note that sits somewhere dense (a Jobs row) and
+   *  kept Alert's ``p="xs"`` before it moved onto a board. */
+  p?: MantineSpacing;
 };
 
 /**
@@ -87,7 +90,7 @@ export function AlertNoticeBoard({
             icon={n.icon}
             // A titled note is a page-level one and keeps Alert's own spacing;
             // the one-sentence form notes stay compact, as they always were.
-            {...(n.title ? {} : { py: 6, px: "sm" })}
+            {...(n.p != null ? { p: n.p } : n.title ? {} : { py: 6, px: "sm" })}
             data-notice={n.key}
             data-testid={n.testId}
             withCloseButton={Boolean(n.onClose)}

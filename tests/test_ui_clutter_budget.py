@@ -46,7 +46,7 @@ BUDGET: dict[str, tuple[int, int]] = {
     "YourYear.tsx": (3, 0),
     "Settings.tsx": (2, 5),
     "Stack.tsx": (2, 5),  # 40 → 5: three notice boards via components/stack/StackNoticeBoard.tsx (2026-11-17)
-    "Jobs.tsx": (2, 10),
+    "Jobs.tsx": (2, 0),  # 10 → 0: three notice boards via components/AlertNoticeBoard.tsx (job-result, scan-result, page notes) (2026-11-17)
     "Compare.tsx": (1, 4),
     "Seestar.tsx": (1, 3),
 }

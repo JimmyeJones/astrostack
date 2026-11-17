@@ -38,4 +38,13 @@ describe("AlertNoticeBoard", () => {
     expect(screen.getByRole("button", { name: "Move it to the top" }))
       .toContainElement(screen.getByTestId("fix-icon"));
   });
+
+  it("lets a titled note in a dense row keep its compact padding", () => {
+    // The Jobs page's result notes were `p="xs"` Alerts before slice 5.
+    board([{ key: "t", priority: NOTICE_PRIORITY.warning, color: "yellow", p: "xs",
+      title: "Very few frames stacked", text: "Two subs." }]);
+    const alert = document.querySelector('[data-notice="t"]') as HTMLElement;
+    expect(alert.style.getPropertyValue("--alert-padding") || alert.getAttribute("style") || "")
+      .toMatch(/xs/);
+  });
 });
