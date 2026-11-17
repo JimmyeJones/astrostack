@@ -213,8 +213,11 @@ function AutoGradeModal({
             {mosaicGradingNote(report?.pointing_groups)}
           </Text>
         ) : null}
+        {/* `maw` because a 320 px phone leaves this modal ~256 px inside its
+            padding, and a fixed 280 px field poked out of the dialog's right
+            side — the whole dialog then scrolled sideways. */}
         <Select
-          label="Sensitivity" size="xs" w={280} allowDeselect={false}
+          label="Sensitivity" size="xs" w={280} maw="100%" allowDeselect={false}
           data={SENSITIVITIES}
           value={sensitivity ?? report?.sensitivity ?? "balanced"}
           onChange={(v) => setSensitivity(v ?? undefined)}

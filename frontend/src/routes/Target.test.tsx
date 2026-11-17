@@ -2045,6 +2045,23 @@ describe("TargetView auto-grade", () => {
     expect(screen.getByText(/Consider a conservative pass first/)).toBeInTheDocument();
   });
 
+  it("keeps the Sensitivity field inside the Auto-grade dialog on a small phone", async () => {
+    // A 320 px phone leaves the dialog ~256 px inside its padding; a fixed
+    // 280 px field poked out of its right side (measured in Playwright) and
+    // the whole dialog scrolled sideways. jsdom has no layout: pin the cap.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "autoGradePreview").mockResolvedValue(mkReport());
+
+    renderTarget();
+    (await screen.findByRole("button", { name: /Auto-grade/ })).click();
+
+    const field = await screen.findByRole("textbox", { name: "Sensitivity" });
+    const root = field.closest(".mantine-Select-root") as HTMLElement;
+    expect(root.style.maxWidth).toBe("100%");
+  });
+
   it("shows a quiet all-consistent state when nothing is flagged", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
