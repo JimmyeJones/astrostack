@@ -2,7 +2,7 @@
 
 ## 2026-11-17 (Builder, branch `claude/fervent-bohr-ghuw4p`)
 
-### v0.507.4 — More settings: a long "Back to default" stays inside its card, and a sub-minute back-up check reads in seconds
+### v0.507.5 — More settings: a long "Back to default" stays inside its card, and a sub-minute back-up check reads in seconds
 
 **What.** On **Settings → More settings** a card whose value has left its default shows a "Heads up" with a
 "Back to default (…)" button naming the default. A Mantine button never wraps its label, so in the two-column grid on a
