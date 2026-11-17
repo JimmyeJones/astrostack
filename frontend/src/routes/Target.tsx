@@ -32,20 +32,9 @@ import {
   processStartedMessage, STACK_BUSY_LABEL, STACK_BUSY_TITLE, useTargetStackJob,
 } from "../hooks/useTargetStackJob";
 import { StackFailedNote } from "../components/target/StackFailedNote";
-import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
-import { InsightTabs } from "../components/InsightTabs";
-import { CompareWithLastCard } from "../components/CompareWithLastCard";
-import { NightsCard } from "../components/NightsCard";
+import { TargetInsights } from "../components/target/TargetInsights";
+import { describeObject } from "../components/ObjectInfoCard";
 import { estimateClearNights } from "../components/clearNights";
-import { FocusTrendCard } from "../components/FocusTrendCard";
-import { TransparencyTrendCard } from "../components/TransparencyTrendCard";
-import { NextSessionCard } from "../components/NextSessionCard";
-import { BestMonthsStrip } from "../components/BestMonthsStrip";
-import { MoonInterferenceCard } from "../components/MoonInterferenceCard";
-import { MosaicMapCard } from "../components/target/MosaicMapCard";
-import { DeepeningReelCard } from "../components/DeepeningReelCard";
-import { SessionRecapCard } from "../components/SessionRecapCard";
-import { StackHealthCard } from "../components/StackHealthCard";
 import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
 import { StackNoiseBadge } from "../components/StackNoiseBadge";
 import { FirstLookCard } from "../components/FirstLookCard";
@@ -53,7 +42,6 @@ import { SampleTourNote } from "../components/SampleTourNote";
 import { ScanToPhoneModal } from "../components/ScanToPhoneButton";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
-import { RejectionBreakdownCard } from "../components/target/RejectionBreakdownCard";
 import { UnsolvedHelp } from "../components/target/UnsolvedHelp";
 import { SkyBrightnessNote } from "../components/target/SkyBrightnessNote";
 import { RejectionOutlookNote } from "../components/target/RejectionOutlookNote";
@@ -1435,81 +1423,6 @@ export function TargetView() {
               from: without it the explainer calls these subs "usually harmless"
               on the one screen where they are the thing blocking the target. */}
           {unsolvedCount > 0 ? <UnsolvedHelp setup={solveSetup} /> : null}
-          {lastReject ? (
-            <Button
-              size="compact-xs"
-              variant="subtle"
-              color="teal"
-              leftSection={<IconArrowBackUp size={14} />}
-              loading={bulk.isPending}
-              aria-label="Undo last bulk reject"
-              onClick={() => bulk.mutate({ action: "accept", ids: lastReject.ids })}
-            >
-              Undo {lastReject.label} reject ({lastReject.ids.length})
-            </Button>
-          ) : null}
-          {streakedAccepted > 0 ? (
-            <Group gap={4}>
-              <HintAnchor
-                multiline
-                w={260}
-                label={`${streakedAccepted} accepted frame${streakedAccepted === 1 ? "" : "s"} carry a satellite/plane trail. Stack with Auto outlier removal to take the trail out while keeping the frame — it picks a method that works at your stack's depth. Or reject them all here.`}
-              >
-                <Badge variant="light" color="orange">
-                  {streakedAccepted} streaked
-                </Badge>
-              </HintAnchor>
-              <Button
-                size="compact-xs"
-                variant="subtle"
-                color="orange"
-                loading={bulk.isPending}
-                aria-label="Reject all streaked frames"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      `Reject all ${streakedAccepted} accepted frame${streakedAccepted === 1 ? "" : "s"} carrying a satellite/plane trail?`,
-                    )
-                  ) {
-                    bulk.mutate({ action: "reject_streaked" });
-                  }
-                }}
-              >
-                Reject all
-              </Button>
-            </Group>
-          ) : null}
-          {trailedAccepted > 0 ? (
-            <Group gap={4}>
-              <HintAnchor
-                multiline
-                w={260}
-                label={`${trailedAccepted} accepted frame${trailedAccepted === 1 ? "" : "s"} have unusually elongated stars for this target — a sign of tracking error, wind or a bumped mount on that whole sub. Rejecting them can sharpen the stack.`}
-              >
-                <Badge variant="light" color="yellow">
-                  {trailedAccepted} trailed
-                </Badge>
-              </HintAnchor>
-              <Button
-                size="compact-xs"
-                variant="subtle"
-                color="yellow"
-                loading={bulk.isPending}
-                aria-label="Reject all trailed frames"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      `Reject all ${trailedAccepted} accepted frame${trailedAccepted === 1 ? "" : "s"} with unusually elongated (trailed) stars?`,
-                    )
-                  ) {
-                    bulk.mutate({ action: "reject_trailed" });
-                  }
-                }}
-              >
-                Reject all
-              </Button>
-            </Group>
-          ) : null}
         </Group>
         <Group gap="xs">
           <Button
@@ -1723,7 +1636,7 @@ export function TargetView() {
 
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>
-          <Group mb="xs" gap="xs" align="flex-end">
+          <Group mb="xs" gap="xs" align="flex-end" data-testid="frame-tools">
             <Select size="xs" label="Reject worst by" w={150} value={rejectMetric}
               allowDeselect={false} data={REJECT_METRICS}
               onChange={(v) => setRejectMetric(v ?? "fwhm_px")} />
@@ -1748,6 +1661,85 @@ export function TargetView() {
                 Auto-grade
               </Button>
             </Tooltip>
+            {/* The frame-curation shortcuts — undo the last bulk reject, and the
+                streaked / trailed counts with their one-tap "Reject all" — sit with
+                the other bulk tools here rather than in the title row, which now
+                carries only what the target *is* (2026-11-17, declutter). */}
+            {lastReject ? (
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="teal"
+                leftSection={<IconArrowBackUp size={14} />}
+                loading={bulk.isPending}
+                aria-label="Undo last bulk reject"
+                onClick={() => bulk.mutate({ action: "accept", ids: lastReject.ids })}
+              >
+                Undo {lastReject.label} reject ({lastReject.ids.length})
+              </Button>
+            ) : null}
+            {streakedAccepted > 0 ? (
+              <Group gap={4}>
+                <HintAnchor
+                  multiline
+                  w={260}
+                  label={`${streakedAccepted} accepted frame${streakedAccepted === 1 ? "" : "s"} carry a satellite/plane trail. Stack with Auto outlier removal to take the trail out while keeping the frame — it picks a method that works at your stack's depth. Or reject them all here.`}
+                >
+                  <Badge variant="light" color="orange">
+                    {streakedAccepted} streaked
+                  </Badge>
+                </HintAnchor>
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="orange"
+                  loading={bulk.isPending}
+                  aria-label="Reject all streaked frames"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Reject all ${streakedAccepted} accepted frame${streakedAccepted === 1 ? "" : "s"} carrying a satellite/plane trail?`,
+                      )
+                    ) {
+                      bulk.mutate({ action: "reject_streaked" });
+                    }
+                  }}
+                >
+                  Reject all
+                </Button>
+              </Group>
+            ) : null}
+            {trailedAccepted > 0 ? (
+              <Group gap={4}>
+                <HintAnchor
+                  multiline
+                  w={260}
+                  label={`${trailedAccepted} accepted frame${trailedAccepted === 1 ? "" : "s"} have unusually elongated stars for this target — a sign of tracking error, wind or a bumped mount on that whole sub. Rejecting them can sharpen the stack.`}
+                >
+                  <Badge variant="light" color="yellow">
+                    {trailedAccepted} trailed
+                  </Badge>
+                </HintAnchor>
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="yellow"
+                  loading={bulk.isPending}
+                  aria-label="Reject all trailed frames"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Reject all ${trailedAccepted} accepted frame${trailedAccepted === 1 ? "" : "s"} with unusually elongated (trailed) stars?`,
+                      )
+                    ) {
+                      bulk.mutate({ action: "reject_trailed" });
+                    }
+                  }}
+                >
+                  Reject all
+                </Button>
+              </Group>
+            ) : null}
           </Group>
           <AutoGradeModal
             safe={safe}
@@ -1938,106 +1930,36 @@ export function TargetView() {
         </Grid.Col>
       </Grid>
 
-      {identity.data ? (
-        <Box mt="xs">
-          <ObjectInfoCard safe={safe} hideFraming={!!measuredFraming} allowRename />
-        </Box>
-      ) : null}
-
-      {/* The page's analysis cards, grouped instead of stacked (IA slice (b) of the
-          owner's "the pages are extremely busy" item) and now *below* the frames
-          table rather than above it (slice (c)). Nine full cards used to sit one
-          below another before the table; they are all still here, still one click
-          away, but only one group is on screen at a time. A group whose cards have
-          nothing to say gets no tab at all — see `InsightTabs`. A later analysis
-          card should join a group here rather than add a tenth stacked card. */}
-      <InsightTabs
-        data-testid="target-insights"
-        groups={[
-          { key: "overview", label: "Overview", node: (
-            <>
-              <SessionRecapCard safe={safe} />
-              <NightsCard safe={safe} />
-            </>
-          ) },
-          { key: "quality", label: "Quality", node: (
-            <>
-              {/* The same "why were some frames left out?" breakdown the badge
-                  above shows on hover — here in a form a phone can reach, and
-                  with the one-tap fixes its advice names. Self-hides when
-                  nothing was left out. */}
-              <RejectionBreakdownCard
-                summary={rejectSummary.data?.summary}
-                onRunPlateSolve={() => qcSolve.mutate()}
-                onTryHarder={() => tryHarder.mutate()}
-                deepRescueOffered={rejectSummary.data?.deep_rescue_offered}
-                safe={safe}
-                examples={rejectSummary.data?.examples} />
-              <FocusTrendCard safe={safe} />
-              <TransparencyTrendCard safe={safe} />
-              <StackHealthCard safe={safe} />
-            </>
-          ) },
-          { key: "planning", label: "Planning", node: (
-            <>
-              {/* Forward-looking companion to "Is it enough yet?" (which stays
-                  inline below — it answers the question the beginner came with):
-                  when there's still a goal gap, join it with the night planner's
-                  next dark window(s) for this object. Self-hides when the goal's
-                  met or no window can be computed. */}
-              {readiness ? (
-                <NextSessionCard
-                  safe={safe}
-                  gapSeconds={readiness.remainingHours * 3600}
-                  subExposureSeconds={
-                    target.data && target.data.n_frames_accepted > 0
-                      ? target.data.total_exposure_s / target.data.n_frames_accepted
-                      : null
-                  }
-                  /* The nights-to-go figure the readiness card already derives
-                     from this target's own pace — handed over so the card can
-                     turn "2 more clear nights" into a date the planner can
-                     actually vouch for. */
-                  nightsToGo={clearNights?.nights ?? null}
-                />
-              ) : null}
-              {/* Which months of the year this object is actually up. Self-hides
-                  without a location/position. */}
-              <BestMonthsStrip safe={safe} />
-              {/* "Your mosaic, panel by panel" — where a mosaic is thin, so the
-                  next clear night goes where it actually helps. Planning, not
-                  another banner: it joins this group rather than being appended
-                  to the page, and self-hides on anything that isn't a mosaic. */}
-              <MosaicMapCard safe={safe} />
-              {/* "Is the Moon going to wash this out tonight?" — a plain-language
-                  Moon-interference readout so a beginner points at a bright target
-                  instead of wasting a bright-Moon night. Self-hides without a
-                  location/position. */}
-              <MoonInterferenceCard safe={safe} />
-            </>
-          ) },
-          { key: "story", label: "Story", node: (
-            <>
-              {/* "Did it get better?" — two links into the run-vs-run A/B page
-                  that has existed since v0.150 and that a beginner who never
-                  opens History never discovers: the newest picture against the
-                  one before it, and (from three pictures on) the newest against
-                  the *first ever*, which is the comparison that actually shows
-                  how far they've come. They join this group rather than adding
-                  another always-on control, and self-hide on the same condition
-                  the reel below it does: fewer than two comparable pictures,
-                  nothing to say. */}
-              <CompareWithLastCard safe={safe} runs={runs.data} />
-              {/* "Night after night" — the same target getting deeper across
-                  re-stacks (self-hides until there are ≥2 stacks to compare).
-                  On a target stacked *once* across several nights it instead
-                  offers to build the night-by-night clip those subs already
-                  hold, since that target is otherwise the one the reel has
-                  nothing to say to — see `webapp/reeloffer.py` for the gates. */}
-              <DeepeningReelCard safe={safe} name={target.data?.name} />
-            </>
-          ) },
-        ]}
+      {/* Everything that *describes* the target — the catalog card ("what am I
+          looking at"), its nights, quality trends, planning and story — is one
+          tabbed group below the frames table (the owner's "recursive
+          organization", 2026-11-17). The catalog card leads the Overview tab,
+          which opens first, so it is where it always was. See TargetInsights. */}
+      <TargetInsights
+        safe={safe}
+        name={target.data?.name}
+        showObjectInfo={!!identity.data}
+        hideFraming={!!measuredFraming}
+        rejection={{
+          summary: rejectSummary.data?.summary,
+          deepRescueOffered: rejectSummary.data?.deep_rescue_offered,
+          examples: rejectSummary.data?.examples,
+        }}
+        onRunPlateSolve={() => qcSolve.mutate()}
+        onTryHarder={() => tryHarder.mutate()}
+        nextSession={readiness ? {
+          safe,
+          gapSeconds: readiness.remainingHours * 3600,
+          subExposureSeconds:
+            target.data && target.data.n_frames_accepted > 0
+              ? target.data.total_exposure_s / target.data.n_frames_accepted
+              : null,
+          // The nights-to-go figure the readiness card derives from this
+          // target's own pace, so the card can turn "2 more clear nights" into
+          // a date the planner can vouch for.
+          nightsToGo: clearNights?.nights ?? null,
+        } : null}
+        runs={runs.data}
       />
 
       {latestRun?.has_preview ? (
