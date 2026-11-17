@@ -36,7 +36,7 @@ _ALERT = re.compile(r"<Alert\b")
 BUDGET: dict[str, tuple[int, int]] = {
     "Target.tsx": (17, 13),  # 30 → 17: the insight tabs and object card → components/target/TargetInsights.tsx (2026-11-17)
     "Dashboard.tsx": (0, 0),  # 23 + 2 → 0: five groups in components/dashboard/, pinned by Dashboard.test.tsx (2026-11-17)
-    "Editor.tsx": (6, 16),
+    "Editor.tsx": (6, 2),  # 16 → 2: three notice boards via components/AlertNoticeBoard.tsx, the preview-box errors one site (2026-11-17)
     "History.tsx": (6, 1),
     "SkySoFar.tsx": (6, 0),
     "Tonight.tsx": (5, 3),

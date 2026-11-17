@@ -1030,7 +1030,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
     the owner's scale), and lower that route's `BUDGET` ceiling in the same commit.
   - Watch the Target page's child components (`frontend/src/components/target/`): the budget counts only
     the route file, so a slice that moves a card into a child without nesting it has not reduced anything.
-  Size **L** overall, **M** per slice. **Slice 1 = v0.507.6** (Target 6 → 5 groups, 30 → 17); **slice 2 = v0.507.7** (Dashboard 7 → 5 groups, 23 + 2 → 0 + 0); **slice 3 = v0.507.8** (Stack form 40 → 5 `<Alert>` sites, three notice boards via `StackNoticeBoard`); next: the Editor's 16 alerts, then Jobs' 10. It is PRIORITY 3 (friendliness) on a direct owner ask, so it takes the
+  Size **L** overall, **M** per slice. **Slice 1 = v0.507.6** (Target 6 → 5 groups, 30 → 17); **slice 2 = v0.507.7** (Dashboard 7 → 5 groups, 23 + 2 → 0 + 0); **slice 3 = v0.507.8** (Stack form 40 → 5 `<Alert>` sites, three notice boards via `StackNoticeBoard`); **slice 4 = v0.507.9** (Editor 16 → 2, three boards via the shared `AlertNoticeBoard`); next: Jobs' 10 alerts, then Target's 13. It is PRIORITY 3 (friendliness) on a direct owner ask, so it takes the
   ⭐ beginner-feature slot until the Target page and Dashboard are each down to five top-level groups.
 
 ### ⭐ Editor — make it excellent (PRIORITY 1)
@@ -3163,6 +3163,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.507.9 **Editor declutter slice 4: its 16 `<Alert>` sites go through three notice boards (`AlertNoticeBoard`: `editor-notes`, `pipeline-notes`, `op-notes`) and the preview box's three exclusive errors become one site (`previewProblem`)** (16 → 2)
 - ✅ v0.507.8 **Stack form declutter slice 3: its 40 always-on `<Alert>`s go through three notice boards (`StackNoticeBoard`: page notes, calibration notes, settings advice)** (40 → 5)
 - ✅ v0.507.7 **Dashboard declutter slice 2: five top-level groups in `components/dashboard/` (`DashboardNotices`, `GettingStarted`, `AtAGlance`, `YourPictures`, `DashboardInsights`), and Recent stacks + My best pictures become one "Your pictures" section with Newest / Best tabs** (clutter count 23 + 2 → 0 + 0)
 - ✅ v0.507.6 **Target page declutter slice 1: the object card leads the Overview insight tab, the tab group moves into `components/target/TargetInsights.tsx`, and Undo / streaked / trailed "Reject all" move from the title row to the frame-tools row** (`TargetInsights`, `frame-tools`; clutter count 30 → 17)
