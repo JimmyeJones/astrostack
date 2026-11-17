@@ -686,7 +686,12 @@ def test_tonight_date_differs_from_today(client, solved_library):
     tonight = client.get("/api/plan/tonight").json()
     future = (datetime.now(timezone.utc) + timedelta(days=14)).date().isoformat()
     later = client.get("/api/plan/tonight", params={"date": future}).json()
-    assert tonight["moon_illumination"] != later["moon_illumination"]
+    # Illumination alone can coincide: two nights either side of a full (or new)
+    # Moon are equally lit — on 2026-11-17 both read 0.473 and this failed CI. The
+    # phase can't repeat 14 days on, so the lit fraction *with* its direction
+    # always differs.
+    assert ((tonight["moon_illumination"], tonight["moon_waxing"])
+            != (later["moon_illumination"], later["moon_waxing"]))
 
 
 def test_tonight_rejects_a_far_future_date(client, solved_library):
