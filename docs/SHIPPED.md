@@ -1,5 +1,30 @@
 # Shipped — the record
 
+## 2026-11-17 (Builder, branch `claude/fervent-bohr-i5rwft`)
+
+### v0.507.6 — Target page, declutter slice 1: the object card joins the insight tabs, and the title row stops carrying frame tools
+
+**What.** First slice of the ⭐ declutter entry (owner, 2026-11-17: "simplicity is sometimes best — or at least recursive
+organization"), on the worst page, `Target.tsx`. Two moves, **nothing removed**:
+- The catalog card ("what am I looking at", `ObjectInfoCard`, with its rename offer) sat on its own between the frames
+  table and the insight tabs. It now leads the **Overview** tab — the tab that opens first — so it is on screen exactly
+  where it was, but the page has one top-level group fewer. The whole tab group (and the card) moved into a child,
+  `components/target/TargetInsights.tsx`: genuinely nested behind tabs, so the route's clutter count drops honestly.
+- The title row carried up to seven things beside the name: three counts, an "Undo last bulk reject" button and two
+  "N streaked / N trailed + Reject all" pairs. The undo and both pairs now sit in the frame-tools row above the frames
+  table (`data-testid="frame-tools"`), beside "Reject worst" and "Auto-grade" — the other bulk frame tools. The title
+  row keeps the name, accepted, integration, and the rejected / not-located badge with its help.
+
+**Measured.** Top-level groups on the page: notice board, title row, picture + "Is it enough yet?", frames, object
+card, insight tabs → the same minus the object card (6 → 5, the AGENTS.md §1 ceiling). Title row: up to 7 → up to 4
+items beside the name. `tests/test_ui_clutter_budget.py` count for `Target.tsx`: 30 → **17** card kinds (ceiling lowered
+in this commit), `<Alert>` sites unchanged at 13 (they already share the `NoticeBoard`). Dogfood `--mosaic`: see
+PROCESS-NOTES 2026-11-17.
+
+**Tests.** `Target.test.tsx`: new "puts the streaked / trailed reject-alls and the undo with the frame tools" and the
+content-order test now asserts the object card is inside `target-insights` — both red on the old page. Frontend only;
+no API, setting, schema or default change.
+
 ## 2026-11-17 (Builder, branch `claude/fervent-bohr-ghuw4p`)
 
 ### v0.507.5 — More settings: a long "Back to default" stays inside its card, and a sub-minute back-up check reads in seconds

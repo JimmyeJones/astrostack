@@ -34,7 +34,7 @@ _ALERT = re.compile(r"<Alert\b")
 #: Ceiling per route file: (distinct surface components, <Alert> sites).
 #: Lower these as pages are consolidated; never raise one without owner sign-off.
 BUDGET: dict[str, tuple[int, int]] = {
-    "Target.tsx": (30, 13),
+    "Target.tsx": (17, 13),  # 30 → 17: the insight tabs and object card → components/target/TargetInsights.tsx (2026-11-17)
     "Dashboard.tsx": (23, 2),
     "Editor.tsx": (6, 16),
     "History.tsx": (6, 1),

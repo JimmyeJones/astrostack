@@ -1030,7 +1030,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
     the owner's scale), and lower that route's `BUDGET` ceiling in the same commit.
   - Watch the Target page's child components (`frontend/src/components/target/`): the budget counts only
     the route file, so a slice that moves a card into a child without nesting it has not reduced anything.
-  Size **L** overall, **M** per slice. It is PRIORITY 3 (friendliness) on a direct owner ask, so it takes the
+  Size **L** overall, **M** per slice. **Slice 1 = v0.507.6** (Target 6 → 5 groups, 30 → 17); next: Dashboard. It is PRIORITY 3 (friendliness) on a direct owner ask, so it takes the
   ⭐ beginner-feature slot until the Target page and Dashboard are each down to five top-level groups.
 
 ### ⭐ Editor — make it excellent (PRIORITY 1)
@@ -3163,6 +3163,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.507.6 **Target page declutter slice 1: the object card leads the Overview insight tab, the tab group moves into `components/target/TargetInsights.tsx`, and Undo / streaked / trailed "Reject all" move from the title row to the frame-tools row** (`TargetInsights`, `frame-tools`; clutter count 30 → 17)
 - ✅ v0.507.5 **More settings: a long "Back to default (…)" button wraps inside its card instead of running ~40 px past it on desktop, and a back-up check stored under a minute reads "Every N seconds", not "Every 0 min" (`MoreCard`, `moreSettings.ts` watch_poll_interval_s format)** — found by `--incoming-lag` + `offEdgeControls`; SHIPPED.md 2026-11-17.
 - ✅ v0.507.4 **The owner's "cluttered again" (2026-11-17) gets a mechanical guard: every route has a ceiling on the card/note/banner kinds and `<Alert>` sites it renders, which can only go down; AGENTS.md §1 gains "Recursive organization" (≤ 5 top-level groups, one notice board per page); a ⭐ declutter entry takes the worst pages a slice at a time** (`tests/test_ui_clutter_budget.py`)
 - ✅ (closed 2026-11-17, no version) **"Save this map" + a Dashboard pointer into My map — both halves were already built: (a) the Sky page's Save button, (b) v0.306.3's "See it on My map →" line under the stat grid** — entry cut whole to `SHIPPED.md` 2026-11-17.

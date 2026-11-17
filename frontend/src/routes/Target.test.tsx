@@ -1893,6 +1893,38 @@ describe("TargetView streaked badge", () => {
   });
 });
 
+describe("TargetView title row stays about the target (declutter, 2026-11-17)", () => {
+  // Owner: "simplicity is sometimes best — or at least recursive organization".
+  // The title row used to carry up to seven things — the name, three counts, an
+  // Undo, and two count + "Reject all" pairs. The frame-curation controls now
+  // sit with the other bulk tools above the frames table. Nothing was removed.
+  it("puts the streaked / trailed reject-alls and the undo with the frame tools", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { streak_detected: true }),
+      mkFrame(2, { streak_detected: true }),
+    ]);
+    vi.spyOn(client.api, "bulkFrames")
+      .mockResolvedValue({ changed: 2, changed_ids: [1, 2] });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderTarget();
+
+    const tools = await screen.findByTestId("frame-tools");
+    const reject = await screen.findByRole("button", { name: "Reject all streaked frames" });
+    expect(tools).toContainElement(reject);
+    expect(tools).toContainElement(screen.getByText("2 streaked"));
+    const title = screen.getByRole("heading", { level: 2 });
+    expect(title.parentElement).not.toContainElement(reject);
+
+    reject.click();
+    const undo = await screen.findByRole("button", { name: "Undo last bulk reject" });
+    expect(tools).toContainElement(undo);
+    expect(title.parentElement).not.toContainElement(undo);
+  });
+});
+
 describe("TargetView trailed badge", () => {
   // Eight tight, round subs plus one strongly-elongated one: only the outlier
   // (both >3·MAD and above the 0.6 floor) counts as trailed.
@@ -2609,6 +2641,9 @@ describe("TargetView content order (IA slice (c))", () => {
     expect(precedes(picture, table)).toBe(true);
     expect(precedes(table, insights)).toBe(true);
     expect(precedes(table, objectCard)).toBe(true);
+    // …and it is no longer a separate top-level group: it leads the Overview tab
+    // (the one that opens first), so the page has one thing fewer at its top level.
+    expect(insights).toContainElement(objectCard);
     // "Is it enough yet?" stays above the fold too — beside the picture, not
     // below the table (it's the question the beginner opened the page with).
     expect(precedes(screen.getByText("Is it enough yet?"), table)).toBe(true);
