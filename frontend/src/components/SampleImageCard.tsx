@@ -148,7 +148,14 @@ export function SampleImageCard() {
               )}
             </Stack>
           </Group>
-          <Group gap="xs" style={{ flexShrink: 0 }}>
+          {/* `maxWidth: 100%` lets the buttons wrap *inside* the card. A
+              `flexShrink: 0` group is as wide as its widest row, so once the
+              row above had dropped it to its own line the four buttons of a
+              stacked sample still stood in one ~420 px row: on a phone
+              "Remove" (and at 320 px "Open sample") sat past the screen's
+              right edge, clipped by the app shell, where nobody could tap it. */}
+          <Group gap="xs" data-testid="sample-card-actions"
+                 style={{ flexShrink: 0, maxWidth: "100%" }}>
             {stacked && (
               <Button size="xs" color="violet"
                 leftSection={<IconWand size={14} />}

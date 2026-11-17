@@ -157,6 +157,24 @@ describe("SampleImageCard", () => {
   // Found by dogfooding (2026-10-31): with the sample already stacked, the
   // Dashboard still said "Your sample target is ready" and led with "Stack it",
   // which only makes a duplicate of the picture he already has.
+  it("keeps every button of a stacked sample on a phone's screen", async () => {
+    // Measured in Playwright on the Dashboard: once stacked the card carries
+    // four buttons, and the `flexShrink: 0` group held them in one ~420 px row
+    // even after it had dropped to its own line — "Remove" sat at x 364–460 on
+    // a 420 px phone, clipped by the app shell and untappable. jsdom has no
+    // layout, so pin the two properties that make the group wrap inside the card.
+    loadedSample([run(1)]);
+    renderCard();
+
+    await screen.findByText(/Your sample is stacked/i);
+    const actions = screen.getByTestId("sample-card-actions");
+    expect(actions.style.maxWidth).toBe("100%");
+    expect(getComputedStyle(actions).flexWrap).not.toBe("nowrap");
+    for (const name of [/Edit it/i, /Stack again/i, /Open sample/i, /Remove/i]) {
+      expect(actions.contains(screen.getByRole("button", { name }))).toBe(true);
+    }
+  });
+
   it("points a stacked sample at the editor instead of stacking it again", async () => {
     loadedSample([run(2), run(1)]);
     render(

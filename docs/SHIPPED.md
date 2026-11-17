@@ -1,5 +1,32 @@
 # Shipped — the record
 
+## 2026-11-17 (Builder, branch `claude/sweet-feynman-2elsqm`)
+
+### v0.507.3 — the Dashboard sample card's buttons, and the Auto-grade dialog, stay on a phone's screen
+
+**What.** The probe gap v0.507.1 recorded — a control pushed past the edge of something that *clips* never grows the
+page's scroll width, so the overflow probe cannot see it — run as a scratch Playwright check (every route at 320 / 375 /
+420 px, plus the Auto-grade dialog, the editor's Presets menu and Save-preset dialog, and "Check it at full size" on the
+`--big` target). Two hits. **(1) The Dashboard sample card, once stacked** ("Edit it", "Stack again", "Open sample",
+"Remove"): its `flexShrink: 0` button group was as wide as one ~420 px row even after v0.264.4 let it drop to its own
+line, so **"Remove" sat at x 364–460 on a 420 px phone** (and "Open sample" too at 320 px), clipped by the app shell and
+untappable — on the first card a beginner sees. The group now carries `maxWidth: 100%` and wraps inside the card
+(`SampleImageCard`, `sample-card-actions`). **(2) The Auto-grade dialog's Sensitivity field** was a fixed 280 px in a
+dialog ~256 px wide inside its padding on a 320 px phone, so the whole dialog scrolled sideways; it is now capped at
+the dialog's width (`Target.tsx` `AutoGradeModal`, `maw="100%"`). Re-probed after: CLEAN at all three widths.
+
+**The probe gap is closed for good:** `scripts/dogfood_probe.mjs` gains `offEdgeControls` — any button, link, input,
+tab or slider drawn past the screen's edge or past an `overflow: hidden` ancestor is reported as `OFF-EDGE CONTROL`
+on every view the probe photographs (a deliberate sideways scroller and a deliberate ellipsis are skipped; a dialog's
+body is not). Shown to work: with fix (1) reverted it reports exactly `[phone] /: OFF-EDGE CONTROL "Remove" at x
+364..460`; with it, "nothing overflowing". Its one other hit, Compare's Split/Blink provenance line truncating a
+"Noise 0.001" hint, is a deliberate `truncate` whose figure the verdict sentence above already says in words — read,
+not changed, and excluded.
+
+**Tests (+2 vitest),** both red before: the stacked sample card's four buttons sit in a group with `maxWidth: 100%`
+that wraps; the Auto-grade Sensitivity field's root is capped at `max-width: 100%`. Frontend + dogfood tooling only:
+no config, schema, API, on-disk or default change.
+
 ## 2026-11-16 (Builder, branch `claude/sweet-feynman-skh2on`)
 
 ### v0.507.2 — with "North up" on, a picture stepped to in the viewer no longer appears the wrong way and then spins

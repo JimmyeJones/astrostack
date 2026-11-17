@@ -1,5 +1,24 @@
 # Process notes & QA sweep records
 
+## 2026-11-17 (Builder, branch `claude/sweet-feynman-2elsqm`) — v0.507.3; v0.507.1's recorded probe gap (controls past an edge or a clipping box) run, fixed twice, and made permanent.
+
+- **Baseline / backlog.** Suite 8844 passed / 7 skipped on `5051e8c2` (xdist `-n 4`, BLAS capped, 15m58s). Every Bugs
+  entry gated on the owner or a diagnostic; the Features entries declined or gated; no open PRs.
+- **Why this angle.** v0.507.1's note named the gap and the shape of its probe (each control's `getBoundingClientRect()`
+  against the screen and any `overflow: hidden` ancestor). Scratch Playwright check, `--big --serve`: every route at
+  320 / 375 / 420 px, plus the Auto-grade dialog, the editor Presets menu, Save preset and the full-size check.
+- **Found (v0.507.3):** the stacked sample card's four-button group (`flexShrink: 0`, so as wide as its one row) put
+  "Remove" at x 364–460 on a 420 px phone, clipped by the app shell; the Auto-grade Sensitivity field (`w={280}`) poked
+  8 px out of a 320 px phone's dialog. Everything else, the three editor surfaces included, held at all three widths.
+- **Made permanent:** `offEdgeControls` in `scripts/dogfood_probe.mjs`, reported as `OFF-EDGE CONTROL`. With the card
+  fix reverted it printed exactly the "Remove" line; with it, nothing. Its first run also flagged Compare's Split/Blink
+  provenance line, where a `truncate` line cuts a "Noise 0.001" hint (desktop too) — deliberate, and the verdict sentence above says
+  the noise in words, so the check skips an ellipsis ancestor the way `overflowingLeaves` does. **Still unprobed by it:**
+  any dialog the probe does not open (it photographs routes, not clicks) — the four above were driven only by the
+  scratch check.
+- **Environment:** the container restarted mid-run (exit 137 during a probe); the working tree survived, the dogfood
+  server did not — re-run `--serve` without `--build` when `webapp/static/` is already built.
+
 ## 2026-11-16 (Builder, branch `claude/sweet-feynman-fgpm2j`) — nothing ungated to build; dogfood `--build --mosaic --dithered --editor --big`: CLEAN.
 
 - **Baseline / backlog.** Suite 8844 passed / 7 skipped on `ce283ef6` (xdist `-n 4`, BLAS capped, 17m30s). Every

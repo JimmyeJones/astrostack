@@ -392,6 +392,58 @@ function overflowingLeaves() {
  * was exactly one hit before the fix and none after, so it is a signal rather
  * than a wall of noise. The cure is `min-width: max-content` on the badge — let
  * the container grow (and scroll) rather than eat the word. */
+/** Controls drawn past the screen's edge, or past an `overflow: hidden` box.
+ *
+ * `overflowingLeaves` measures a box's *scroll* width, so a control pushed off
+ * the side of something that clips — the app shell, a full-screen viewer — is
+ * invisible to it: nothing scrolls, the page width never grows, and the button
+ * simply cannot be tapped. That is how the picture viewer's toolbar ran off a
+ * phone's left edge (v0.507.1) and the Dashboard sample card's "Remove" off
+ * its right one (v0.507.3). A control inside a deliberate sideways scroller
+ * (a table) is reachable and skipped — except a dialog's own body, which only
+ * scrolls because its vertical overflow forces it to — and so is one cut off by
+ * a deliberate ellipsis. */
+function offEdgeControls() {
+  const out = [];
+  const W = window.innerWidth;
+  const sel = "button, a[href], input:not([type=hidden]), select, textarea, " +
+    "[role=button], [role=tab], [role=switch], [role=checkbox], [role=slider]";
+  for (const el of document.querySelectorAll(sel)) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    const st = getComputedStyle(el);
+    if (st.visibility === "hidden" || +st.opacity === 0) continue;
+    let reachable = false, clipped = false;
+    for (let p = el.parentElement; p; p = p.parentElement) {
+      const ps = getComputedStyle(p);
+      const pr = p.getBoundingClientRect();
+      const outside = r.left < pr.left - 1 || r.right > pr.right + 1;
+      if (ps.overflowX === "auto" || ps.overflowX === "scroll") {
+        const dialog = p.classList.contains("mantine-Modal-content")
+          || p.classList.contains("mantine-Modal-body");
+        if (dialog && outside) clipped = true; else reachable = true;
+        break;
+      }
+      if ((ps.overflowX === "hidden" || ps.overflowX === "clip") && outside) {
+        // A deliberate `truncate` line (text-overflow: ellipsis) shows "…" where
+        // the rest went — the same exclusion `overflowingLeaves` makes. Compare's
+        // Split/Blink provenance line truncates a "Noise 0.001" hint this way,
+        // and the verdict sentence above it already says the noise in words.
+        if (ps.textOverflow === "ellipsis") { reachable = true; clipped = false; break; }
+        clipped = true;
+      }
+    }
+    if (reachable && !clipped) continue;
+    if (!clipped && r.left >= -1 && r.right <= W + 1) continue;
+    out.push({
+      text: (el.getAttribute("aria-label") || el.innerText || el.tagName)
+        .trim().replace(/\s+/g, " ").slice(0, 60),
+      left: Math.round(r.left), right: Math.round(r.right), width: W,
+    });
+  }
+  return out;
+}
+
 function clippedLabels() {
   // Same exclusion as `overflowingLeaves` — see the note there.
   const screenReaderOnly = (node) => {
@@ -696,6 +748,13 @@ for (const { name, width, height } of WIDTHS) {
       console.log(
         `[${name}] ${label}: CLIPPED LABEL ${c.clientWidth}px box vs ` +
         `${c.scrollWidth}px word — "${c.text}" (scrolling cannot reveal it)`,
+      );
+    }
+    for (const c of await page.evaluate(offEdgeControls)) {
+      findings++;
+      console.log(
+        `[${name}] ${label}: OFF-EDGE CONTROL "${c.text}" at x ${c.left}..${c.right} ` +
+        `of a ${c.width}px screen (clipped — it cannot be tapped)`,
       );
     }
     for (const e of errors.slice(0, 3)) {
