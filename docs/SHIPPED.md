@@ -1,5 +1,34 @@
 # Shipped — the record
 
+## 2026-11-17 (Builder, branch `claude/fervent-bohr-y4cpj2`)
+
+### v0.507.9 — Editor, declutter slice 4: three notice boards instead of sixteen alerts
+
+**What.** Fourth slice of the ⭐ declutter entry, on `routes/Editor.tsx`, whose notes were 16 separate `<Alert>` sites.
+The Stack form's board moved to `components/AlertNoticeBoard.tsx` (`StackNoticeBoard` stays as a re-export) and gained
+a close button (`onClose`), a per-note `testId`, a fix-button icon (`leftSection`) and `mt`/`mb` spacing that
+vanishes with an empty board. **Nothing removed** — every note keeps its wording and its button, one click away at most:
+- **Editor notes** (`editor-notes`, above the Pipeline card): "trimmed by an older version" + Re-trim border
+  (warning), "This picture was auto-edited" (info), and "What Auto-process did" with its taste feedback and close
+  button — the answer to a click just made, `JUST_DONE_PRIORITY`, never folded.
+- **Pipeline notes** (`pipeline-notes`, inside the Pipeline card): no Stretch / more than one Stretch / an empty
+  Levels range (warnings, each with its one-click fix) outrank the empty-pipeline welcome with its Auto-process /
+  previous edit / default / preset-suggestion buttons.
+- **Op notes** (`op-notes`, above the selected step's sliders): the crop how-to + "Back to the whole picture"
+  first, then a stranded coverage leveling + "Move it to the top", the single-field leveling no-op, the
+  background-mode nudge, and the slow-preview reassurance last.
+- The preview box's three mutually exclusive errors (no image data / preview failed / overlay failed, each with its
+  Retry) are one `<Alert>` fed by `previewProblem`. Unchanged and inline: the "Skipped N failed operation(s)" line
+  under the histogram, and `BlownCoreNudge`.
+
+**Measured.** `tests/test_ui_clutter_budget.py` for `Editor.tsx`: 6 card kinds + 16 `<Alert>` sites → **6 + 2**
+(ceiling lowered to `(6, 2)`).
+
+**Tests.** `AlertNoticeBoard.test.tsx` (3: no spacer when silent; close button; test id and fix icon on the note).
+`Editor.test.tsx`: two stretches + an empty Levels range share the pipeline board with their fix visible; "What
+Auto-process did" sits visible on the editor board — both red on the old page. Frontend only; no API, setting,
+schema or default change.
+
 ## 2026-11-17 (Builder, branch `claude/fervent-bohr-i9m6zu`)
 
 ### v0.507.8 — Stack form, declutter slice 3: three notice boards instead of a wall of alerts

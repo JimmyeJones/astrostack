@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Link, RouterProvider, createMemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorView } from "./Editor";
@@ -1372,6 +1372,9 @@ describe("EditorView", () => {
     await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3, undefined));
     // ...and a plain-language note explains what Auto did.
     expect(await screen.findByText("What Auto-process did")).toBeInTheDocument();
+    // It sits on the editor's notice board, never folded (it answers a click).
+    expect(within(screen.getByTestId("editor-notes")).getByText("What Auto-process did"))
+      .toBeVisible();
     expect(screen.getByText("Applied a natural stretch.")).toBeInTheDocument();
     // ...and names the data-driven value it chose (the STF sky level).
     expect(screen.getByText("Tuned to your data: stretched sky level 0.2.")).toBeInTheDocument();
@@ -3269,6 +3272,31 @@ describe("EditorView", () => {
     fireEvent.click(screen.getByRole("button", { name: /Disable the extra stretch/ }));
     await waitFor(() =>
       expect(screen.queryByText(/More than one/)).not.toBeInTheDocument());
+  });
+
+  it("puts the pipeline's warnings on one notice board", async () => {
+    // ⭐ declutter slice 4: two stretches *and* an empty Levels range used to be
+    // two always-on boxes under the pipeline; they now share one board.
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, LEVELS]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "s1", id: "tone.stretch", enabled: true, params: { stretch: 0.5 } },
+        { uid: "s2", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+        { uid: "lv1", id: "tone.levels", enabled: true, params: { black: 0.6, white: 0.4 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    const board = await screen.findByTestId("pipeline-notes");
+    await waitFor(() => expect(within(board).getByText(/More than one/)).toBeVisible());
+    expect(within(board).getByText(/white point at or below its black point/)).toBeVisible();
+    expect(within(board).getByRole("button", { name: /Disable the extra stretch/ })).toBeVisible();
   });
 
   it("warns about a degenerate Levels op and resets its range on click", async () => {

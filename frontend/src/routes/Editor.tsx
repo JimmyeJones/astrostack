@@ -17,6 +17,8 @@ import {
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, type AutoAnalysis, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
+import { AlertNoticeBoard, JUST_DONE_PRIORITY } from "../components/AlertNoticeBoard";
+import { NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { GlossaryLink } from "../components/GlossaryLink";
 import { HintAnchor } from "../components/HintAnchor";
 import { ImageLightbox } from "../components/ImageLightbox";
@@ -1477,6 +1479,26 @@ export function EditorView() {
   // proposed rectangle, so keep the old fall-back there (and don't let a coverage
   // failure block the crop UI); for a genuine A/B overlay, surface the error.
   const overlayError = overlay?.q.isError && !cropPreview ? overlay : null;
+  // What stands in the picture's place when there is no picture to show — at
+  // most one of these at a time, so one Alert site (⭐ declutter slice 4).
+  const previewProblem: { color: string; text: string; retry: (() => void) | null } | null =
+    hist.data?.empty ? {
+      color: "yellow",
+      text: "This stack has no image data (all pixels are empty) — it likely failed to "
+        + "plate-solve or stack, so there's nothing to edit. Check the stack on the "
+        + "Target page.",
+      retry: null,
+    } : preview.isError ? {
+      color: "red",
+      text: `Preview failed: ${(preview.error as Error)?.message ?? ""}`,
+      retry: refreshPreview,
+    } : overlayError ? {
+      color: "red",
+      text: `The ${overlayError.label} overlay failed to load`
+        + ((overlayError.q.error as Error)?.message
+          ? `: ${(overlayError.q.error as Error).message}` : "."),
+      retry: () => { overlayError.q.refetch(); },
+    } : null;
   // Drag-to-crop owns the preview box like any other overlay: only when its mode
   // is on, the op is draggable, and nothing else has the box.
   const cropDragActive = cropDragWanted && !overlay && !cropPreview
@@ -1898,34 +1920,17 @@ export function EditorView() {
           <Paper withBorder p="xs">
             <div style={{ position: "relative", background: "#000", borderRadius: 8,
               minHeight: 220, overflow: "hidden" }}>
-              {hist.data?.empty ? (
-                <Alert color="yellow" icon={<IconAlertTriangle size={16} />} m="md">
-                  This stack has no image data (all pixels are empty) — it likely failed to
-                  plate-solve or stack, so there's nothing to edit. Check the stack on the
-                  Target page.
-                </Alert>
-              ) : preview.isError ? (
-                <Alert color="red" icon={<IconAlertTriangle size={16} />} m="md">
-                  Preview failed: {(preview.error as Error)?.message}
-                  <div>
-                    <Button size="xs" variant="light" color="red" mt="xs"
-                      leftSection={<IconRefresh size={14} />} onClick={refreshPreview}>
-                      Retry
-                    </Button>
-                  </div>
-                </Alert>
-              ) : overlayError ? (
-                <Alert color="red" icon={<IconAlertTriangle size={16} />} m="md">
-                  The {overlayError.label} overlay failed to load
-                  {(overlayError.q.error as Error)?.message
-                    ? `: ${(overlayError.q.error as Error).message}` : "."}
-                  <div>
-                    <Button size="xs" variant="light" color="red" mt="xs"
-                      leftSection={<IconRefresh size={14} />}
-                      onClick={() => overlayError.q.refetch()}>
-                      Retry
-                    </Button>
-                  </div>
+              {previewProblem ? (
+                <Alert color={previewProblem.color} icon={<IconAlertTriangle size={16} />} m="md">
+                  {previewProblem.text}
+                  {previewProblem.retry ? (
+                    <div>
+                      <Button size="xs" variant="light" color="red" mt="xs"
+                        leftSection={<IconRefresh size={14} />} onClick={previewProblem.retry}>
+                        Retry
+                      </Button>
+                    </div>
+                  ) : null}
                 </Alert>
               ) : shownSrc ? (
                 // The image box is sized to the shown image's exact content box
@@ -2481,11 +2486,16 @@ export function EditorView() {
                 right. Conditional on something rare — a mosaic whose *saved* crop
                 keeps under a quarter of what the current border rule offers — so it
                 is not another always-on banner, and it is an offer rather than an
-                action because a tight crop can be the user's own. */}
-            {overTrim ? (
-              <Alert color="orange" variant="light" py={8}
-                icon={<IconCrop size={16} />}
-                title="This picture was trimmed by an older version">
+                action because a tight crop can be the user's own.
+                The three notes above the pipeline share one notice board
+                (AlertNoticeBoard, ⭐ declutter slice 4): the confirmation of an
+                Auto click the reader just made never folds. */}
+            <AlertNoticeBoard data-testid="editor-notes" items={[
+            overTrim ? {
+              key: "over-trim", priority: NOTICE_PRIORITY.warning, color: "orange",
+              icon: <IconCrop size={16} />,
+              title: "This picture was trimmed by an older version",
+              body: (<>
                 <Text size="xs" c="dimmed">{overTrimmedSentence(overTrim)}</Text>
                 {/* The stored "what Auto did" note was written by that same older
                     version, so its trim figure describes the crop being replaced,
@@ -2502,18 +2512,19 @@ export function EditorView() {
                 <Button size="xs" mt={8} variant="default" color="orange"
                   leftSection={<IconCrop size={14} />}
                   onClick={() => enterCropPreview("trim")}>Re-trim border</Button>
-              </Alert>
-            ) : null}
+              </>),
+            } : null,
 
-            {/* A recipe a *background* job auto-edited (Process-target / reprocess /
+            /* A recipe a *background* job auto-edited (Process-target / reprocess /
                 watcher auto-stack): explain it — the user landed here on an edit
                 they didn't build. Shown only while the pipeline is still pristine
                 (unedited) and no interactive Auto note is up, and only when a note
-                was actually stored, so a hand-built recipe never surfaces it. */}
-            {!autoSummary && seedKey !== null && recipeKey === seedKey
-              && autoNote.data?.note ? (
-              <Alert color="violet" variant="light" py={8}
-                icon={<IconWand size={16} />} title="This picture was auto-edited">
+                was actually stored, so a hand-built recipe never surfaces it. */
+            !autoSummary && seedKey !== null && recipeKey === seedKey
+              && autoNote.data?.note ? {
+              key: "auto-edited", priority: NOTICE_PRIORITY.info, color: "violet",
+              icon: <IconWand size={16} />, title: "This picture was auto-edited",
+              body: (<>
                 <Text size="xs" c="dimmed">{autoNote.data.note}</Text>
                 {/* The pipeline is still pristine here, so it *is* the auto recipe:
                     surface the same data-driven values the interactive Auto note
@@ -2564,13 +2575,14 @@ export function EditorView() {
                 <Text size="10px" c="dimmed" mt={4}>
                   These steps were chosen from your image — tweak or remove any of them below.
                 </Text>
-              </Alert>
-            ) : null}
+              </>),
+            } : null,
 
-            {autoSummary ? (
-              <Alert color="violet" variant="light" py={8} withCloseButton
-                icon={<IconWand size={16} />} title="What Auto-process did"
-                onClose={() => { setAutoSummary(null); setAutoValues(null); setAutoCause(null); }}>
+            autoSummary ? {
+              key: "auto-summary", priority: JUST_DONE_PRIORITY, color: "violet",
+              icon: <IconWand size={16} />, title: "What Auto-process did",
+              onClose: () => { setAutoSummary(null); setAutoValues(null); setAutoCause(null); },
+              body: (<>
                 <Text size="xs">{autoSummary}</Text>
                 {autoCause ? (
                   <Text size="xs" mt={4} c="dimmed">{autoCause}</Text>
@@ -2605,16 +2617,22 @@ export function EditorView() {
                     immediately. */}
                 <AutoFeedback onRerun={() => auto.mutate()} safe={safe} runId={rid}
                   autoCrop={autoCropArg} />
-              </Alert>
-            ) : null}
+              </>),
+            } : null,
+            ]} />
 
             <Paper withBorder p="sm">
               <Text fw={600} size="sm" mb={6}>Pipeline</Text>
               <OpList ops={ops} specs={specs} selected={selected} onSelect={setSelected}
                 onMove={move} onToggle={toggle} onRemove={remove} onFix={fixStage} />
-              {ops.length === 0 ? (
-                <Alert color="grape" variant="light" py={8} mt="xs"
-                  icon={<IconSparkles size={16} />}>
+              {/* The pipeline's own notes share one board (⭐ declutter slice 4):
+                  a "this does nothing / washes out" warning outranks the
+                  beginner's welcome, and the rest fold behind "N more notes". */}
+              <AlertNoticeBoard data-testid="pipeline-notes" mt="xs" items={[
+              ops.length === 0 ? {
+                key: "welcome", priority: NOTICE_PRIORITY.advisory, color: "grape",
+                icon: <IconSparkles size={16} />,
+                body: (<>
                   <Text size="xs" mb={6}>
                     New to this? Let <b>Auto-process</b> build a good starting recipe from
                     your image (background &amp; colour balance, a natural stretch, gentle
@@ -2676,51 +2694,50 @@ export function EditorView() {
                       </Tooltip>
                     </Group>
                   ) : null}
-                </Alert>
-              ) : null}
-              {noStretch ? (
-                <Alert color="yellow" variant="light" py={8} mt="xs"
-                  icon={<IconAlertTriangle size={16} />}>
-                  <Text size="xs" mb={6}>
+                </>),
+              } : null,
+              noStretch ? {
+                key: "no-stretch", priority: NOTICE_PRIORITY.warning, color: "yellow",
+                icon: <IconAlertTriangle size={16} />,
+                text: (<>
                     No <b>Stretch</b> step — a default stretch is applied automatically at
                     the end so the preview isn't black, but your tone &amp; colour ops are
                     running on un-stretched (linear) data. Add a Stretch op to control the
                     look and put those ops on the right side of it.
-                  </Text>
-                  <Button size="compact-xs" variant="light" color="yellow"
-                    leftSection={<IconPlus size={14} />} onClick={addOrEnableStretch}>
-                    {disabledStretch ? "Enable stretch" : "Add stretch"}
-                  </Button>
-                </Alert>
-              ) : null}
-              {extraStretchUids.length > 0 ? (
-                <Alert color="orange" variant="light" py={8} mt="xs"
-                  icon={<IconAlertTriangle size={16} />}>
-                  <Text size="xs" mb={6}>
+                </>),
+                fix: {
+                  label: disabledStretch ? "Enable stretch" : "Add stretch",
+                  leftSection: <IconPlus size={14} />,
+                  color: "yellow", onClick: addOrEnableStretch,
+                },
+              } : null,
+              extraStretchUids.length > 0 ? {
+                key: "extra-stretch", priority: NOTICE_PRIORITY.warning, color: "orange",
+                icon: <IconAlertTriangle size={16} />,
+                text: (<>
                     More than one <b>Stretch</b> is enabled. Stretches compound — the
                     second one re-stretches already-stretched data and washes the image
                     out (flat or dark). Keep a single Stretch and tune <i>that</i> one.
-                  </Text>
-                  <Button size="compact-xs" variant="light" color="orange"
-                    onClick={disableExtraStretches}>
-                    Disable the extra stretch{extraStretchUids.length > 1 ? "es" : ""}
-                  </Button>
-                </Alert>
-              ) : null}
-              {degenerateLevels.length > 0 ? (
-                <Alert color="orange" variant="light" py={8} mt="xs"
-                  icon={<IconAlertTriangle size={16} />}>
-                  <Text size="xs" mb={6}>
+                </>),
+                fix: {
+                  label: `Disable the extra stretch${extraStretchUids.length > 1 ? "es" : ""}`,
+                  color: "orange", onClick: disableExtraStretches,
+                },
+              } : null,
+              degenerateLevels.length > 0 ? {
+                key: "degenerate-levels", priority: NOTICE_PRIORITY.warning, color: "orange",
+                icon: <IconAlertTriangle size={16} />,
+                text: (<>
                     A <b>Levels</b> op has its white point at or below its black point,
                     so its range is empty — it does nothing. Reset the black and white
                     points to spread across the full range again.
-                  </Text>
-                  <Button size="compact-xs" variant="light" color="orange"
-                    onClick={resetDegenerateLevels}>
-                    Reset the black &amp; white points
-                  </Button>
-                </Alert>
-              ) : null}
+                </>),
+                fix: {
+                  label: "Reset the black & white points",
+                  color: "orange", onClick: resetDegenerateLevels,
+                },
+              } : null,
+              ]} />
             </Paper>
 
             {selectedOp && specs[selectedOp.id] ? (
@@ -2877,77 +2894,109 @@ export function EditorView() {
                     ) : null}
                   </Group>
                 ) : null}
-                {/* Coverage leveling only equalises panels on a mosaic; on a
+                {/* The selected step's notes share one board (⭐ declutter slice 4):
+                    a "this step is doing nothing" warning and the crop's own
+                    how-to outrank the slow-preview reassurance. */}
+                <AlertNoticeBoard data-testid="op-notes" mb="xs" items={[
+                /* Coverage leveling only equalises panels on a mosaic; on a
                     single-field stack (uniform coverage) it's a deliberate no-op,
-                    so tell the user rather than let the control silently do nothing. */}
-                {selectedOp.id === "background.level_coverage" && hist.data?.is_mosaic === false ? (
-                  <Alert color="gray" variant="light" py={6} mb="xs"
-                    icon={<IconInfoCircle size={16} />}>
-                    <Text size="xs">
+                    so tell the user rather than let the control silently do nothing. */
+                selectedOp.id === "background.level_coverage" && hist.data?.is_mosaic === false ? {
+                  key: "leveling-single-field", priority: NOTICE_PRIORITY.info, color: "gray",
+                  icon: <IconInfoCircle size={16} />,
+                  text: (<>
                       No effect on this stack — it's a single-field image with even
                       coverage. This op equalises the sky across the panels of a
                       <b> mosaic</b>, where frames overlap unevenly.
-                    </Text>
-                  </Alert>
-                ) : null}
-                {/* The *other* reason this op can do nothing, and the one nothing
+                  </>),
+                } : null,
+                /* The *other* reason this op can do nothing, and the one nothing
                     used to say. It bins the image against the run's own coverage
                     map, so once an op above it has really reshaped the frame the
                     two can't be aligned and the engine skips it (measured: 0.142
                     of full scale on its own, 0.000000 with an aimed Crop/Rotate/
                     Resize above it). Shown only on a mosaic, where moving it is
                     the real fix — on a single field the note above is the honest
-                    answer and this one would be a second, misleading reason. */}
-                {selectedOp.id === "background.level_coverage"
+                    answer and this one would be a second, misleading reason. */
+                selectedOp.id === "background.level_coverage"
                   && hist.data?.is_mosaic === true
-                  && strandedLeveling.includes(selectedOp.uid) ? (
-                  <Alert color="orange" variant="light" py={6} mb="xs"
-                    data-testid="leveling-stranded"
-                    icon={<IconAlertTriangle size={16} />}>
-                    <Text size="xs" mb={6}>
+                  && strandedLeveling.includes(selectedOp.uid) ? {
+                  key: "leveling-stranded", priority: NOTICE_PRIORITY.warning, color: "orange",
+                  testId: "leveling-stranded",
+                  icon: <IconAlertTriangle size={16} />,
+                  text: (<>
                       No effect while a <b>Crop</b>, <b>Rotate</b> or <b>Resize</b> sits
                       above it. This op evens the sky out panel by panel, which it can
                       only do on the picture's original shape — once something above has
                       changed that shape, it is skipped. Move it to the top of the list
                       and it works again.
-                    </Text>
-                    <Button size="compact-xs" variant="light" color="orange"
-                      onClick={unstrandLeveling}>
-                      Move it to the top
-                    </Button>
-                  </Alert>
-                ) : null}
-                {specs[selectedOp.id].heavy && selectedOp.enabled ? (
-                  <Alert color="grape" variant="light" py={6} mb="xs"
-                    icon={<IconInfoCircle size={16} />}>
-                    <Text size="xs">
+                  </>),
+                  fix: { label: "Move it to the top", color: "orange", onClick: unstrandLeveling },
+                } : null,
+                specs[selectedOp.id].heavy && selectedOp.enabled ? {
+                  key: "slow-op", priority: NOTICE_PRIORITY.info + 5, color: "grape",
+                  icon: <IconInfoCircle size={16} />,
+                  text: (<>
                       This op is slow to render, so the live preview waits for a short
                       pause after you change a slider before updating — it's not stuck.
                       The full-resolution result appears when you Export.
-                    </Text>
-                  </Alert>
-                ) : null}
-                {/* A big emission nebula's colours have different shapes, so a
+                  </>),
+                } : null,
+                /* A big emission nebula's colours have different shapes, so a
                     per-colour sky/gradient fit bends into it unevenly and leaves
                     cyan cores and red halos. The catalog already knows which
                     targets those are (it drives the same nudge on the Stack form);
-                    say it here too, beside the control that decides it. */}
-                {(() => {
+                    say it here too, beside the control that decides it. */
+                (() => {
                   const advice = backgroundModeAdvice(
                     identity.data, specs[selectedOp.id], selectedOp.params);
                   if (!advice) return null;
-                  return (
-                    <Alert color="blue" variant="light" py={6} mb="xs"
-                      icon={<IconInfoCircle size={16} />}>
-                      <Text size="xs">{advice.text}</Text>
+                  return {
+                    key: "background-mode", priority: NOTICE_PRIORITY.advisory, color: "blue",
+                    icon: <IconInfoCircle size={16} />,
+                    text: advice.text,
+                    fix: {
+                      label: `Use ${backgroundModeOptionLabel(advice.mode, specs[selectedOp.id])} mode`,
+                      onClick: () => setParams(
+                        selectedOp.uid, { ...selectedOp.params, mode: advice.mode }),
+                    },
+                  };
+                })(),
+                /* Crop: say where the real control is. The four Left/Top/Right/
+                    Bottom sliders below are fractions of the frame, which is an
+                    honest way to store a crop and a hostile way to aim one — so
+                    point at the rectangle on the picture, keep a one-click way
+                    back to the whole frame, and be honest when a hard crop is
+                    about to cost real pixels. When dragging can't be offered
+                    (something after this op reshapes the frame) say why, rather
+                    than showing a rectangle that would be in the wrong place.
+                    It is this step's how-to, so it ranks first (no other note
+                    on this board applies to a Crop). */
+                selectedOp.id === "geometry.crop" ? (() => {
+                  const crop = cropFromParams(selectedOp.params);
+                  const note = bigCropNote(crop);
+                  return {
+                    key: "crop-howto", priority: NOTICE_PRIORITY.blocking, color: "blue",
+                    icon: <IconCrop size={16} />,
+                    text: cropDragBlocked
+                      ? cropDragBlocked
+                      : selectedOp.enabled
+                        ? "Drag the white handles on the picture to choose what to keep — "
+                          + "the sliders below follow along."
+                        : "Turn this step on (the checkbox in the list) to drag the crop "
+                          + "on the picture.",
+                    extra: (<>
+                      {note ? <Text size="xs" mt={4} c="dimmed">{note}</Text> : null}
                       <Button size="compact-xs" variant="light" mt={6}
-                        onClick={() => setParams(
-                          selectedOp.uid, { ...selectedOp.params, mode: advice.mode })}>
-                        Use {backgroundModeOptionLabel(advice.mode, specs[selectedOp.id])} mode
+                        disabled={isFullFrame(crop)}
+                        onClick={() => setParams(selectedOp.uid,
+                          { ...selectedOp.params, ...cropToParams(FULL_CROP) })}>
+                        Back to the whole picture
                       </Button>
-                    </Alert>
-                  );
-                })()}
+                    </>),
+                  };
+                })() : null,
+                ]} />
                 {/* The highlight suggestion's button hangs off the "Hold back
                     highlights" slider, which is an `advanced` param — so it sits
                     inside the panel's collapsed Advanced accordion, where a
@@ -2962,39 +3011,6 @@ export function EditorView() {
                       ...selectedOp.params, highlights: strength,
                     })} />
                 ) : null}
-                {/* Crop: say where the real control is. The four Left/Top/Right/
-                    Bottom sliders below are fractions of the frame, which is an
-                    honest way to store a crop and a hostile way to aim one — so
-                    point at the rectangle on the picture, keep a one-click way
-                    back to the whole frame, and be honest when a hard crop is
-                    about to cost real pixels. When dragging can't be offered
-                    (something after this op reshapes the frame) say why, rather
-                    than showing a rectangle that would be in the wrong place. */}
-                {selectedOp.id === "geometry.crop" ? (() => {
-                  const crop = cropFromParams(selectedOp.params);
-                  const note = bigCropNote(crop);
-                  return (
-                    <Alert color="blue" variant="light" py={6} mb="xs"
-                      icon={<IconCrop size={16} />}>
-                      <Text size="xs">
-                        {cropDragBlocked
-                          ? cropDragBlocked
-                          : selectedOp.enabled
-                            ? "Drag the white handles on the picture to choose what to keep — "
-                              + "the sliders below follow along."
-                            : "Turn this step on (the checkbox in the list) to drag the crop "
-                              + "on the picture."}
-                      </Text>
-                      {note ? <Text size="xs" mt={4} c="dimmed">{note}</Text> : null}
-                      <Button size="compact-xs" variant="light" mt={6}
-                        disabled={isFullFrame(crop)}
-                        onClick={() => setParams(selectedOp.uid,
-                          { ...selectedOp.params, ...cropToParams(FULL_CROP) })}>
-                        Back to the whole picture
-                      </Button>
-                    </Alert>
-                  );
-                })() : null}
                 <OpParamPanel spec={specs[selectedOp.id]} params={selectedOp.params}
                   histogram={hist.data}
                   curveGhost={curveGhost} onBakeCurve={bakeAutoCurve}
