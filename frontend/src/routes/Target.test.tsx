@@ -2123,6 +2123,22 @@ describe("TargetView auto-grade", () => {
     expect(await screen.findByText(/Not enough graded frames/)).toBeInTheDocument();
   });
 
+  it("still shows why the outlier list could not be made when the preview fails", async () => {
+    // v0.507.11 drew the dialog's three exclusive outcomes as one note
+    // (alertNoticeNode): the failure keeps its own red box and message.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "autoGradePreview").mockRejectedValue(new Error("grader exploded"));
+
+    renderTarget();
+    (await screen.findByRole("button", { name: /Auto-grade/ })).click();
+
+    const note = (await screen.findByText("grader exploded")).closest("[data-notice]");
+    expect(note?.getAttribute("data-notice")).toBe("grade-error");
+    expect(screen.queryByText(/No outliers found/)).toBeNull();
+  });
+
   it("labels auto-grade rejections on frame rows", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(
       mkTarget({ n_frames: 2, n_frames_accepted: 1 }),
@@ -3226,6 +3242,32 @@ describe("TargetView thin-stack warning's next step", () => {
     // and located — this is the fail-before.
     expect(warn.textContent).not.toMatch(/plate-solved/);
     expect(warn.textContent).not.toMatch(/add more subs/);
+  });
+
+  it("puts both notes on the target-notes board, warning first, as board notes", async () => {
+    // Declutter slice 6 (v0.507.11): the Target route draws no `<Alert>` of its
+    // own — each note goes through alertNoticeNode, so the board can name it.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ reusable: true, n_frames_used: 3 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1), mkFrame(2), mkFrame(3),
+    ]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(
+      mkNewLight({ n_new_subs: 3 }));
+
+    renderTarget();
+
+    const board = await screen.findByTestId("target-notes");
+    await waitFor(() => expect(board.querySelector('[data-notice="new-subs"]')).not.toBeNull());
+    const order = Array.from(board.querySelectorAll("[data-notice]"))
+      .map((el) => el.getAttribute("data-notice"));
+    expect(order.indexOf("thin-stack")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("thin-stack")).toBeLessThan(order.indexOf("new-subs"));
+    expect(screen.getByTestId("thin-stack-warning").getAttribute("data-notice"))
+      .toBe("thin-stack");
+    expect(screen.getByRole("button", { name: "Restack" })).toBeInTheDocument();
   });
 
   it("still names the waiting subs while a newer sub is unlocated, by the Process button", async () => {
