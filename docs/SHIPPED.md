@@ -1,5 +1,30 @@
 # Shipped — the record
 
+## 2026-11-17 (Builder, branch `claude/fervent-bohr-6qegv8`)
+
+### v0.507.10 — Jobs, declutter slice 5: three notice boards instead of ten alerts
+
+**What.** Fifth slice of the ⭐ declutter entry, on `routes/Jobs.tsx`, whose notes were 10 separate `<Alert>` sites —
+a walk-away scan that tripped several of them stacked up to six coloured boxes on one job row. Each group now hands
+its notes to the shared `AlertNoticeBoard` (which gained a per-note `p`, so a titled note in a dense row keeps its old
+`p="xs"`). **Nothing removed** — every note keeps its title, wording, links and buttons; the top two stay inline and
+the rest are one click away behind "N more notes":
+- **A finished stack** (`job-result-notes`, process_target row): very few frames stacked, the storage-trouble note,
+  the mismatched master dark — all warnings, in the order they always stood.
+- **A finished scan** (`scan-result-notes`, pipeline row): problems first — Seestar-looking folders that were passed
+  over (with their "Bring this folder in" buttons), unreadable subs, subs not on disk right now — then the
+  advisory "not ready to auto-stack yet", then "subs still arriving" and "re-made a picture that had come out thin".
+- **The page** (`jobs-page-notes`): the "new frames are waiting to be imported" note — the place the next page-level
+  note goes. Unchanged and inline: every dimmed one-line note, `CalibrationSkippedNote`, `StackNoiseBadge`.
+
+**Measured.** `tests/test_ui_clutter_budget.py` for `Jobs.tsx`: 2 card kinds + 10 `<Alert>` sites → **2 + 0**
+(ceiling lowered to `(2, 0)`).
+
+**Tests.** `Jobs.test.tsx`: a scan tripping five notes shows the two problems with "3 more notes" and all five after
+the click; a thin stack off a flaking drive with a mismatched dark shows two with "1 more note" — both red on the old
+page. `AlertNoticeBoard.test.tsx`: the `p` override (red without it). Frontend only; no API, setting, schema or default
+change.
+
 ## 2026-11-17 (Builder, branch `claude/fervent-bohr-y4cpj2`)
 
 ### v0.507.9 — Editor, declutter slice 4: three notice boards instead of sixteen alerts

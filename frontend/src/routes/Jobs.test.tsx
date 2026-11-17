@@ -278,6 +278,31 @@ describe("JobsView process_target result actions", () => {
     expect(screen.getByText("Stacked 8 frames into a new master.")).toBeInTheDocument();
   });
 
+  it("puts a finished stack's warnings on one board — two inline, the third folded", async () => {
+    // ⭐ declutter slice 5: a thin stack off a flaking drive with a mismatched
+    // dark used to be three stacked yellow boxes on one row.
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pt-warn", kind: "process_target", target: "M_42", state: "done",
+        result: { stacked: true, solved_accepted: 2, stack: {
+          n_frames_used: 2, n_unreadable: 5, n_offered: 7,
+          calibration_warnings: ["Master dark is 30s but your subs are 10s — "
+            + "its pedestal will be over-subtracted on every frame."],
+        } },
+      }),
+    ]);
+    renderJobsRouted();
+    const board = await screen.findByTestId("job-result-notes");
+    const order = Array.from(board.querySelectorAll("[data-notice]"))
+      .map((el) => el.getAttribute("data-notice"));
+    expect(order).toEqual(["thin", "storage", "cal-mismatch"]);
+    await waitFor(() => expect(screen.getByText("1 more note")).toBeInTheDocument());
+    const dark = screen.getByText("Your master dark doesn't match these subs");
+    expect(dark).not.toBeVisible();
+    fireEvent.click(screen.getByText("1 more note"));
+    expect(dark).toBeVisible();
+  });
+
   it("keeps a finished full-size archive collectable from the Jobs page", async () => {
     // The build takes minutes, so the tab that started it is often gone by the
     // time it lands. Without this row the only way back to the finished file is
@@ -1198,6 +1223,42 @@ describe("JobsView pipeline result actions", () => {
     )).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "M 42" }))
       .toHaveAttribute("href", "/targets/M 42");
+  });
+
+  // ⭐ declutter slice 5: a scan that trips every note used to stack six coloured
+  // boxes on one row. They now share a notice board — the two problems lead,
+  // the rest fold behind "N more notes", and nothing is removed.
+  it("folds a scan's notes onto one board, problems first, nothing removed", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-all", kind: "pipeline", target: null, state: "done",
+        result: {
+          scanned: 60, auto_stacked: ["M 42"],
+          unreadable_targets: [{ target: "M 31", safe: "M_31", n: 2, examples: ["a.fit"] }],
+          auto_stack_held_thin: [{ target: "NGC 7000", frames: 2, min: 3 }],
+          auto_stack_held_unreadable: [
+            { target: "M 42", offered: 787, readable: 271, unreadable: 516 },
+          ],
+          auto_stack_held_settling: [{ target: "C 9", waiting: 7, on_disk: 40, folders: 1 }],
+          auto_stack_healed: [{ target: "M 81", frames: 787, newest: 271, best: 787 }],
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    const board = await screen.findByTestId("scan-result-notes");
+    const order = Array.from(board.querySelectorAll("[data-notice]"))
+      .map((el) => el.getAttribute("data-notice"));
+    expect(order).toEqual(
+      ["unreadable-subs", "held-files", "held-thin", "held-settling", "healed"]);
+    const shown = (key: string) =>
+      (board.querySelector(`[data-notice="${key}"]`)!.parentElement as HTMLElement)
+        .style.display !== "none";
+    await waitFor(() => expect(screen.getByText("3 more notes")).toBeInTheDocument());
+    expect(order.map((k) => shown(k!))).toEqual([true, true, false, false, false]);
+    expect(board.querySelectorAll(".mantine-Alert-root")).toHaveLength(5);
+    fireEvent.click(screen.getByText("3 more notes"));
+    expect(order.map((k) => shown(k!))).toEqual([true, true, true, true, true]);
+    expect(screen.getByText("Re-made a picture that had come out thin")).toBeVisible();
   });
 
   it("credits the stack-then-solve rescue on a finished scan", async () => {

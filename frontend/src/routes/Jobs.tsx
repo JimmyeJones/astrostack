@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Anchor, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Switch,
+  ActionIcon, Anchor, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Switch,
   Text, Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -8,7 +8,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type Job } from "../api/client";
+import { AlertNoticeBoard } from "../components/AlertNoticeBoard";
 import { AutoDrizzleNote } from "../components/AutoDrizzleNote";
+import { NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { BringFolderInButton } from "../components/BringFolderInButton";
 import {
   type SkipReason, skipReasonOf, skippedFolderLine, skippedFoldersExplainer,
@@ -1521,32 +1523,35 @@ function JobResultActions({ job }: { job: Job }) {
         {/* The other half of "auto-grade dropped N": say when it handed subs
             back, so the numbers the user remembers keep adding up. */}
         {putBack ? <Text size="xs" c="dimmed">{putBack}</Text> : null}
-        {thin ? (
-          <Alert color={thin.level === "single" ? "orange" : "yellow"} p="xs"
-            title="Very few frames stacked">
-            <Text size="xs">{thin.message}</Text>
-          </Alert>
-        ) : null}
-        {/* Names a storage problem as a storage problem — otherwise a cleared
-            cache over an offline share just looks like a mysteriously thin
-            stack. Shown above the reassuring notes because it's actionable, and
-            deliberately ONE alert: a flaking drive produces both the
-            missing-file and the failed-read counts, and two stacked yellow
-            blocks that both end in "go check the drive" read as two problems. */}
-        {storage ? (
-          <Alert color="yellow" p="xs" title={storage.title}>
-            <Text size="xs">{storage.message}</Text>
-          </Alert>
-        ) : null}
-        {/* The opposite of the skipped-master note below: a master that *was*
-            applied but doesn't match these subs. The summary line above says the
-            stack succeeded, so without this a wrong-exposure dark quietly
-            crushing every frame's background reads as a clean run. */}
-        {calMismatch ? (
-          <Alert color="yellow" p="xs" title="Your master dark doesn't match these subs">
-            <Text size="xs">{calMismatch}</Text>
-          </Alert>
-        ) : null}
+        {/* The result's warnings share one notice board (⭐ declutter slice 5):
+            the top two stay inline and a third folds behind "1 more note".
+            Order among equals is the order they used to stand in:
+            - a thin stack first;
+            - then a storage problem named as a storage problem — otherwise a
+              cleared cache over an offline share just looks like a mysteriously
+              thin stack. Deliberately ONE note: a flaking drive produces both
+              the missing-file and the failed-read counts, and two yellow blocks
+              that both end in "go check the drive" read as two problems;
+            - then the opposite of the skipped-master note below: a master that
+              *was* applied but doesn't match these subs. The summary line says
+              the stack succeeded, so without this a wrong-exposure dark quietly
+              crushing every frame's background reads as a clean run. */}
+        <AlertNoticeBoard data-testid="job-result-notes" items={[
+          thin && {
+            key: "thin", priority: NOTICE_PRIORITY.warning, p: "xs",
+            color: thin.level === "single" ? "orange" : "yellow",
+            title: "Very few frames stacked", text: thin.message,
+          },
+          storage && {
+            key: "storage", priority: NOTICE_PRIORITY.warning, p: "xs",
+            color: "yellow", title: storage.title, text: storage.message,
+          },
+          !!calMismatch && {
+            key: "cal-mismatch", priority: NOTICE_PRIORITY.warning, p: "xs",
+            color: "yellow", title: "Your master dark doesn't match these subs",
+            text: calMismatch,
+          },
+        ]} />
         {/* Where the depth came from, when subs that were never located in the
             sky were brought in by their star patterns. Silent by default. */}
         {starMatched ? (
@@ -1707,178 +1712,189 @@ function JobResultActions({ job }: { job: Job }) {
             {" page."}
           </Text>
         ) : null}
-        {/* Folders the Seestar convention passed over as the device's own
-            finished picture, holding files that don't look like one. Silent on
-            a healthy Seestar library; loud exactly when a scan has walked past
-            frames it can't account for, which is the only case worth a word. */}
-        {skipped.length ? (
-          <Alert color="yellow" variant="light" p="xs"
-            title={skippedFoldersTitle(skipped.map((s) => s.reason))}>
-            <Text size="xs">
-              {skippedFoldersExplainer(skipped.map((s) => s.reason))}
-            </Text>
-            <Stack gap={2} mt={4}>
-              {skipped.map((s) => (
-                <div key={s.name}>
-                  <Text size="xs">{skippedFolderLine(s)}</Text>
-                  {/* The button only appears on a backend that sent the folder's
-                      path; an older one still reports the folder, and the
-                      rename advice below still works. */}
-                  {s.path ? <BringFolderInButton path={s.path} name={s.name} /> : null}
-                </div>
-              ))}
-            </Stack>
-            <Text size="xs" mt={4}>
-              {"If those really are subs you want in your picture, bring the "}
-              {"folder in above — its frames join the target of the same name, "}
-              {"and any of your Seestar's own finished pictures inside it are "}
-              {"left out. Nothing on your disk is renamed or moved."}
-            </Text>
-          </Alert>
-        ) : null}
-        {/* Subs the scan couldn't open at all. These leave no frame row, so this
-            alert is the only place in the whole app they exist — everywhere
-            else, a damaged sub simply isn't there. Silent on every healthy scan;
-            it appears the moment one file can't be read, and goes away by
-            itself once the file is fixed or removed, because every scan
-            re-tries them. */}
-        {unreadable ? (
-          <Alert color="yellow" variant="light" p="xs"
-            title={unreadable.total === 1
+        {/* The scan's notes share one notice board (⭐ declutter slice 5): the
+            top two stay inline — a problem always before a "waiting" or a
+            "fixed it" — and the rest fold behind "N more notes". */}
+        <AlertNoticeBoard data-testid="scan-result-notes" items={[
+          /* Folders the Seestar convention passed over as the device's own
+             finished picture, holding files that don't look like one. Silent on
+             a healthy Seestar library; loud exactly when a scan has walked past
+             frames it can't account for, which is the only case worth a word. */
+          skipped.length > 0 && {
+            key: "skipped-folders", priority: NOTICE_PRIORITY.warning, p: "xs", color: "yellow",
+            title: skippedFoldersTitle(skipped.map((s) => s.reason)),
+            body: (<>
+              <Text size="xs">
+                {skippedFoldersExplainer(skipped.map((s) => s.reason))}
+              </Text>
+              <Stack gap={2} mt={4}>
+                {skipped.map((s) => (
+                  <div key={s.name}>
+                    <Text size="xs">{skippedFolderLine(s)}</Text>
+                    {/* The button only appears on a backend that sent the folder's
+                        path; an older one still reports the folder, and the
+                        rename advice below still works. */}
+                    {s.path ? <BringFolderInButton path={s.path} name={s.name} /> : null}
+                  </div>
+                ))}
+              </Stack>
+              <Text size="xs" mt={4}>
+                {"If those really are subs you want in your picture, bring the "}
+                {"folder in above — its frames join the target of the same name, "}
+                {"and any of your Seestar's own finished pictures inside it are "}
+                {"left out. Nothing on your disk is renamed or moved."}
+              </Text>
+            </>),
+          },
+          /* Subs the scan couldn't open at all. These leave no frame row, so this
+             alert is the only place in the whole app they exist — everywhere
+             else, a damaged sub simply isn't there. Silent on every healthy scan;
+             it appears the moment one file can't be read, and goes away by
+             itself once the file is fixed or removed, because every scan
+             re-tries them. */
+          unreadable && {
+            key: "unreadable-subs", priority: NOTICE_PRIORITY.warning, p: "xs", color: "yellow",
+            title: unreadable.total === 1
               ? "One of your subs couldn't be read"
-              : `${unreadable.total} of your subs couldn't be read`}>
-            <Text size="xs">
-              {unreadable.total === 1
-                ? "This file isn't readable as a picture file, so it was left out "
-                : "These files aren't readable as picture files, so they were left out "}
-              {"— nothing else was affected, and nothing on your disk was changed "}
-              {"or deleted. The usual cause is a copy that didn't finish. Copying "}
-              {unreadable.total === 1 ? "it " : "them "}
-              {"over again from your Seestar normally fixes it; if not, "}
-              {unreadable.total === 1 ? "the sub is " : "the subs are "}
-              {"damaged and safe to delete. Every scan tries again, so this note "}
-              {"disappears on its own once "}
-              {unreadable.total === 1 ? "it's " : "they're "}
-              {"sorted."}
-            </Text>
-            <Stack gap={0} mt={4}>
-              {unreadable.named.map((t) => (
-                <Text size="xs" key={t.safe || t.target}>
-                  {/* A target with unreadable subs may still have plenty of good
-                      ones, so the link is worth having; an older backend that
-                      sent no safe name still gets the name and the file list. */}
-                  {t.safe ? (
-                    <Anchor component={Link} to={`/targets/${t.safe}`}>
-                      {t.target || t.safe}
-                    </Anchor>
-                  ) : (t.target || "One target")}
-                  {unreadableSubsLine(t)}
-                </Text>
-              ))}
-              {unreadable.rest > 0 ? (
-                <Text size="xs" c="dimmed">{`…and ${unreadable.rest} more target`
-                  + `${unreadable.rest === 1 ? "" : "s"}.`}</Text>
-              ) : null}
-            </Stack>
-          </Alert>
-        ) : null}
-        {held.length ? (
-          <Alert color="blue" variant="light" p="xs"
-            title={held.some((h) => (h.panelDepth ?? 0) > 0)
+              : `${unreadable.total} of your subs couldn't be read`,
+            body: (<>
+              <Text size="xs">
+                {unreadable.total === 1
+                  ? "This file isn't readable as a picture file, so it was left out "
+                  : "These files aren't readable as picture files, so they were left out "}
+                {"— nothing else was affected, and nothing on your disk was changed "}
+                {"or deleted. The usual cause is a copy that didn't finish. Copying "}
+                {unreadable.total === 1 ? "it " : "them "}
+                {"over again from your Seestar normally fixes it; if not, "}
+                {unreadable.total === 1 ? "the sub is " : "the subs are "}
+                {"damaged and safe to delete. Every scan tries again, so this note "}
+                {"disappears on its own once "}
+                {unreadable.total === 1 ? "it's " : "they're "}
+                {"sorted."}
+              </Text>
+              <Stack gap={0} mt={4}>
+                {unreadable.named.map((t) => (
+                  <Text size="xs" key={t.safe || t.target}>
+                    {/* A target with unreadable subs may still have plenty of good
+                        ones, so the link is worth having; an older backend that
+                        sent no safe name still gets the name and the file list. */}
+                    {t.safe ? (
+                      <Anchor component={Link} to={`/targets/${t.safe}`}>
+                        {t.target || t.safe}
+                      </Anchor>
+                    ) : (t.target || "One target")}
+                    {unreadableSubsLine(t)}
+                  </Text>
+                ))}
+                {unreadable.rest > 0 ? (
+                  <Text size="xs" c="dimmed">{`…and ${unreadable.rest} more target`
+                    + `${unreadable.rest === 1 ? "" : "s"}.`}</Text>
+                ) : null}
+              </Stack>
+            </>),
+          },
+          held.length > 0 && {
+            key: "held-thin", priority: NOTICE_PRIORITY.advisory, p: "xs", color: "blue",
+            title: held.some((h) => (h.panelDepth ?? 0) > 0)
               ? "Not ready to auto-stack yet"
-              : "Waiting for more of your subs to be located"}>
-            <Text size="xs">
-              {held.length === 1
-                ? "One target isn't ready to auto-stack yet"
-                : `${held.length} targets aren't ready to auto-stack yet`}
-              {" — the hands-off auto-stack is holding off rather than making a "}
-              {"picture out of one or two frames (that would just be noise). "}
-              {held.every((h) => (h.panelDepth ?? 0) > 0)
-                ? "Keep shooting and the next scan will stack it, or open the "
-                : "Run Plate Solve to locate more subs, or open the "}
-              {'target and use "Stack" to make one now anyway:'}
-            </Text>
-            <Stack gap={0} mt={4}>
-              {held.map((h) => (
-                <Text size="xs" key={h.target}>
-                  {h.target ? (
-                    <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
-                  ) : "This target"}
-                  {heldForSubsLine(h)}
-                </Text>
-              ))}
-            </Stack>
-          </Alert>
-        ) : null}
-        {heldFiles.length ? (
-          <Alert color="yellow" variant="light" p="xs"
-            title="Some of your subs aren't on disk right now">
-            <Text size="xs">
-              {"Stacking without them would have made a thinner, noisier picture "}
-              {"than the one you already have, so it was left alone. This usually "}
-              {"means a drive or network share went off-line, or a folder was "}
-              {"moved. Put it back and the next scan will stack the full set "}
-              {"automatically — nothing has been lost:"}
-            </Text>
-            <Stack gap={0} mt={4}>
-              {heldFiles.map((h) => (
-                <Text size="xs" key={h.target}>
-                  {h.target ? (
-                    <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
-                  ) : "This target"}
-                  {heldForFilesLine(h)}
-                </Text>
-              ))}
-            </Stack>
-          </Alert>
-        ) : null}
-        {heldSettling.length ? (
-          <Alert color="blue" variant="light" p="xs"
-            title="Subs still arriving — waiting for the batch to settle">
-            <Text size="xs">
-              {"New subs are still arriving for these — either you're shooting "}
-              {"right now, or a folder is still copying in — so the picture is "}
-              {"not made yet. Stacking now would make it out of only the subs "}
-              {"that have landed so far, and the next batch would replace it "}
-              {"minutes later. Nothing is skipped — the next check after the "}
-              {"subs stop stacks each one, once, from everything it has. Open a "}
-              {'target and use "Stack" if you want one now:'}
-            </Text>
-            <Stack gap={0} mt={4}>
-              {heldSettling.map((h) => (
-                <Text size="xs" key={h.target}>
-                  {h.target ? (
-                    <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
-                  ) : "This target"}
-                  {heldSettlingLine(h)}
-                </Text>
-              ))}
-            </Stack>
-          </Alert>
-        ) : null}
-        {healed.length ? (
-          <Alert color="green" variant="light" p="xs"
-            title="Re-made a picture that had come out thin">
-            <Text size="xs">
-              {"All of these subs are readable again, and the newest picture had "}
-              {"been made from far fewer of them than this target managed before "}
-              {"— usually because a drive or share was off-line at the time. It "}
-              {"was stacked again from the full set, so the better picture is "}
-              {"back. Your earlier pictures are all still in History:"}
-            </Text>
-            <Stack gap={0} mt={4}>
-              {healed.map((h) => (
-                <Text size="xs" key={h.target}>
-                  {h.target ? (
-                    <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
-                  ) : "This target"}
-                  {`: last picture used ${h.newest} subs, this one used all ${h.frames} `}
-                  {`(its best before was ${h.best}).`}
-                </Text>
-              ))}
-            </Stack>
-          </Alert>
-        ) : null}
+              : "Waiting for more of your subs to be located",
+            body: (<>
+              <Text size="xs">
+                {held.length === 1
+                  ? "One target isn't ready to auto-stack yet"
+                  : `${held.length} targets aren't ready to auto-stack yet`}
+                {" — the hands-off auto-stack is holding off rather than making a "}
+                {"picture out of one or two frames (that would just be noise). "}
+                {held.every((h) => (h.panelDepth ?? 0) > 0)
+                  ? "Keep shooting and the next scan will stack it, or open the "
+                  : "Run Plate Solve to locate more subs, or open the "}
+                {'target and use "Stack" to make one now anyway:'}
+              </Text>
+              <Stack gap={0} mt={4}>
+                {held.map((h) => (
+                  <Text size="xs" key={h.target}>
+                    {h.target ? (
+                      <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
+                    ) : "This target"}
+                    {heldForSubsLine(h)}
+                  </Text>
+                ))}
+              </Stack>
+            </>),
+          },
+          heldFiles.length > 0 && {
+            key: "held-files", priority: NOTICE_PRIORITY.warning, p: "xs", color: "yellow",
+            title: "Some of your subs aren't on disk right now",
+            body: (<>
+              <Text size="xs">
+                {"Stacking without them would have made a thinner, noisier picture "}
+                {"than the one you already have, so it was left alone. This usually "}
+                {"means a drive or network share went off-line, or a folder was "}
+                {"moved. Put it back and the next scan will stack the full set "}
+                {"automatically — nothing has been lost:"}
+              </Text>
+              <Stack gap={0} mt={4}>
+                {heldFiles.map((h) => (
+                  <Text size="xs" key={h.target}>
+                    {h.target ? (
+                      <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
+                    ) : "This target"}
+                    {heldForFilesLine(h)}
+                  </Text>
+                ))}
+              </Stack>
+            </>),
+          },
+          heldSettling.length > 0 && {
+            key: "held-settling", priority: NOTICE_PRIORITY.info, p: "xs", color: "blue",
+            title: "Subs still arriving — waiting for the batch to settle",
+            body: (<>
+              <Text size="xs">
+                {"New subs are still arriving for these — either you're shooting "}
+                {"right now, or a folder is still copying in — so the picture is "}
+                {"not made yet. Stacking now would make it out of only the subs "}
+                {"that have landed so far, and the next batch would replace it "}
+                {"minutes later. Nothing is skipped — the next check after the "}
+                {"subs stop stacks each one, once, from everything it has. Open a "}
+                {'target and use "Stack" if you want one now:'}
+              </Text>
+              <Stack gap={0} mt={4}>
+                {heldSettling.map((h) => (
+                  <Text size="xs" key={h.target}>
+                    {h.target ? (
+                      <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
+                    ) : "This target"}
+                    {heldSettlingLine(h)}
+                  </Text>
+                ))}
+              </Stack>
+            </>),
+          },
+          healed.length > 0 && {
+            key: "healed", priority: NOTICE_PRIORITY.info, p: "xs", color: "green",
+            title: "Re-made a picture that had come out thin",
+            body: (<>
+              <Text size="xs">
+                {"All of these subs are readable again, and the newest picture had "}
+                {"been made from far fewer of them than this target managed before "}
+                {"— usually because a drive or share was off-line at the time. It "}
+                {"was stacked again from the full set, so the better picture is "}
+                {"back. Your earlier pictures are all still in History:"}
+              </Text>
+              <Stack gap={0} mt={4}>
+                {healed.map((h) => (
+                  <Text size="xs" key={h.target}>
+                    {h.target ? (
+                      <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
+                    ) : "This target"}
+                    {`: last picture used ${h.newest} subs, this one used all ${h.frames} `}
+                    {`(its best before was ${h.best}).`}
+                  </Text>
+                ))}
+              </Stack>
+            </>),
+          },
+        ]} />
         {autoEdited > 0 ? (
           <Group>
             <Button size="xs" variant="light" leftSection={<IconPhoto size={14} />}
@@ -2281,12 +2297,18 @@ export function JobsView() {
       {/* A queued import nobody asked for looks identical to an idle queue on
           every other screen, so the one page that *has* the queue says it out
           loud — above the rows, because the row itself only reads "queued". */}
-      {stuckImport ? (
-        <Alert color="yellow" variant="light" title={stuckImport.title}>
-          <Text size="sm">{stuckImport.body}</Text>
-          <Text size="sm" mt={4}>{stuckImport.reassurance}</Text>
-        </Alert>
-      ) : null}
+      {/* The page's own notice board (⭐ declutter slice 5) — one note today,
+          and the place the next page-level note goes rather than a new Alert. */}
+      <AlertNoticeBoard data-testid="jobs-page-notes" items={[
+        stuckImport && {
+          key: "stuck-import", priority: NOTICE_PRIORITY.warning, color: "yellow",
+          title: stuckImport.title,
+          body: (<>
+            <Text size="sm">{stuckImport.body}</Text>
+            <Text size="sm" mt={4}>{stuckImport.reassurance}</Text>
+          </>),
+        },
+      ]} />
       {jobs.length === 0 ? (
         <Paper withBorder p="xl">
           <Stack align="center" gap="sm">
