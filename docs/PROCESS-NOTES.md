@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-11-17 (Scout, branch `claude/sweet-euler-0rt6q3`) — QA rotation sweep (4), new angle — `HEAD` and `Range` on every file-serving GET: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8873 passed / 7 skipped on `734b8aa2` (xdist `-n 4`, BLAS capped, 14m07s). No open
+  PRs. Inbox: the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  `Diagnostic result:` issue yet. **Dogfood `--build --mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors).
+- **Sweep (4), the angle two earlier (4) sweeps recorded as "not yet run"** (2026-11-11, 2026-11-13). Booted the app on
+  the dogfood's mosaic data root and walked `openapi.json`: every GET with its ids filled in that answers 200 with a
+  non-JSON, non-HTML body (22 routes — thumbnail, frame preview, run render / full-res PNG / sky overlay / zoom clip /
+  reference sub / before-after / wallpaper, editor preview / loupe / star mask / coverage map, My map, montage,
+  pictures.zip, recap, imaging-log CSV, three calendar `.ics`, life-list grid) — then `HEAD` and seven `Range` shapes
+  (`0-9`, garbage, reversed, past the end, multi-range, suffix, wrong unit). **No 500 anywhere.** The four
+  `FileResponse` routes advertise `Accept-Ranges: bytes` and answer RFC-correctly (206 / 416 / multipart 206; Starlette
+  1.10 answers a malformed or reversed range 400 rather than ignoring it — permitted, and no browser sends one); the
+  18 in-memory `Response` routes ignore `Range` with a full 200 (permitted). No route serves video, so iOS Safari's
+  must-have-206 rule never applies. `HEAD` is 405 on every path including `/` — FastAPI's default; nothing sends it (the
+  Docker/compose healthcheck GETs `/api/health`, the frontend never uses `HEAD`). Not filed.
+- **Read, not filed:** `/api/targets/{safe}/thumbnail` serves the run's whole stored preview PNG (≤ 1024 px wide,
+  `PREVIEW_MAX_WIDTH`; 1.3 MB on the sample mosaic) to every Library / Life-list / year-card tile. With
+  `Cache-Control: no-cache` a repeat visit is a 304 per tile, so only a first visit pays; not measured at the owner's
+  77 targets and no user-visible harm shown — a lead for a dogfood `--deep` pass, not a bug.
+- **Rotation: (4) done → next sweep is (1)** (preview↔export parity at mosaic scale).
+
 ## 2026-11-17 (Builder, branch `claude/fervent-bohr-ghuw4p`) — v0.507.5; the state-seeding dogfood flags run under `offEdgeControls` for the first time.
 
 - **Baseline / backlog.** Suite 8844 passed / 7 skipped on `c1fd1306` (xdist `-n 4`, BLAS capped, 14m12s). Every Bugs
