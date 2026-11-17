@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-11-17 (Builder, branch `claude/fervent-bohr-gr597o`)
+
+### v0.507.11 — Target, declutter slice 6: the route draws no `<Alert>` of its own
+
+**What.** Sixth slice of the ⭐ declutter entry, on `routes/Target.tsx` (13 `<Alert>` sites). Unlike Jobs and the
+Editor, this page's notes already went through one prioritised board (`target-notes`), so a reader sees the
+same page: the slice makes every note a board note. `components/AlertNoticeBoard.tsx` now exports
+`alertNoticeNode(n)` — the one `<Alert>` every board draws — and `AlertNoticeBoard` is that plus the folding:
+- **`target-notes`**: solve-setup, ready to process, N subs missing, files missing, couldn't be quality-checked,
+  mixed pointings, rejected the odd-target frames (with its Undo), auto-stack waiting to locate, thin stack — each
+  keeps its title, icon, colour, wording and buttons, and now carries `data-notice=<key>`.
+- **The Auto-grade dialog**: its three exclusive "no list to show" outcomes (preview failed / not enough graded
+  frames / no outliers) are one `gradeVerdict` drawn by one call; the 25 %-cap note keeps its `p="xs"`.
+**Nothing removed.**
+
+**Measured.** `tests/test_ui_clutter_budget.py` for `Target.tsx`: 17 card kinds + 13 `<Alert>` sites → **17 + 0**
+(ceiling lowered to `(17, 0)`), so the next note on this page has to go through the board.
+
+**Tests.** `Target.test.tsx`: the thin-stack and "N subs missing" notes sit on `target-notes` in priority order as
+named board notes; a failing Auto-grade preview still shows its message as the `grade-error` note — both red on the
+old page. Frontend only; no API, setting, schema or default change.
+
 ## 2026-11-17 (Builder, branch `claude/fervent-bohr-6qegv8`)
 
 ### v0.507.10 — Jobs, declutter slice 5: three notice boards instead of ten alerts

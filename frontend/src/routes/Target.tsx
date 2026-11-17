@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Badge, Box, Button, Center, Grid, Group, HoverCard, Image,
+  ActionIcon, Badge, Box, Button, Center, Grid, Group, HoverCard, Image,
   Loader, Modal, NumberFormatter, NumberInput, Paper, Progress, Select, Stack,
   Table, TagsInput, Text, Textarea, Title, Tooltip,
 } from "@mantine/core";
@@ -10,7 +10,7 @@ import {
   IconTargetArrow, IconWand, IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
@@ -26,6 +26,7 @@ import { CleanestShotNote } from "../components/CleanestShotNote";
 import { GrainierNewestNote } from "../components/GrainierNewestNote";
 import { MosaicThinHoldNote } from "../components/MosaicThinHoldNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
+import { alertNoticeNode } from "../components/AlertNoticeBoard";
 import { RestackGainNote } from "../components/RestackGainNote";
 import { RestoredSubsNote } from "../components/RestoredSubsNote";
 import {
@@ -186,6 +187,18 @@ function AutoGradeModal({
   // Which of the two 25% rails truncated the list — they want opposite advice
   // (shared with the Stack form's hint, so the two cannot disagree).
   const capNotice = gradeCapNotice(report);
+  const gradeVerdict: { key: string; color: string; body: ReactNode } | null =
+    preview.isError
+      ? { key: "grade-error", color: "red", body: (preview.error as Error).message }
+      : nothingGradable
+      ? { key: "grade-nothing", color: "gray",
+          body: "Not enough graded frames to judge — run QC first (each metric needs "
+            + "at least 10 measured frames)." }
+      : recs.length === 0
+      ? { key: "grade-clean", color: "teal",
+          body: <>No outliers found — your {report?.n_accepted ?? 0} accepted frames
+            look consistent at this sensitivity.</> }
+      : null;
 
   return (
     <Modal opened={opened} onClose={onClose} title="Auto-grade frames" size="lg">
@@ -212,18 +225,10 @@ function AutoGradeModal({
         />
         {preview.isLoading ? (
           <Center h={80}><Loader size="sm" /></Center>
-        ) : preview.isError ? (
-          <Alert color="red">{(preview.error as Error).message}</Alert>
-        ) : nothingGradable ? (
-          <Alert color="gray">
-            Not enough graded frames to judge — run QC first (each metric needs
-            at least 10 measured frames).
-          </Alert>
-        ) : recs.length === 0 ? (
-          <Alert color="teal">
-            No outliers found — your {report?.n_accepted ?? 0} accepted frames
-            look consistent at this sensitivity.
-          </Alert>
+        ) : gradeVerdict ? (
+          // The dialog's three exclusive "no list to show" outcomes, one note.
+          alertNoticeNode({ key: gradeVerdict.key, priority: 0, color: gradeVerdict.color,
+            p: "md", body: gradeVerdict.body })
         ) : (
           <>
             <Text size="sm">
@@ -231,7 +236,8 @@ function AutoGradeModal({
               like outliers:
             </Text>
             {capNotice ? (
-              <Alert color="orange" p="xs">{capNotice.text}</Alert>
+              alertNoticeNode({ key: "grade-cap", priority: 0, color: "orange",
+                p: "xs", body: capNotice.text })
             ) : null}
             <Table.ScrollContainer minWidth={400} mah={300}>
               <Table striped withTableBorder>
@@ -1007,16 +1013,17 @@ export function TargetView() {
           // works — it just stopped producing new pictures.
           { key: "stack-failed", priority: NOTICE_PRIORITY.warning,
             node: <StackFailedNote safe={safe} /> },
-          { key: "solve-setup", priority: NOTICE_PRIORITY.blocking, node: solveSetup ? (
-            <Alert color="orange" icon={<IconAlertTriangle size={18} />}
-              title={solveSetup.kind === "astap" && solveSetup.cannot_run
+          { key: "solve-setup", priority: NOTICE_PRIORITY.blocking, node: solveSetup ? alertNoticeNode({
+              key: "solve-setup", priority: NOTICE_PRIORITY.blocking,
+              color: "orange", icon: <IconAlertTriangle size={18} />,
+              title: solveSetup.kind === "astap" && solveSetup.cannot_run
                 ? "Plate-solving isn't working — ASTAP can't be started"
                 : solveSetup.kind === "astap"
                 ? "Plate-solving isn't set up — ASTAP wasn't found"
                 : solveSetup.kind === "scratch"
                 ? "Plate-solving ran out of temporary space"
-                : "Plate-solving needs a star database"}>
-              <Text size="sm">
+                : "Plate-solving needs a star database",
+              body: <Text size="sm">
                 {solveSetup.kind === "astap" && solveSetup.cannot_run
                   ? `${solveSetup.frames} frame${solveSetup.frames === 1 ? "" : "s"} couldn't be `
                     + "plate-solved because ASTAP (the plate-solver) is there but can't be "
@@ -1040,8 +1047,8 @@ export function TargetView() {
                     + "plate-solved because ASTAP couldn't find a star database to match against. "
                     + "Download an ASTAP star database (e.g. the D50/H17/H18 catalog) into ASTAP's "
                     + "folder, then re-run solving."}
-              </Text>
-              <Group gap="xs" mt="xs">
+              </Text>,
+              extra: <Group gap="xs" mt="xs">
                 <Button size="xs" variant="filled" color="orange"
                   loading={qcSolve.isPending} onClick={() => qcSolve.mutate()}>
                   Re-run QC + Solve
@@ -1050,17 +1057,17 @@ export function TargetView() {
                   component={Link} to={settingsLink("plate-solving")}>
                   Open Settings
                 </Button>
-              </Group>
-            </Alert>
-          ) : null },
-          { key: "needs-processing", priority: NOTICE_PRIORITY.advisory, node: needsProcessing ? (
-            <Alert color="violet" icon={<IconSparkles size={18} />}
-              title="Ready to process?">
-              <Text size="sm">
+              </Group>,
+            }) : null },
+          { key: "needs-processing", priority: NOTICE_PRIORITY.advisory, node: needsProcessing ? alertNoticeNode({
+              key: "needs-processing", priority: NOTICE_PRIORITY.advisory,
+              color: "violet", icon: <IconSparkles size={18} />,
+              title: "Ready to process?",
+              body: <Text size="sm">
                 One click runs quality-check, plate-solving and stacking for this
                 target — no form to fill. You'll get a finished master image to edit.
-              </Text>
-              <Group gap="xs" mt="xs">
+              </Text>,
+              extra: <Group gap="xs" mt="xs">
                 <Button size="xs" variant="filled" color="violet"
                   leftSection={<IconSparkles size={14} />}
                   loading={process.isPending} disabled={!!stackJob}
@@ -1068,9 +1075,8 @@ export function TargetView() {
                   onClick={() => process.mutate()}>
                   {stackJob ? STACK_BUSY_LABEL : "Process target"}
                 </Button>
-              </Group>
-            </Alert>
-          ) : null },
+              </Group>,
+            }) : null },
           /* "Your picture doesn't include everything you've shot." The count is
               the server's, measured against the picture on the wall, so it also
               covers the shapes a capture clock cannot see — a combined folder's
@@ -1078,17 +1084,18 @@ export function TargetView() {
               the whole story to tell, so the two can never both offer the same
               button. */
           { key: "new-subs", priority: NOTICE_PRIORITY.advisory,
-            node: newSubsSinceStack > 0 && !restoredIsWholeStory ? (
-            <Alert color="blue" variant="light" icon={<IconStack2 size={18} />}
-              title={`${newSubsSinceStack} sub${newSubsSinceStack === 1 ? "" : "s"} missing from your current picture`}>
-              <Text size="sm">
+            node: newSubsSinceStack > 0 && !restoredIsWholeStory ? alertNoticeNode({
+              key: "new-subs", priority: NOTICE_PRIORITY.advisory,
+              color: "blue", icon: <IconStack2 size={18} />,
+              title: `${newSubsSinceStack} sub${newSubsSinceStack === 1 ? "" : "s"} missing from your current picture`,
+              body: <Text size="sm">
                 {newSubsSinceStack === 1 ? "A frame is" : `${newSubsSinceStack} frames are`}{" "}
                 accepted and located, but the picture you're looking at wasn't made
                 with {newSubsSinceStack === 1 ? "it" : "them"} — so it's thinner
                 than your own data. Restack to fold{" "}
                 {newSubsSinceStack === 1 ? "it" : "them"} in.
-              </Text>
-              <Group gap="xs" mt="xs">
+              </Text>,
+              extra: <Group gap="xs" mt="xs">
                 <Button size="xs" variant="filled" color="blue"
                   leftSection={<IconStack2 size={14} />}
                   loading={process.isPending} disabled={!!stackJob}
@@ -1096,9 +1103,8 @@ export function TargetView() {
                   onClick={() => process.mutate()}>
                   {stackJob ? STACK_BUSY_LABEL : "Restack"}
                 </Button>
-              </Group>
-            </Alert>
-          ) : null },
+              </Group>,
+            }) : null },
           /* "Your newest stack is cleaner than the cover you pinned — swap?"
               Only ever an offer, and only when a cover is pinned. Self-hides. */
           { key: "cleanest-shot", priority: NOTICE_PRIORITY.advisory,
@@ -1155,11 +1161,12 @@ export function TargetView() {
              really cannot reach it; see RejectionOutlookNote. */
           { key: "rejection-outlook", priority: NOTICE_PRIORITY.warning,
             node: <RejectionOutlookNote safe={safe} streaked={streakedAccepted} /> },
-          { key: "missing-files", priority: NOTICE_PRIORITY.warning, node: missingFiles !== null ? (
-            <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
-              title={missingFiles.title}>
-              <Text size="sm">{missingFiles.message}</Text>
-              <Group gap="xs" mt="xs">
+          { key: "missing-files", priority: NOTICE_PRIORITY.warning, node: missingFiles !== null ? alertNoticeNode({
+              key: "missing-files", priority: NOTICE_PRIORITY.warning,
+              color: "orange", icon: <IconAlertTriangle size={18} />,
+              title: missingFiles.title,
+              body: <Text size="sm">{missingFiles.message}</Text>,
+              extra: <Group gap="xs" mt="xs">
                 <Button size="xs" variant="light" color="orange"
                   loading={rejectSummary.isFetching}
                   onClick={() => {
@@ -1167,32 +1174,32 @@ export function TargetView() {
                   }}>
                   Check again
                 </Button>
-              </Group>
-            </Alert>
-          ) : null },
-          { key: "qc-uncheckable", priority: NOTICE_PRIORITY.warning, node: qcUncheckable > 0 ? (
-            <Alert color="gray" variant="light" icon={<IconAlertTriangle size={18} />}
-              title={`${qcUncheckable} frame${qcUncheckable === 1 ? "" : "s"} couldn't be quality-checked`}>
-              <Text size="sm">
+              </Group>,
+            }) : null },
+          { key: "qc-uncheckable", priority: NOTICE_PRIORITY.warning, node: qcUncheckable > 0 ? alertNoticeNode({
+              key: "qc-uncheckable", priority: NOTICE_PRIORITY.warning,
+              color: "gray", icon: <IconAlertTriangle size={18} />,
+              title: `${qcUncheckable} frame${qcUncheckable === 1 ? "" : "s"} couldn't be quality-checked`,
+              body: <Text size="sm">
                 {qcUncheckable === 1 ? "A frame" : `${qcUncheckable} frames`} couldn't be
                 read during quality-check (an unreadable, corrupt or truncated FITS
                 file), so {qcUncheckable === 1 ? "it has" : "they have"} no metrics and{" "}
                 {qcUncheckable === 1 ? "is" : "are"} skipped when stacking. Re-check{" "}
                 {qcUncheckable === 1 ? "it" : "them"} in case the read failure was
                 transient (a copy still in progress).
-              </Text>
-              <Group gap="xs" mt="xs">
+              </Text>,
+              extra: <Group gap="xs" mt="xs">
                 <Button size="xs" variant="light" color="gray"
                   loading={qcSolve.isPending} onClick={() => qcSolve.mutate()}>
                   Re-check these frames
                 </Button>
-              </Group>
-            </Alert>
-          ) : null },
-          { key: "mixed-pointings", priority: NOTICE_PRIORITY.warning, node: mixedRejected === null && mixedPointings ? (
-            <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
-              title={`This batch looks like ${mixedPointings.pointings} different targets`}>
-              <Text size="sm">
+              </Group>,
+            }) : null },
+          { key: "mixed-pointings", priority: NOTICE_PRIORITY.warning, node: mixedRejected === null && mixedPointings ? alertNoticeNode({
+              key: "mixed-pointings", priority: NOTICE_PRIORITY.warning,
+              color: "orange", icon: <IconAlertTriangle size={18} />,
+              title: `This batch looks like ${mixedPointings.pointings} different targets`,
+              body: <Text size="sm">
                 {mixedPointings.majority} of your accepted, plate-solved subs point at
                 one place and {mixedPointings.others} point about{" "}
                 {Math.round(mixedPointings.separationDeg)}° away — that usually means two
@@ -1203,44 +1210,40 @@ export function TargetView() {
                 silently dropped, so you'd waste a stack on part of the data. Reject the
                 odd frames to keep just the main pointing, or check each frame's solved
                 RA/Dec in the Frames table below and split them into their own target.
-              </Text>
-              {mixedPointings.minorityIds.length ? (
+              </Text>,
+              extra: mixedPointings.minorityIds.length ? (
                 <Button mt="xs" size="xs" variant="light" color="orange"
                   loading={rejectMixed.isPending}
                   onClick={() => rejectMixed.mutate(mixedPointings.minorityIds)}>
                   Reject the {mixedPointings.minorityIds.length} odd-target frame
                   {mixedPointings.minorityIds.length === 1 ? "" : "s"}
                 </Button>
-              ) : null}
-            </Alert>
-          ) : null },
-          { key: "mixed-rejected", priority: NOTICE_PRIORITY.info, node: mixedRejected !== null ? (
-            <Alert color="teal" variant="light" icon={<IconCheck size={18} />}
-              title="Rejected the odd-target frames">
-              <Text size="sm">
+              ) : null,
+            }) : null },
+          { key: "mixed-rejected", priority: NOTICE_PRIORITY.info, node: mixedRejected !== null ? alertNoticeNode({
+              key: "mixed-rejected", priority: NOTICE_PRIORITY.info,
+              color: "teal", icon: <IconCheck size={18} />,
+              title: "Rejected the odd-target frames",
+              body: <Text size="sm">
                 Rejected {mixedRejected.length} sub{mixedRejected.length === 1 ? "" : "s"} that
                 didn't match the main pointing — the batch is a single target now, so a
                 stack won't waste itself on part of the data.
-              </Text>
-              <Button mt="xs" size="xs" variant="light" color="teal"
+              </Text>,
+              extra: <Button mt="xs" size="xs" variant="light" color="teal"
                 leftSection={<IconArrowBackUp size={14} />}
                 loading={undoMixed.isPending}
                 onClick={() => undoMixed.mutate(mixedRejected)}>
                 Undo — re-accept {mixedRejected.length} frame{mixedRejected.length === 1 ? "" : "s"}
-              </Button>
-            </Alert>
-          ) : null },
+              </Button>,
+            }) : null },
           /* Was the sky brighter than usual on the latest night? Explains a washed-out
               result the owner would otherwise blame on themselves. Self-hides. */
           { key: "sky-brightness", priority: NOTICE_PRIORITY.info, node: <SkyBrightnessNote read={skyBrightness.data?.read} /> },
-          { key: "held-for-solve", priority: NOTICE_PRIORITY.advisory, node: heldForSolve ? (
-            <Alert
-              color="blue"
-              variant="light"
-              icon={<IconClock size={18} />}
-              title="Auto-stack is waiting for more of your subs to be located"
-            >
-              <Text size="sm">
+          { key: "held-for-solve", priority: NOTICE_PRIORITY.advisory, node: heldForSolve ? alertNoticeNode({
+              key: "held-for-solve", priority: NOTICE_PRIORITY.advisory,
+              color: "blue", icon: <IconClock size={18} />,
+              title: "Auto-stack is waiting for more of your subs to be located",
+              body: <Text size="sm">
                 {heldForSolve.located === 0
                   ? "None of your accepted subs have been located (plate-solved) yet"
                   : `Only ${heldForSolve.located} of your accepted subs `
@@ -1251,22 +1254,18 @@ export function TargetView() {
                   + `will stack automatically once at least ${heldForSolve.floor} subs `
                   + `are located — run Plate Solve to locate more, or use "Stack" / `
                   + `"Process this target" to make one now anyway.`}
-              </Text>
-            </Alert>
-          ) : null },
-          { key: "thin-stack", priority: NOTICE_PRIORITY.warning, node: thinStack ? (
-            <Alert
-              color={thinStack.level === "single" ? "orange" : "yellow"}
-              variant="light"
-              icon={<IconAlertTriangle size={18} />}
-              data-testid="thin-stack-warning"
-              title={thinStack.level === "single"
+              </Text>,
+            }) : null },
+          { key: "thin-stack", priority: NOTICE_PRIORITY.warning, node: thinStack ? alertNoticeNode({
+              key: "thin-stack", priority: NOTICE_PRIORITY.warning,
+              color: thinStack.level === "single" ? "orange" : "yellow",
+              icon: <IconAlertTriangle size={18} />,
+              testId: "thin-stack-warning",
+              title: thinStack.level === "single"
                 ? "This stack is really just one frame"
-                : "Very few frames were combined"}
-            >
-              <Text size="sm">{thinStack.message}</Text>
-            </Alert>
-          ) : null },
+                : "Very few frames were combined",
+              body: <Text size="sm">{thinStack.message}</Text>,
+            }) : null },
           /* The concrete "stacking cut your noise ~N×" payoff, right where a beginner
               lands on the finished picture (self-hides for a thin/unmeasurable stack). */
           { key: "stack-noise", priority: NOTICE_PRIORITY.praise, node: latestRun?.has_preview ? (

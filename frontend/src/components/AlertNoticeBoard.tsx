@@ -44,6 +44,47 @@ export type AlertNotice = {
 };
 
 /**
+ * One note drawn as the `<Alert>` every {@link AlertNoticeBoard} uses, for a
+ * page whose own board mixes these with self-hiding note components (the
+ * Target page's ``target-notes`` and its Auto-grade dialog, v0.507.11). The
+ * board below is this plus the folding; a caller that already has a
+ * {@link NoticeBoard} hands it ``node: cond ? alertNoticeNode({...}) : null``.
+ */
+export function alertNoticeNode(n: AlertNotice) {
+  return (
+    <Alert
+      color={n.color}
+      variant="light"
+      title={n.title}
+      icon={n.icon}
+      // A titled note is a page-level one and keeps Alert's own spacing;
+      // the one-sentence form notes stay compact, as they always were.
+      {...(n.p != null ? { p: n.p } : n.title ? {} : { py: 6, px: "sm" })}
+      data-notice={n.key}
+      data-testid={n.testId}
+      withCloseButton={Boolean(n.onClose)}
+      onClose={n.onClose}
+    >
+      {n.body ?? (n.text != null ? <Text size="xs">{n.text}</Text> : null)}
+      {n.fix ? (
+        <Button
+          size="compact-xs"
+          variant="light"
+          color={n.fix.color}
+          mt={6}
+          loading={n.fix.loading}
+          leftSection={n.fix.leftSection}
+          onClick={n.fix.onClick}
+        >
+          {n.fix.label}
+        </Button>
+      ) : null}
+      {n.extra}
+    </Alert>
+  );
+}
+
+/**
  * A notice board of `<Alert>` notes — first written for the Stack form, now
  * shared with the Editor (v0.507.9).
  *
@@ -82,37 +123,7 @@ export function AlertNoticeBoard({
       items={live.map((n) => ({
         key: n.key,
         priority: n.priority,
-        node: (
-          <Alert
-            color={n.color}
-            variant="light"
-            title={n.title}
-            icon={n.icon}
-            // A titled note is a page-level one and keeps Alert's own spacing;
-            // the one-sentence form notes stay compact, as they always were.
-            {...(n.p != null ? { p: n.p } : n.title ? {} : { py: 6, px: "sm" })}
-            data-notice={n.key}
-            data-testid={n.testId}
-            withCloseButton={Boolean(n.onClose)}
-            onClose={n.onClose}
-          >
-            {n.body ?? (n.text != null ? <Text size="xs">{n.text}</Text> : null)}
-            {n.fix ? (
-              <Button
-                size="compact-xs"
-                variant="light"
-                color={n.fix.color}
-                mt={6}
-                loading={n.fix.loading}
-                leftSection={n.fix.leftSection}
-                onClick={n.fix.onClick}
-              >
-                {n.fix.label}
-              </Button>
-            ) : null}
-            {n.extra}
-          </Alert>
-        ),
+        node: alertNoticeNode(n),
       }))}
     />
   );
