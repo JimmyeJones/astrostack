@@ -266,7 +266,10 @@ export const MORE_SETTINGS_GROUPS: MoreGroup[] = [
         dflt: 300,
         value: (form) => numOr(form, "watch_poll_interval_s", 300),
         patch: (v) => ({ watch_poll_interval_s: v }),
-        format: (v) => `Every ${Math.round(v / 60)} min`,
+        // The slider starts at 1 min, but the old "Poll interval (s)" box takes
+        // anything from 2 s, so a stored 5 s read "Every 0 min". Under a minute,
+        // say it in seconds.
+        format: (v) => (v < 60 ? `Every ${v} seconds` : `Every ${Math.round(v / 60)} min`),
         minLabel: "1 min",
         maxLabel: "30 min",
         warn: (v) =>

@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-11-17 (Builder, branch `claude/fervent-bohr-ghuw4p`)
+
+### v0.507.4 — More settings: a long "Back to default" stays inside its card, and a sub-minute back-up check reads in seconds
+
+**What.** On **Settings → More settings** a card whose value has left its default shows a "Heads up" with a
+"Back to default (…)" button naming the default. A Mantine button never wraps its label, so in the two-column grid on a
+1440 px desktop "Back to default (Wait 30 seconds)" ran to x 341–587 of a card ending ~40 px earlier, its last words
+clipped by the card (and "Back to default (Standard (set when installed))", the folders card's, is longer still). The
+button is now capped at the alert's width (`maw="100%"`, `h="auto"`) with a wrapping label (`MoreCard`). In the same
+card pair, the back-up check (`watch_poll_interval_s`) formatted any stored value under a minute as **"Every 0 min"** —
+the slider starts at 1 min but the old "Poll interval (s)" box and the field (`ge=2`) take anything from 2 s; under a
+minute it now says "Every N seconds" (`moreSettings.ts` `format`).
+
+**How found.** Dogfood `--build --restack --closing --incoming-lag` — last run 2026-11-15, i.e. before v0.507.3's
+`offEdgeControls` existed. `--incoming-lag` is the only pass that leaves a watcher
+setting off its default (quiet period 900 s, poll 5 s), so it is the only one on which these warnings render at all:
+`[desktop] /settings/more: OFF-EDGE CONTROL "Back to default (Wait 30 seconds)" at x 341..587 … (clipped)`. Re-run after
+the fix (`--build --no-stack --incoming-lag`): nothing overflowing, no OFF-EDGE line; the screenshot shows the button on
+two lines inside its card.
+
+**Tests.** `Settings.test.tsx` "keeps a long Back to default button inside its card" (`maxWidth: 100%` and a
+`white-space: normal` label — red before: `''` ≠ `'100%'`); `moreSettings.test.ts` "says a sub-minute back-up check in
+seconds" (red before: `"Every 0 min"`). Frontend only; no setting, default, schema or API change.
+
 ## 2026-11-17 (Builder, branch `claude/sweet-feynman-84vxgq`)
 
 ### Closed, no version — "Save this map" and a Dashboard pointer into My map were both already built

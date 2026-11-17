@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-11-17 (Builder, branch `claude/fervent-bohr-ghuw4p`) — v0.507.4; the state-seeding dogfood flags run under `offEdgeControls` for the first time.
+
+- **Baseline / backlog.** Suite 8844 passed / 7 skipped on `c1fd1306` (xdist `-n 4`, BLAS capped, 14m12s). Every Bugs
+  entry gated; Features entries declined or gated; no open PRs.
+- **Why this angle.** `--restack`, `--closing` and `--incoming-lag` last ran 2026-11-15 — before v0.507.3's
+  `OFF-EDGE CONTROL` check existed. Each is the only pass that puts some state on
+  screen. `--build --restack --closing --incoming-lag`: restack 2 runs (3 → 6 subs), reel and noise-delta available,
+  closing card 2 rows, lag note 8 subs / 1 unreadable — all as before; **one finding**: the More settings
+  "Back to default (Wait 30 seconds)" button clipped past its card at 1440 px (`--incoming-lag` is the only pass that
+  leaves a watcher setting off its default, so the warnings only render there). Fixed as v0.507.4, plus "Every 0 min"
+  read off the same screenshot (the pass's 5 s poll). Re-run `--build --no-stack --incoming-lag`: CLEAN.
+- **Read, not changed:** the quiet-period card shows "Wait 900 seconds" with its slider pinned at the 5 min end — the
+  words are true, the slider just cannot show past its range; touching it would clamp to ≤ 5 min, which is the slider's
+  job. `--combine` (2026-11-15) not re-run.
+
 ## 2026-11-17 (Builder, branch `claude/sweet-feynman-84vxgq`) — no app change; v0.507.3's recorded remainder (dialogs the probe does not open) run at 320 / 375 px: CLEAN.
 
 - **Baseline / backlog.** Suite 8844 passed / 7 skipped on `baa8752e` (xdist `-n 4`, BLAS capped, 15m43s). Every Bugs

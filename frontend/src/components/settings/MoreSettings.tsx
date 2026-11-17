@@ -149,8 +149,17 @@ export function MoreCard({
           >
             <Stack gap="xs" align="flex-start">
               <Text size="sm">{warning}</Text>
+              {/* The label names the default ("Wait 30 seconds", "Standard
+                  (set when installed)"), and a Mantine button never wraps its
+                  label: in a two-column card on a 1440 px desktop the button
+                  ran ~40 px past the card's edge, its closing words clipped
+                  (dogfood OFF-EDGE CONTROL). Cap it at the alert's width and
+                  let the label wrap onto a second line instead. */}
               <Button
                 size="compact-sm" variant="default"
+                maw="100%" h="auto" py={4}
+                styles={{ label: { whiteSpace: "normal", textAlign: "left", lineHeight: 1.35 } }}
+                data-testid="more-setting-reset"
                 onClick={() => onPatch(moreSettingResetPatch(d, ctx))}
               >
                 Back to default ({moreSettingDefaultLabel(d, ctx)})

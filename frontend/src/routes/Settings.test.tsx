@@ -1327,6 +1327,20 @@ describe("More settings", () => {
       .not.toBeChecked();
   });
 
+  it("keeps a long Back to default button inside its card", async () => {
+    // Measured in Playwright at 1440 px: in the two-column grid the quiet-period
+    // card's "Back to default (Wait 30 seconds)" ran past the card's right edge
+    // with its last words clipped, because a Mantine button never wraps. jsdom
+    // has no layout, so pin the two properties that let it wrap inside the card.
+    renderSettingsWith({}, "more", { incoming_dir: "/elsewhere/incoming", library_root: "" });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
+    const back = await screen.findByRole("button",
+      { name: "Back to default (Standard (set when installed))" });
+    expect(back.style.maxWidth).toBe("100%");
+    const label = back.querySelector(".mantine-Button-label") as HTMLElement;
+    expect(getComputedStyle(label).whiteSpace).toBe("normal");
+  });
+
   it("edits the same buffer as the old control, so the two can never disagree", async () => {
     // Every control here also still lives on the section it always did. Both
     // read and write the page's one shared form, which is what makes "nothing
