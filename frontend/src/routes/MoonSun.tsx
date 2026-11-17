@@ -12,6 +12,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type VideoCapture } from "../api/client";
 import { formatStampDate } from "../format";
+import { AlertNoticeBoard } from "../components/AlertNoticeBoard";
+import { NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { QueryError } from "../components/QueryError";
 import { ScanToPhoneButton } from "../components/ScanToPhoneButton";
 import { SharePictureButton } from "../components/SharePictureButton";
@@ -252,123 +254,100 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
           {result.warnings.map((w) => (
             <Text key={w} size="xs" c="dimmed">{w}</Text>
           ))}
-          {/* This picture is genuinely wrong — it was stacked before AstroStack
-              could read the camera's colour filter *correctly*, so its colours
-              are off and a fine mesh runs over it. Two generations land here:
-              the pre-v0.347.0 stills, which are grey and meshed, and the
-              v0.347.0 ones, which are green and meshed because that build
-              demosaiced in the deep-sky path's phase rather than video's. The
-              copy names the symptom both share rather than picking one, since
-              the owner can see which he has. Nothing on disk fixes itself and
-              there is no automatic stack for video, so the only way he ever
-              gets the good version is if the page says so and offers the
-              button. */}
-          {result.colour_stale ? (
-            <Alert
-              color="violet"
-              variant="light"
-              icon={<IconRefresh size={18} />}
-              p="xs"
-              mt={4}
-            >
-              <Text size="xs">
-                This picture was made before AstroStack could read your camera's
-                colour filter properly, so its colours came out wrong and it has
-                a fine mesh over it. Stacking it again gives you true colour and
-                a clean picture.
-              </Text>
-              <Button
-                size="compact-xs"
-                variant="light"
-                mt={6}
-                leftSection={<IconRefresh size={12} />}
-                onClick={() => stack.mutate({})}
-                loading={stack.isPending}
-              >
-                Stack it again
-              </Button>
-            </Alert>
-          ) : null}
-          {/* The clip changed after this picture was made — most often it was
-              stacked while still copying in from the Seestar, so the picture
-              was made from only its first part. Kept (it is still his picture),
-              but nothing re-stacks a video on its own, so the page says so and
-              offers the button. Hidden beside the colour notice, which already
-              offers the same re-stack. */}
-          {result.source_changed && !result.colour_stale ? (
-            <Alert
-              color="violet"
-              variant="light"
-              icon={<IconRefresh size={18} />}
-              p="xs"
-              mt={4}
-            >
-              <Text size="xs">
-                This video has changed since this picture was made — it may
-                still have been copying in. Stacking it again uses the whole
-                clip as it is now.
-              </Text>
-              <Button
-                size="compact-xs"
-                variant="light"
-                mt={6}
-                leftSection={<IconRefresh size={12} />}
-                onClick={() => stack.mutate({})}
-                loading={stack.isPending}
-              >
-                Stack it again
-              </Button>
-            </Alert>
-          ) : null}
-          {/* Most people won't think to ask for a crop before they've seen how
-              much sky their Seestar left around the Moon — so the offer waits
-              until the picture itself can make the case. */}
-          {suggestCrop ? (
-            <Alert
-              color="violet"
-              variant="light"
-              icon={<IconCrop size={18} />}
-              p="xs"
-              mt={4}
-            >
-              <Text size="xs">{suggestCrop}</Text>
-              <Button
-                size="compact-xs"
-                variant="light"
-                mt={6}
-                leftSection={<IconCrop size={12} />}
-                onClick={() => cropStill.mutate()}
-                loading={cropStill.isPending}
-              >
-                Crop it
-              </Button>
-            </Alert>
-          ) : null}
-          {/* …and the same offer for the detail, for the same reason: nobody
-              knows how sharp they want the picture until they can see it. */}
-          {offerSharpen ? (
-            <Alert
-              color="violet"
-              variant="light"
-              icon={<IconSparkles size={18} />}
-              p="xs"
-              mt={4}
-            >
-              <Text size="xs">{offerSharpen}</Text>
-              <Select
-                mt={6}
-                size="xs"
-                label="Bring out surface detail"
-                description="Applied to the saved picture — no re-stack."
-                data={SHARPEN_PRESETS}
-                value={sharpenValueOf(result)}
-                onChange={(v) => sharpenStill.mutate(Number(v ?? DEFAULT_SHARPEN))}
-                disabled={sharpenStill.isPending}
-                allowDeselect={false}
-                w={{ base: "100%", xs: 260 }}
-              />
-            </Alert>
-          ) : null}
+          {/* This card's offers share one notice board (the owner's "recursive
+              organization", 2026-11-17): an old picture can carry the colour
+              notice, the crop offer and the sharpen offer at once — three
+              stacked violet boxes per card, on a page that lists every
+              capture. The most important one or two stay inline, the rest
+              fold behind "N more notes"; nothing is removed, every button is
+              one click away. A wrong picture outranks an offer to improve a
+              right one. */}
+          <AlertNoticeBoard
+            data-testid="capture-offers"
+            mt={4}
+            items={[
+              /* This picture is genuinely wrong — it was stacked before
+                 AstroStack could read the camera's colour filter *correctly*,
+                 so its colours are off and a fine mesh runs over it. Two
+                 generations land here: the pre-v0.347.0 stills, which are grey
+                 and meshed, and the v0.347.0 ones, which are green and meshed
+                 because that build demosaiced in the deep-sky path's phase
+                 rather than video's. The copy names the symptom both share
+                 rather than picking one, since the owner can see which he has.
+                 Nothing on disk fixes itself and there is no automatic stack
+                 for video, so the only way he ever gets the good version is if
+                 the page says so and offers the button. */
+              result.colour_stale ? {
+                key: "colour-stale", priority: NOTICE_PRIORITY.warning, color: "violet", p: "xs",
+                icon: <IconRefresh size={18} />,
+                text: "This picture was made before AstroStack could read your camera's "
+                  + "colour filter properly, so its colours came out wrong and it has "
+                  + "a fine mesh over it. Stacking it again gives you true colour and "
+                  + "a clean picture.",
+                fix: {
+                  label: "Stack it again",
+                  onClick: () => stack.mutate({}),
+                  loading: stack.isPending,
+                  leftSection: <IconRefresh size={12} />,
+                },
+              } : null,
+              /* The clip changed after this picture was made — most often it
+                 was stacked while still copying in from the Seestar, so the
+                 picture was made from only its first part. Kept (it is still
+                 his picture), but nothing re-stacks a video on its own, so the
+                 page says so and offers the button. Hidden beside the colour
+                 notice, which already offers the same re-stack. */
+              result.source_changed && !result.colour_stale ? {
+                key: "source-changed", priority: NOTICE_PRIORITY.warning, color: "violet", p: "xs",
+                icon: <IconRefresh size={18} />,
+                text: "This video has changed since this picture was made — it may "
+                  + "still have been copying in. Stacking it again uses the whole "
+                  + "clip as it is now.",
+                fix: {
+                  label: "Stack it again",
+                  onClick: () => stack.mutate({}),
+                  loading: stack.isPending,
+                  leftSection: <IconRefresh size={12} />,
+                },
+              } : null,
+              /* Most people won't think to ask for a crop before they've seen
+                 how much sky their Seestar left around the Moon — so the offer
+                 waits until the picture itself can make the case. */
+              suggestCrop ? {
+                key: "crop", priority: NOTICE_PRIORITY.advisory, color: "violet", p: "xs",
+                icon: <IconCrop size={18} />,
+                text: suggestCrop,
+                fix: {
+                  label: "Crop it",
+                  onClick: () => cropStill.mutate(),
+                  loading: cropStill.isPending,
+                  leftSection: <IconCrop size={12} />,
+                },
+              } : null,
+              /* …and the same offer for the detail, for the same reason:
+                 nobody knows how sharp they want the picture until they can
+                 see it. */
+              offerSharpen ? {
+                key: "sharpen", priority: NOTICE_PRIORITY.advisory, color: "violet", p: "xs",
+                icon: <IconSparkles size={18} />,
+                text: offerSharpen,
+                extra: (
+                  <Select
+                    mt={6}
+                    size="xs"
+                    label="Bring out surface detail"
+                    description="Applied to the saved picture — no re-stack."
+                    data={SHARPEN_PRESETS}
+                    value={sharpenValueOf(result)}
+                    onChange={(v) => sharpenStill.mutate(Number(v ?? DEFAULT_SHARPEN))}
+                    disabled={sharpenStill.isPending}
+                    allowDeselect={false}
+                    w={{ base: "100%", xs: 260 }}
+                  />
+                ),
+              } : null,
+            ]}
+          />
           <Group gap="xs" mt={4}>
             <Button
               size="xs"
