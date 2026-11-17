@@ -171,6 +171,19 @@ describe("More settings — a control with fewer choices than its field still sh
   });
 });
 
+describe("More settings — a value off the slider's scale still reads true", () => {
+  it("says a sub-minute back-up check in seconds, never \"Every 0 min\"", () => {
+    // The slider starts at 1 min but the old "Poll interval (s)" box (and the
+    // field, `ge=2`) take anything from 2 s — a stored 5 s read "Every 0 min".
+    const d = card("watch_poll_interval_s");
+    if (d.kind !== "slider") throw new Error("slider");
+    expect(d.format(5)).toBe("Every 5 seconds");
+    expect(d.format(59)).toBe("Every 59 seconds");
+    expect(d.format(60)).toBe("Every 1 min");
+    expect(d.format(300)).toBe("Every 5 min");
+  });
+});
+
 describe("More settings — Automatic is a value, not a blank", () => {
   it("puts the memory slider at its Automatic end for a stored null", () => {
     const d = card("max_stack_memory_gb");
