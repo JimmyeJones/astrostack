@@ -1012,6 +1012,27 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   not proximity alone. (Recorded here so the guard isn't forgotten when the merge
   lands.)
 
+### ⭐ Declutter — recursive organization (owner ask, PRIORITY 3)
+
+- **⭐ OWNER-ASKED (2026-11-17) — declutter: "simplicity is sometimes best — or at least recursive
+  organization".** Measured on 2026-11-17 by `tests/test_ui_clutter_budget.py`, as distinct card/note/banner
+  kinds plus `<Alert>` sites per route file. The worst: **Target 30 + 13**, **Dashboard 23 + 2**, **Stack form
+  2 + 40 alerts**, **Editor 6 + 16**, **Jobs 2 + 10**. These are only what the route file itself renders; its
+  child components add more. **The work**, one slice per run, worst page first (Target, then Dashboard, then
+  the Stack form's alerts):
+  - Give the page **≤ 5 top-level groups**, each with a one-line summary, as AGENTS.md §1 "Recursive
+    organization" describes. Nest everything else: collapsed sections, tabs, or nested routes
+    (`/library/<target>/…`).
+  - Put **every note onto one notice board** that shows the top one or two and folds the rest behind "N more".
+  - **NOTHING MAY BE REMOVED.** Every feature stays reachable within two clicks of where it was, and the
+    commit says where each moved.
+  - Measure before and after with `scripts/agent-dogfood.sh --mosaic --big` (visible cards above the fold at
+    the owner's scale), and lower that route's `BUDGET` ceiling in the same commit.
+  - Watch the Target page's child components (`frontend/src/components/target/`): the budget counts only
+    the route file, so a slice that moves a card into a child without nesting it has not reduced anything.
+  Size **L** overall, **M** per slice. It is PRIORITY 3 (friendliness) on a direct owner ask, so it takes the
+  ⭐ beginner-feature slot until the Target page and Dashboard are each down to five top-level groups.
+
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 
 The editor is where a good stack becomes a good *picture*, and it has real
@@ -3142,6 +3163,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.507.4 **The owner's "cluttered again" (2026-11-17) gets a mechanical guard: every route has a ceiling on the card/note/banner kinds and `<Alert>` sites it renders, which can only go down; AGENTS.md §1 gains "Recursive organization" (≤ 5 top-level groups, one notice board per page); a ⭐ declutter entry takes the worst pages a slice at a time** (`tests/test_ui_clutter_budget.py`)
 - ✅ (closed 2026-11-17, no version) **"Save this map" + a Dashboard pointer into My map — both halves were already built: (a) the Sky page's Save button, (b) v0.306.3's "See it on My map →" line under the stat grid** — entry cut whole to `SHIPPED.md` 2026-11-17.
 - ✅ v0.507.3 **The Dashboard sample card's "Remove" (and at 320 px "Open sample") no longer sits off a phone's right edge once the sample is stacked, and the Auto-grade dialog's Sensitivity field no longer pokes out of it on a 320 px phone (`SampleImageCard` actions `maxWidth`, `AutoGradeModal` `maw`); the dogfood probe now reports any control drawn past an edge or a clipping box (`dogfood_probe.mjs` `offEdgeControls`)** — Builder 2026-11-17, the probe gap v0.507.1 recorded; SHIPPED.md.
 - ✅ v0.507.2 **With "North up" on, a picture opened or stepped to in the Gallery viewer is no longer drawn the way it was saved and then spun once its annotations answer — the turned URL is shown while that answer is pending (`Gallery.tsx` `viewingShowTurned`; downloads still wait)** — Builder 2026-11-16, the unrun v0.507.0 prev/next-over-two-runs angle; SHIPPED.md.
