@@ -12,8 +12,12 @@ const STRIP_LIMIT = 4;
 /** A compact, self-hiding "My best pictures" strip for the Dashboard: the top few
  * auto-ranked finished stacks across every target, linking through to the full
  * wall. Renders nothing until the wall has something worth showing (the endpoint
- * self-hides below two finished pictures), so a new install sees no empty card. */
-export function BestPicturesStrip() {
+ * self-hides below two finished pictures), so a new install sees no empty card.
+ *
+ * `showTitle={false}` is for a host that already names the strip — the
+ * Dashboard's "Your pictures" group shows it under a "Best" tab — and moves the
+ * link to the full wall under the pictures instead of beside a heading. */
+export function BestPicturesStrip({ showTitle = true }: { showTitle?: boolean } = {}) {
   const best = useQuery({
     queryKey: ["galleryBest", "strip"],
     queryFn: () => api.getGalleryBest(STRIP_LIMIT),
@@ -25,10 +29,12 @@ export function BestPicturesStrip() {
 
   return (
     <>
-      <Group justify="space-between" mt="sm">
-        <Title order={4}>My best pictures</Title>
-        <Text component={Link} to="/best" size="sm" c="violet">View all →</Text>
-      </Group>
+      {showTitle ? (
+        <Group justify="space-between" mt="sm">
+          <Title order={4}>My best pictures</Title>
+          <Text component={Link} to="/best" size="sm" c="violet">View all →</Text>
+        </Group>
+      ) : null}
       <SimpleGrid cols={{ base: 2, sm: 4 }}>
         {items.map((pic) => {
           const reason = bestPictureReason(pic);
@@ -59,6 +65,13 @@ export function BestPicturesStrip() {
           );
         })}
       </SimpleGrid>
+      {showTitle ? null : (
+        <Group justify="flex-end" mt="xs">
+          <Text component={Link} to="/best" size="sm" c="violet">
+            View all my best pictures →
+          </Text>
+        </Group>
+      )}
     </>
   );
 }
