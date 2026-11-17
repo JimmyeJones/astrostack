@@ -1,5 +1,19 @@
 # Process notes & QA sweep records
 
+## 2026-11-17 (Builder, branch `claude/fervent-bohr-uh3xuc`) — nothing ungated to build; dogfood `--build --mosaic --dithered --editor` CLEAN after the seven declutter slices.
+
+- **Baseline / backlog.** Suite 8874 passed / 7 skipped on `550a2902` (v0.507.12; xdist `-n 4`, BLAS capped, 13m16s). Every
+  Bugs entry is gated on the owner or a diagnostic; the Features entries are declined or gated; the "sentence that names a
+  number gets a button" sweep is closed (2026-09-04). No open PRs.
+- **Why this pass.** It is the first full editor drive since v0.507.6–.12 moved ~100 `<Alert>` sites onto notice boards.
+  Exit 0, nothing overflowing, no console errors. Tiled mosaic Auto trims 8 % (bar 15 %); the dithered apron 31 % is the
+  recorded non-finding. All 21 Add-menu ops re-render; Undo/Redo apply; "What Auto-process did" stays inline
+  (`JUST_DONE_PRIORITY`) with its taste chips live; one live and one at-limit chip tapped, profile reset.
+- **Read, not changed:** the Stack form's calibration board ranks the orange content warning level with the red
+  "will fail" size notes and first by source order, so a pick with two size mismatches and a content warning folds one red
+  note behind "1 more note". That is the comment's stated choice (the content mistake is the most damaging pick) and
+  needs three simultaneous mistakes — not filed.
+
 ## 2026-11-17 (Scout, branch `claude/sweet-euler-0rt6q3`) — QA rotation sweep (4), new angle — `HEAD` and `Range` on every file-serving GET: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8873 passed / 7 skipped on `734b8aa2` (xdist `-n 4`, BLAS capped, 14m07s). No open
