@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from webapp import deps
+from webapp.seestar import keyfile
 from webapp.seestar.client import SeestarError
 
 router = APIRouter(prefix="/api/seestar", tags=["seestar"])
@@ -35,6 +36,47 @@ def _require_control(request: Request) -> None:
             status_code=409,
             detail="Seestar control is disabled. Enable it in Settings to send commands.",
         )
+
+
+# ---- the interop key (⭐ Seestar-page upgrade, slice 1) ---------------------
+#
+# Firmware 7.18+ answers commands only from a client that signs its challenge
+# with this key. These three endpoints say only "installed / not installed":
+# the key is never served back (`webapp.seestar.keyfile` holds the rules). None
+# is gated on `seestar_enabled` — the owner may add the key before switching the
+# integration on — and none is on the read-only token's allowlist. The upload is
+# a JSON body, which is also this app's CSRF guard (see `routers/updates.py`).
+
+
+class KeyUpload(BaseModel):
+    pem: str = Field(max_length=4 * keyfile.MAX_KEY_BYTES)
+
+
+@router.get("/key")
+def key_status(request: Request) -> dict:
+    return keyfile.key_status(deps.get_settings(request).state_dir)
+
+
+@router.post("/key")
+def upload_key(body: KeyUpload, request: Request) -> dict:
+    state_dir = deps.get_settings(request).state_dir
+    try:
+        keyfile.install_key(state_dir, body.pem)
+    except keyfile.KeyFileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except OSError:
+        raise HTTPException(
+            status_code=500,
+            detail="AstroStack couldn't save the key file. Check that its data folder is writable.",
+        ) from None
+    return keyfile.key_status(state_dir)
+
+
+@router.delete("/key")
+def remove_key(request: Request) -> dict:
+    state_dir = deps.get_settings(request).state_dir
+    removed = keyfile.remove_key(state_dir)
+    return {**keyfile.key_status(state_dir), "removed": removed}
 
 
 @router.get("/devices")

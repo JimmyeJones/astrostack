@@ -2437,7 +2437,10 @@ problems. Dogfood it every big-picture run and fix root causes.
   `AGENTS_GUIDE.md` first; its test-status table says what was verified on the scope. Today `webapp/seestar/`
   (`client.py`, from seestar_alp) predates the firmware 7.18+ RSA handshake, so against his scope it gets
   little beyond broadcast events. **Slices, one per run:**
-  1. **The key, uploaded through the web** (his answer). Settings → the existing Seestar group gets "Add your
+  1. ✅ **v0.508.0 — shipped** (`webapp/seestar/keyfile.py`, `GET/POST/DELETE /api/seestar/key`,
+     `SeestarKeyBox` on Settings → This device; record in `SHIPPED.md`). `keyfile.load_key` returns the `n, e, d`
+     slice 2 signs with. **Next run: slice 2.** Original text:
+     **The key, uploaded through the web** (his answer). Settings → the existing Seestar group gets "Add your
      Seestar key file". `POST /api/seestar/key` (password-gated; never on the read-only allowlist) stores it
      as `state/seestar/seestar.pem` with mode 0600, checks that it parses as a PKCS#8 RSA key, and supports
      replace and remove. It is **never served back, logged, or included** in any API response, backup or
@@ -3173,6 +3176,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.508.0 **⭐ Seestar-page upgrade slice 1: the Seestar key file uploads through Settings → This device (`SeestarKeyBox`, `POST/DELETE /api/seestar/key`), checked as an RSA key with the standard library (`webapp.seestar.keyfile`), stored 0600, never served back** — entry stays open for slices 2–4
 - ✅ v0.507.13 **The owner's own Seestar Studio (verified on his S30, firmware 9.75) is kept as protocol reference in `docs/reference/seestar-studio/` — scrubbed of his key, probes and data, outside ruff and pytest — and the ⭐ Seestar-page upgrade it serves is filed** (owner ask 2026-11-18)
 - ✅ v0.507.12 **Moon & Sun declutter slice 7: each capture card's colour / re-stack / crop / sharpen offers go on one `AlertNoticeBoard` (`capture-offers`), the wrong-picture note first** (5 → 1); **the ⭐ declutter entry is closed** — no route holds more than 5 `<Alert>` sites, Settings' five sit in five different sections (no wall), and `tests/test_ui_clutter_budget.py` keeps the ratchet
 - ✅ v0.507.11 **Target declutter slice 6: its 13 `<Alert>` sites (nine on `target-notes`, four in the Auto-grade dialog) drawn through `alertNoticeNode`** (13 → 0)

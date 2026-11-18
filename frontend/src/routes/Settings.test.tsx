@@ -44,6 +44,8 @@ beforeEach(() => {
   vi.spyOn(client.api, "autoCastSummary").mockResolvedValue({
     measured: 0, neutral: 0, cast: 0, by_cast: {}, median_deviation: null,
   });
+  // The telescope tab's key box asks whether a Seestar key is installed.
+  vi.spyOn(client.api, "getSeestarKey").mockResolvedValue({ installed: false, problem: null });
   // …and its highlight sibling, for the same reason.
   vi.spyOn(client.api, "autoHighlightSummary").mockResolvedValue({
     measured: 0, blown: 0, median_strength: null,
@@ -1783,5 +1785,38 @@ describe("Stacking — how pictures are made", () => {
     renderSettingsWith({ min_max_reject: true, quality_weighted: true, drizzle: false });
     await waitFor(() =>
       expect(screen.getByText(/On any stack of 3 or more subs/)).toBeVisible());
+  });
+});
+
+describe("Seestar key file (⭐ Seestar-page upgrade, slice 1)", () => {
+  it("says plainly what no key means, uploads a chosen file and then only says it's installed", async () => {
+    const up = vi.spyOn(client.api, "uploadSeestarKey")
+      .mockResolvedValue({ installed: true, problem: null });
+    renderSettingsWith({}, "telescope");
+
+    const box = await screen.findByTestId("seestar-key");
+    await waitFor(() =>
+      expect(box).toHaveTextContent(/can only listen to what the telescope announces/));
+    expect(box).toHaveTextContent("not installed");
+
+    const input = box.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----\n"],
+      "seestar.pem", { type: "application/x-pem-file" });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(up).toHaveBeenCalledWith(expect.stringContaining("BEGIN PRIVATE KEY")));
+    await waitFor(() => expect(box).toHaveTextContent(/never shown again/));
+    expect(screen.getByRole("button", { name: "Replace the key file" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove the key" })).toBeInTheDocument();
+  });
+
+  it("shows the server's refusal without the status code", async () => {
+    vi.spyOn(client.api, "uploadSeestarKey")
+      .mockRejectedValue(new Error("400: This is the public half of a key. AstroStack needs the private key file."));
+    renderSettingsWith({}, "telescope");
+    const box = await screen.findByTestId("seestar-key");
+    const input = box.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["x"], "k.pem")] } });
+    expect(await within(box).findByRole("alert")).toHaveTextContent(/^This is the public half of a key/);
   });
 });
