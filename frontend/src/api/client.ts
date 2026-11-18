@@ -1528,7 +1528,13 @@ export interface SeestarDevice {
   last_seen_utc: string | null;
   telemetry: SeestarTelemetry | null;
   error: string | null;
+  /** The firmware 7.18+ key handshake's outcome (⭐ Seestar-page upgrade,
+   *  slice 2); null while not connected or not yet tried. Optional: an older
+   *  backend omits it. */
+  auth?: SeestarAuth | null;
 }
+
+export type SeestarAuth = "verified" | "not_needed" | "key_needed" | "rejected" | "failed";
 
 /** `GET /api/seestar/key` — whether the interop key is installed. The key itself is never sent back. */
 export interface SeestarKeyStatus {

@@ -1,5 +1,36 @@
 # Shipped — the record
 
+## 2026-11-18 (Builder, branch `claude/kind-goodall-q448hg`)
+
+### v0.509.0 — ⭐ Seestar-page upgrade, slice 2: the firmware 7.18+ handshake, signed with the standard library
+
+**What.** With the key from slice 1 installed, AstroStack now proves itself to the scope on every fresh connection,
+exactly as Seestar Studio does on the owner's S30: `get_verify_str "verify"` → sign the challenge → `verify_client
+{sign, data}` → `pi_is_verified "verify"` (`SeestarClient.handshake`). The signature is RSASSA-PKCS1-v1_5 with SHA-1
+(`keyfile.sign_pkcs1v15_sha1` / `sign_challenge`): EMSA-PKCS1-v1_5 encoding and `pow`, **no new dependency**. Code
+103 on the first call means firmware older than 7.18 (no gate). With no key the first call is still made, which is
+how the app learns whether a key is needed, and nothing else is sent. `SeestarManager._ensure_auth` runs it after
+each connect from the scan loop, the poll loop and the Connect button, under one lock so two loops never sign on one
+socket. It runs again when the key is added, replaced or removed, and a handshake that got no answer is retried
+after `_AUTH_RETRY_S` (60 s), not every poll. Every device in `/api/seestar/devices` gains an additive `auth` field:
+`verified` / `not_needed` / `key_needed` / `rejected` / `failed`, or null while not connected. When a gated scope
+serves no telemetry, its error now says why in plain words ("add the key file in Settings → This device") instead of
+"port 4700 returned no data". The Seestar page's device card has one plain line under the IP saying the same, with
+a link to the key box when the owner has something to do. No new card or alert (the clutter ratchet is unchanged).
+`SeestarClient._rpc` was split into `_call` + `_rpc` (unchanged contract) + `_rpc_reply` (the whole reply, `code`
+and all). Nothing about the key or the signature is logged.
+
+**Tests.** `tests/webapp/test_seestar_handshake.py` (17). The **independent check**: OpenSSL generates a 2048-bit
+PKCS#8 key and signs the same challenge, and ours must match it **byte for byte** (PKCS#1 v1.5 is deterministic)
+and pass `openssl dgst -verify`. A from-the-RFC verifier written in the test also checks it. A fake scope shaped like
+Studio's `seestar_sim.py` actually checks the signature with the public key, so a wrong encoding can't pass. It
+covers the right key (commands go from 207 "fail to operate" to answered, in Studio's exact call sequence), a wrong
+key (rejected, `pi_is_verified` not sent), no key (only `get_verify_str` sent), old firmware (103), and silence
+(failed, no exception). On the manager it covers a key added or replaced later, retry pacing, disconnect clearing
+`auth`, the poll loop's plain-words error, and the key never appearing in the snapshot. Mutation check: a one-bit
+change in the SHA-1 DigestInfo prefix fails 7 of them. Frontend: `Seestar.test.tsx` (+2). Upgrade-safe: no setting,
+schema, layout or default change, and `auth` is an added response field.
+
 ## 2026-11-18 (Builder, branch `claude/kind-goodall-z6mkal`)
 
 ### v0.508.0 — ⭐ Seestar-page upgrade, slice 1: the Seestar key file, uploaded through Settings

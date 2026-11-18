@@ -10,7 +10,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type SeestarDevice } from "../api/client";
+import { api, type SeestarAuth, type SeestarDevice } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
 
@@ -21,6 +21,20 @@ function Metric({ label, value }: { label: string; value: string }) {
       <Text fw={600}>{value}</Text>
     </div>
   );
+}
+
+/** One plain line about the Seestar key handshake (firmware 7.18+ answers
+ *  commands only after it), and whether it needs the owner to do anything. */
+export function authLine(auth: SeestarAuth | null | undefined):
+  { text: string; color: string; fix: boolean } | null {
+  switch (auth) {
+    case "verified": return { text: "Key accepted — the scope answers AstroStack", color: "teal", fix: false };
+    case "not_needed": return { text: "This firmware needs no key", color: "dimmed", fix: false };
+    case "key_needed": return { text: "This scope needs your Seestar key —", color: "orange", fix: true };
+    case "rejected": return { text: "The scope refused the key file —", color: "red", fix: true };
+    case "failed": return { text: "Couldn't check the key yet; trying again shortly", color: "dimmed", fix: false };
+    default: return null;
+  }
 }
 
 function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnabled: boolean }) {
@@ -56,6 +70,7 @@ function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnable
     onSuccess: () => notifications.show({ message: "Park sent", color: "teal" }), onError: onErr,
   });
 
+  const auth = authLine(dev.auth);
   const battery = t?.battery_pct ?? null;
   const batteryColor = battery == null ? "gray" : battery < 20 ? "red" : battery < 50 ? "yellow" : "teal";
   const storage = t?.free_storage_mb != null && t?.total_storage_mb
@@ -70,6 +85,19 @@ function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnable
           <div style={{ minWidth: 0 }}>
             <Text fw={700} lineClamp={1}>{dev.device_name || dev.model || dev.ip}</Text>
             <Text size="xs" c="dimmed">{dev.ip}{dev.firmware ? ` · fw ${dev.firmware}` : ""}</Text>
+            {auth ? (
+              <Text size="xs" c={auth.color}>
+                {auth.text}
+                {auth.fix ? (
+                  <>
+                    {" "}
+                    <Anchor component={Link} to={settingsLink("telescope")} size="xs">
+                      {dev.auth === "rejected" ? "upload the right one" : "add it in Settings"}
+                    </Anchor>
+                  </>
+                ) : null}
+              </Text>
+            ) : null}
           </div>
         </Group>
         <Group gap="xs" wrap="nowrap">

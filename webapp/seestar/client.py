@@ -19,12 +19,15 @@ or renamed fields. Nothing in this module should raise on a malformed reply.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import socket
 import threading
 import time
 from typing import Any
+
+from webapp.seestar.keyfile import KeyFileError, RsaPrivateKey, sign_challenge
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +43,16 @@ _UDP_INTRO_MSG = {"id": 1, "method": "scan_iscope", "params": ""}
 # param and may not reply at all if it's missing (seen as an RPC timeout), so
 # we always send it — matching the seestar_alp reference client.
 _DEFAULT_STATE_KEYS = ["device", "setting", "pi_status", "storage"]
+
+# The firmware 7.18+ handshake (``SeestarClient.handshake``) ends in one of
+# these. They are what ``/api/seestar/devices`` reports as a device's ``auth``.
+AUTH_VERIFIED = "verified"        # the scope accepted our signature
+AUTH_NOT_NEEDED = "not_needed"    # firmware older than 7.18: no handshake exists
+AUTH_KEY_NEEDED = "key_needed"    # the scope asks for one and no key is installed
+AUTH_REJECTED = "rejected"        # the scope refused the signature (wrong key)
+AUTH_FAILED = "failed"            # no usable answer (timeout, dropped link, odd reply)
+#: ``get_verify_str`` on firmware without the gate: "method not found".
+_CODE_METHOD_NOT_FOUND = 103
 
 
 class SeestarError(RuntimeError):
@@ -61,12 +74,13 @@ def _send_udp_intro(host: str) -> None:
 
 
 class _Pending:
-    __slots__ = ("event", "result", "error")
+    __slots__ = ("event", "result", "error", "reply")
 
     def __init__(self) -> None:
         self.event = threading.Event()
         self.result: Any = None
         self.error: str | None = None
+        self.reply: dict[str, Any] = {}  # the whole message, ``code`` and all
 
 
 class SeestarClient:
@@ -181,6 +195,7 @@ class SeestarClient:
         mid = msg.get("id")
         if mid is not None and mid in self._pending:
             p = self._pending.pop(mid)
+            p.reply = msg
             if isinstance(msg.get("error"), dict) or msg.get("error"):
                 p.error = str(msg.get("error"))
             else:
@@ -195,6 +210,22 @@ class SeestarClient:
             self.last_event = msg
 
     def _rpc(self, method: str, params: Any = None, timeout: float = _RPC_TIMEOUT) -> Any:
+        pending = self._call(method, params, timeout)
+        if pending.error is not None:
+            raise SeestarError(f"{self.host}: '{method}' error: {pending.error}")
+        return pending.result
+
+    def _rpc_reply(self, method: str, params: Any = None,
+                   timeout: float = _RPC_TIMEOUT) -> dict[str, Any]:
+        """The whole reply, error or not — for the handshake, which branches on
+        the firmware's ``code`` (103 = method not found). Raises only when no
+        reply arrives."""
+        pending = self._call(method, params, timeout)
+        if pending.error == "disconnected" and not pending.reply:
+            raise SeestarError(f"{self.host}: '{method}' error: disconnected")
+        return pending.reply
+
+    def _call(self, method: str, params: Any, timeout: float) -> _Pending:
         if not self._connected or self._sock is None:
             raise SeestarError(f"{self.host}: not connected")
         with self._lock:
@@ -214,9 +245,7 @@ class SeestarClient:
         if not pending.event.wait(timeout):
             self._pending.pop(mid, None)
             raise SeestarError(f"{self.host}: '{method}' timed out{self._timeout_hint()}")
-        if pending.error is not None:
-            raise SeestarError(f"{self.host}: '{method}' error: {pending.error}")
-        return pending.result
+        return pending
 
     def _timeout_hint(self) -> str:
         """Turn a bare timeout into a diagnosis based on what (if anything) the
@@ -269,3 +298,51 @@ class SeestarClient:
 
     def park(self) -> Any:
         return self._rpc("scope_park")
+
+    # ---- the firmware 7.18+ handshake (⭐ Seestar-page upgrade, slice 2) ----
+
+    def handshake(self, key: RsaPrivateKey | None,
+                  timeout: float = _RPC_TIMEOUT) -> str:
+        """Prove to the scope that we hold the interop key, so it answers our
+        commands: ``get_verify_str`` → sign the challenge (RSA PKCS#1 v1.5,
+        SHA-1) → ``verify_client {sign, data}`` → ``pi_is_verified``, exactly
+        the sequence Seestar Studio verified on the owner's S30. Code 103 on the
+        first call means firmware too old to have the gate. With no key the
+        first call is still made — it is how we learn whether one is needed —
+        and nothing more is sent. Never raises; returns one of the ``AUTH_*``
+        values. Nothing about the key or the signature is logged."""
+        try:
+            reply = self._rpc_reply("get_verify_str", "verify", timeout)
+        except SeestarError as exc:
+            log.info("seestar %s: handshake got no answer (%s)", self.host, exc)
+            return AUTH_FAILED
+        code = reply.get("code")
+        if code == _CODE_METHOD_NOT_FOUND:
+            return AUTH_NOT_NEEDED
+        result = reply.get("result")
+        challenge = result.get("str") if isinstance(result, dict) else None
+        if code not in (0, None) or reply.get("error") or not isinstance(challenge, str) \
+                or not challenge:
+            log.info("seestar %s: handshake challenge unusable (code=%s)", self.host, code)
+            return AUTH_FAILED
+        if key is None:
+            return AUTH_KEY_NEEDED
+        try:
+            signature = sign_challenge(key, challenge)
+        except KeyFileError:
+            return AUTH_REJECTED  # a key too short to sign with can never pass
+        try:
+            verdict = self._rpc_reply(
+                "verify_client", {"sign": signature, "data": challenge}, timeout)
+        except SeestarError as exc:
+            log.info("seestar %s: verify_client got no answer (%s)", self.host, exc)
+            return AUTH_FAILED
+        if verdict.get("code") not in (0, None) or verdict.get("error"):
+            log.info("seestar %s: the scope refused the key (code=%s)",
+                     self.host, verdict.get("code"))
+            return AUTH_REJECTED
+        # Studio sends it and does not wait on the answer; neither do we.
+        with contextlib.suppress(SeestarError):
+            self._rpc_reply("pi_is_verified", "verify", timeout)
+        log.info("seestar %s: key accepted — the scope will answer commands", self.host)
+        return AUTH_VERIFIED

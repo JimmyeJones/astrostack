@@ -32,6 +32,7 @@ from __future__ import annotations
 import base64
 import binascii
 import contextlib
+import hashlib
 import logging
 import os
 import re
@@ -271,3 +272,35 @@ def key_status(state_dir: Path) -> dict:
         return {"installed": False,
                 "problem": "A key file is stored but can't be read. Upload it again."}
     return {"installed": True, "problem": None}
+
+
+# ---------------------------------------------------------------------------
+# Signing the scope's challenge (⭐ Seestar-page upgrade, slice 2)
+# ---------------------------------------------------------------------------
+
+# DigestInfo prefix for SHA-1 (RFC 8017 §9.2, note 1): the DER of
+# ``SEQUENCE { SEQUENCE { OID sha1, NULL }, OCTET STRING (20 bytes) }`` up to
+# the hash itself.
+_SHA1_DIGEST_INFO = bytes.fromhex("3021300906052b0e03021a05000414")
+
+
+def sign_pkcs1v15_sha1(key: RsaPrivateKey, message: bytes) -> bytes:
+    """RSASSA-PKCS1-v1_5 with SHA-1 (RFC 8017 §8.2.1) — what the Seestar's
+    ``verify_client`` checks, and what Seestar Studio makes with
+    ``cryptography``'s ``PKCS1v15()`` + ``SHA1()``. Standard library only:
+    EMSA-PKCS1-v1_5 encode, then ``pow``. The signature is ``k`` bytes long,
+    ``k`` being the modulus length in bytes."""
+    k = (key.n.bit_length() + 7) // 8
+    t = _SHA1_DIGEST_INFO + hashlib.sha1(message).digest()
+    if k < len(t) + 11:
+        raise KeyFileError("This key is too short to sign with.")
+    em = b"\x00\x01" + b"\xff" * (k - len(t) - 3) + b"\x00" + t
+    s = pow(int.from_bytes(em, "big"), key.d, key.n)
+    return s.to_bytes(k, "big")
+
+
+def sign_challenge(key: RsaPrivateKey, challenge: str) -> str:
+    """The ``sign`` field of ``verify_client``: the challenge string's UTF-8
+    bytes, signed, base64-encoded — exactly as Seestar Studio sends it."""
+    return base64.b64encode(
+        sign_pkcs1v15_sha1(key, challenge.encode("utf-8"))).decode("ascii")
