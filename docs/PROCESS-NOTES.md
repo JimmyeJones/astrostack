@@ -1,5 +1,19 @@
 # Process notes & QA sweep records
 
+## 2026-11-18 (Builder, branch `claude/fervent-bohr-1901i7`) — nothing ungated to build; dogfood `--build --deep --restack --closing` CLEAN after the declutter.
+
+- **Baseline / backlog.** Suite 8874 passed / 7 skipped on `3141c8b7` (v0.507.12; xdist `-n 4`, BLAS capped, 17m02s). Every
+  Bugs entry is still gated on the owner or a diagnostic; the Features entries are declined or gated. No open PRs.
+- **Why this pass.** The previous run named `--deep --restack --closing` as the one combination not yet seen through the
+  v0.507.6–.12 notice boards. Exit 0, nothing overflowing, no console errors on any probed page.
+- **What it read.** Deep: 301 of 1,200 rows, 7,577 nodes, first paint 1.5 s; grows to 601 rows on scroll. Restack: 2 runs
+  (3 → 6 subs), reel and noise-delta (ratio 1.658, pixel-exact) available. Closing: *Shoot these before they're gone*,
+  *Plan my week* and its closing line name the same target and "tomorrow". Target page as one paragraph: next-best-move
+  (mosaic mode), readiness (doubling 1 min → 29 %) and the framing verdict agree; the health card folds behind "more
+  notes", 3 of 4 inline. Standing non-findings only (no ASTAP here; the single-field 3×3/18 h clause is the gated LEAD;
+  `[phone] /life-list [Still to shoot]` 14,513 px by design).
+- **Not yet run since the declutter:** `--combine` and `--empty`.
+
 ## 2026-11-18 (Builder, branch `claude/fervent-bohr-9l42qw`) — nothing ungated to build; dogfood `--build --mosaic --calibration --big --incoming-lag --editor` CLEAN on the notice boards.
 
 - **Baseline / backlog.** Suite 8874 passed / 7 skipped on `08b5d981` (v0.507.12; xdist `-n 4`, BLAS capped, 15m33s). Every
