@@ -99,6 +99,8 @@ seestack = ["data/*.json", "data/*.md"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# The owner's Seestar Studio, kept as protocol reference only — not app code.
+extend-exclude = ["docs/reference"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

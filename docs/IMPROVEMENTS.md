@@ -2430,6 +2430,37 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-ASKED (2026-11-18) — upgrade AstroStack's Seestar page using his own Seestar Studio as the
+  protocol reference.** He built **Seestar Studio**, a local control and monitor app verified against his
+  real S30 on firmware 9.75, and chose **"Upgrade AstroStack's Seestar page"** over bringing all of Studio in.
+  A scrubbed copy is in [`docs/reference/seestar-studio/`](reference/seestar-studio/ABOUT.md). Read its
+  `AGENTS_GUIDE.md` first; its test-status table says what was verified on the scope. Today `webapp/seestar/`
+  (`client.py`, from seestar_alp) predates the firmware 7.18+ RSA handshake, so against his scope it gets
+  little beyond broadcast events. **Slices, one per run:**
+  1. **The key, uploaded through the web** (his answer). Settings → the existing Seestar group gets "Add your
+     Seestar key file". `POST /api/seestar/key` (password-gated; never on the read-only allowlist) stores it
+     as `state/seestar/seestar.pem` with mode 0600, checks that it parses as a PKCS#8 RSA key, and supports
+     replace and remove. It is **never served back, logged, or included** in any API response, backup or
+     diagnostic; the API reports only "installed / not installed". No key means broadcast-only mode, said in
+     plain words.
+  2. **The handshake.** `get_verify_str` → sign (RSA PKCS#1 v1.5, SHA-1) → `verify_client {sign, data}` →
+     `pi_is_verified`, exactly as `seestar_studio.py` does it; code 103 means old firmware with no auth.
+     **No new dependency:** Studio uses `cryptography`, which AstroStack does not ship. Implement the signature
+     with the standard library (minimal DER parse of the PKCS#8 key, EMSA-PKCS1-v1_5 encoding, `pow`). Test it
+     against a key generated in the test, verified with an independent check. Adding `cryptography` instead
+     needs owner sign-off (AGENTS.md §10).
+  3. **Monitor first**, all read-only and verified in Studio: state, battery, temperature, frames stacked,
+     storage, and the live stacked image from the scope's HTTP server. The image and polling are bounded,
+     and stop when the page closes.
+  4. **Then only the controls Studio verified on the real scope** (see its table): GoTo + stack, stop and
+     resume, park, focus, plate solve. Nothing that is "simulator only" or "not exercised". **Never port the
+     skyline scan**, and read the skyline incident before touching motion: the firmware picks its own GoTo
+     route. Always pass the current `equ_mode` to `scope_park`, and never forward the `get_setting` hotspot
+     password to the browser.
+  **Rules:** the page follows "Recursive organization" (≤ 5 top-level groups; the clutter ratchet must not
+  rise for `Seestar.tsx`). Talking to the scope on his LAN is local; nothing reaches the internet. Use
+  Studio's `seestar_sim.py` as the fixture shape for tests. Size **L** overall, **M** per slice.
+
 *(Scout 2026-10-31: thirteen closed or shipped entries that had piled up in this section — the Settings
 redesign, "Bring my pictures up to date", the noise-delta picture, "Was the moon out?", the caption/lightbox pair,
 the card-signal slices, the removed-overlay halves, the Universe fly-to trio, the plateau nudge, data-driven
@@ -3142,6 +3173,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.507.13 **The owner's own Seestar Studio (verified on his S30, firmware 9.75) is kept as protocol reference in `docs/reference/seestar-studio/` — scrubbed of his key, probes and data, outside ruff and pytest — and the ⭐ Seestar-page upgrade it serves is filed** (owner ask 2026-11-18)
 - ✅ v0.507.12 **Moon & Sun declutter slice 7: each capture card's colour / re-stack / crop / sharpen offers go on one `AlertNoticeBoard` (`capture-offers`), the wrong-picture note first** (5 → 1); **the ⭐ declutter entry is closed** — no route holds more than 5 `<Alert>` sites, Settings' five sit in five different sections (no wall), and `tests/test_ui_clutter_budget.py` keeps the ratchet
 - ✅ v0.507.11 **Target declutter slice 6: its 13 `<Alert>` sites (nine on `target-notes`, four in the Auto-grade dialog) drawn through `alertNoticeNode`** (13 → 0)
 - ✅ v0.507.10 **Jobs declutter slice 5: its 10 `<Alert>` sites go through three notice boards (`AlertNoticeBoard`: `job-result-notes`, `scan-result-notes`, `jobs-page-notes`)** (10 → 0)
