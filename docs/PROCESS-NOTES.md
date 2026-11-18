@@ -5,7 +5,9 @@
 - **Baseline / inbox / PRs.** Suite 8874 passed / 7 skipped on `cc21a3e8` (xdist `-n 4`, BLAS capped, 16m59s). Inbox: the
   same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
   `Diagnostic result:` issue yet. One open PR, #1517 (another run's v0.507.13, head pushed within two hours — a live
-  claim, left alone). **Dogfood `--build --mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors, Auto trim
+  claim, left alone; it merged mid-run as v0.507.13 and filed the ⭐ OWNER-ASKED Seestar-page upgrade, now the front of
+  the queue in `docs/FOCUS.md`; its reference copy grepped for site coordinates, host paths, private keys and email —
+  none; the only LAN-address string is the stock example default). **Dogfood `--build --mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors, Auto trim
   7.9 %; standing non-findings only — no ASTAP here, `[phone] /life-list [Still to shoot]` 14,513 px by design).
 - **Sweep (1), the angle the 11-14 `r0r7nj` (1) left as "not yet run":** owner-scale Auto parity *with a taste profile and
   a deep trim*. Driver (scratch, not landed): a synthetic 2×2 mosaic with **staggered** panels (depth 20/35/45/60, ±120 px
