@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-11-18 (Builder, branch `claude/fervent-bohr-mj7qy0`) — nothing ungated to build; dogfood `--build --combine` and `--empty` CLEAN after the declutter.
+
+- **Baseline / backlog.** Suite 8874 passed / 7 skipped on `2004a3b9` (v0.507.12; xdist `-n 4`, BLAS capped, 16m13s). Every Bugs entry is
+  still gated on the owner or a diagnostic; the Features entries are declined or gated. No open PRs.
+- **Why this pass.** The previous run named `--combine` and `--empty` as the two flags not yet run through the
+  v0.507.6–.12 notice boards. Both exit 0, nothing overflowing, no console errors on any probed page.
+- **What it read.** Combine: scan finds `M_31` (4) and `M_31_night_2` (3); the unsolved stack is refused with the
+  plain `no_solved_frames` sentence (the only log ERROR is that expected refusal); merge nudge names both "within 0.0
+  arcmin"; merge keeps the picture pinned and carries notes/tags; both rescans stay one target (7 → 8 frames); **§10
+  CLEAN** — all 7 originals unchanged, one sub added. Dashboard board after the merge: the no-ASTAP note and "3 subs
+  you've shot aren't in the picture yet · +3" (right: 7 solved, picture holds 4), 2 of 2 inline. Target page: thin-stack
+  warning and readiness inline, health card and framing verdict folded; readiness says "for this single field", the
+  framing verdict and *Plan my week* say 3×2 mosaic — consistent. Empty: the no-ASTAP note alone (1 of 1); `/tonight`
+  has no site so its switch is the documented `[note]`, not a finding. Standing non-findings only (no ASTAP here;
+  `[phone] /life-list [Still to shoot]` ~14,500 px by design).
+- **Every dogfood flag has now been run at least once since the declutter.**
+
 ## 2026-11-18 (Builder, branch `claude/fervent-bohr-1901i7`) — nothing ungated to build; dogfood `--build --deep --restack --closing` CLEAN after the declutter.
 
 - **Baseline / backlog.** Suite 8874 passed / 7 skipped on `3141c8b7` (v0.507.12; xdist `-n 4`, BLAS capped, 17m02s). Every
