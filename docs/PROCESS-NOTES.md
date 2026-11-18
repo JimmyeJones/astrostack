@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-11-18 (Builder, branch `claude/fervent-bohr-9l42qw`) — nothing ungated to build; dogfood `--build --mosaic --calibration --big --incoming-lag --editor` CLEAN on the notice boards.
+
+- **Baseline / backlog.** Suite 8874 passed / 7 skipped on `08b5d981` (v0.507.12; xdist `-n 4`, BLAS capped, 15m33s). Every
+  Bugs entry is still gated on the owner or a diagnostic; the Features entries are declined or gated. No open PRs.
+- **Why this pass.** The same flags last ran on 2026-11-12, *before* v0.507.6–.12 moved the Stack form, Editor, Jobs, Target
+  and Dashboard notes onto notice boards — so the calibrated, decimated and lagging-`incoming/` states had not yet been seen
+  through them. Exit 0, nothing overflowing, no console errors on any probed page.
+- **What it read.** Scale pair: 1 of 16 moved, only `sky` (0.004 → 0.003), as on 2026-11-12. Auto trim 7.9 % (bar 15 %).
+  Calibrated single field: health says "calibrated (dark+flat)" and the calibration note withdraws; the full-size mosaic's
+  card still offers darks — right, the masters fit the small sensor only. Dashboard board: the no-ASTAP note (scratch
+  install) and the incoming-lag note inline, 2 of 2 speaking. Target pages fold the mosaic map and the health card behind
+  "more notes", 3 of 5 inline. Three editor drives (field, mosaic, full-size at 847 px) re-render all 21 ops; Undo/Redo
+  apply; the loupe follows the navigator and its noise-reduction caveat speaks; "What Auto-process did" stays inline;
+  taste chips 10 live / 2 at-limit, profile reset afterwards.
+- **Not yet run since the declutter:** `--deep --restack --closing` (and `--combine`, `--empty`) — the next pass's pick.
+
 ## 2026-11-17 (Builder, branch `claude/fervent-bohr-uh3xuc`) — nothing ungated to build; dogfood `--build --mosaic --dithered --editor` CLEAN after the seven declutter slices.
 
 - **Baseline / backlog.** Suite 8874 passed / 7 skipped on `550a2902` (v0.507.12; xdist `-n 4`, BLAS capped, 13m16s). Every
