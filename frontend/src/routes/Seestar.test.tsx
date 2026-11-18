@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SeestarView } from "./Seestar";
+import { SeestarView, authLine } from "./Seestar";
 import * as client from "../api/client";
 import type { SeestarDevices } from "../api/client";
 
@@ -88,5 +88,29 @@ describe("SeestarView", () => {
     await waitFor(() =>
       expect(screen.getByText("Couldn't load this page")).toBeInTheDocument());
     expect(screen.getByText("Retry")).toBeInTheDocument();
+  });
+  it("says in one line whether the scope accepted the Seestar key, and links the fix", async () => {
+    vi.spyOn(client.api, "getSeestarDevices").mockResolvedValue({
+      enabled: true, control_enabled: false,
+      devices: [{
+        id: "10.0.0.5", ip: "10.0.0.5", device_name: "Seestar S30", model: "Seestar S30",
+        firmware: "9.75", reachable: true, connected: true, last_seen_utc: null,
+        error: null, telemetry: null, auth: "key_needed",
+      }],
+    } as SeestarDevices);
+    renderSeestar();
+    await waitFor(() =>
+      expect(screen.getByText(/This scope needs your Seestar key/)).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "add it in Settings" }))
+      .toHaveAttribute("href", "/settings/telescope");
+  });
+
+  it("maps every handshake outcome to plain words, and says nothing before one", () => {
+    expect(authLine("verified")?.text).toMatch(/Key accepted/);
+    expect(authLine("not_needed")?.fix).toBe(false);
+    expect(authLine("rejected")?.fix).toBe(true);
+    expect(authLine("failed")?.text).toMatch(/trying again/);
+    expect(authLine(null)).toBeNull();
+    expect(authLine(undefined)).toBeNull();
   });
 });

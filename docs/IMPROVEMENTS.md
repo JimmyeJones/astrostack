@@ -2439,19 +2439,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   little beyond broadcast events. **Slices, one per run:**
   1. ✅ **v0.508.0 — shipped** (`webapp/seestar/keyfile.py`, `GET/POST/DELETE /api/seestar/key`,
      `SeestarKeyBox` on Settings → This device; record in `SHIPPED.md`). `keyfile.load_key` returns the `n, e, d`
-     slice 2 signs with. **Next run: slice 2.** Original text:
+     slice 2 signs with. Original text:
      **The key, uploaded through the web** (his answer). Settings → the existing Seestar group gets "Add your
      Seestar key file". `POST /api/seestar/key` (password-gated; never on the read-only allowlist) stores it
      as `state/seestar/seestar.pem` with mode 0600, checks that it parses as a PKCS#8 RSA key, and supports
      replace and remove. It is **never served back, logged, or included** in any API response, backup or
      diagnostic; the API reports only "installed / not installed". No key means broadcast-only mode, said in
      plain words.
-  2. **The handshake.** `get_verify_str` → sign (RSA PKCS#1 v1.5, SHA-1) → `verify_client {sign, data}` →
-     `pi_is_verified`, exactly as `seestar_studio.py` does it; code 103 means old firmware with no auth.
-     **No new dependency:** Studio uses `cryptography`, which AstroStack does not ship. Implement the signature
-     with the standard library (minimal DER parse of the PKCS#8 key, EMSA-PKCS1-v1_5 encoding, `pow`). Test it
-     against a key generated in the test, verified with an independent check. Adding `cryptography` instead
-     needs owner sign-off (AGENTS.md §10).
+  2. ✅ **v0.509.0 — shipped** (`SeestarClient.handshake`, `keyfile.sign_pkcs1v15_sha1`,
+     `SeestarManager._ensure_auth`; each device's `auth` in `/api/seestar/devices`; record in `SHIPPED.md`).
+     **Next run: slice 3.**
   3. **Monitor first**, all read-only and verified in Studio: state, battery, temperature, frames stacked,
      storage, and the live stacked image from the scope's HTTP server. The image and polling are bounded,
      and stop when the page closes.
@@ -3176,6 +3173,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.509.0 **⭐ Seestar-page upgrade slice 2: the firmware 7.18+ handshake (`SeestarClient.handshake`, signed by the standard-library `keyfile.sign_pkcs1v15_sha1`, byte-identical to OpenSSL); each device reports `auth`, and the Seestar page says in one line whether the scope accepted the key** — entry stays open for slices 3–4
 - ✅ v0.508.0 **⭐ Seestar-page upgrade slice 1: the Seestar key file uploads through Settings → This device (`SeestarKeyBox`, `POST/DELETE /api/seestar/key`), checked as an RSA key with the standard library (`webapp.seestar.keyfile`), stored 0600, never served back** — entry stays open for slices 2–4
 - ✅ v0.507.13 **The owner's own Seestar Studio (verified on his S30, firmware 9.75) is kept as protocol reference in `docs/reference/seestar-studio/` — scrubbed of his key, probes and data, outside ruff and pytest — and the ⭐ Seestar-page upgrade it serves is filed** (owner ask 2026-11-18)
 - ✅ v0.507.12 **Moon & Sun declutter slice 7: each capture card's colour / re-stack / crop / sharpen offers go on one `AlertNoticeBoard` (`capture-offers`), the wrong-picture note first** (5 → 1); **the ⭐ declutter entry is closed** — no route holds more than 5 `<Alert>` sites, Settings' five sit in five different sections (no wall), and `tests/test_ui_clutter_budget.py` keeps the ratchet

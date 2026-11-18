@@ -19,8 +19,14 @@ import time
 from typing import Any, Callable
 
 from webapp.config import Settings
-from webapp.seestar import discovery, telemetry
-from webapp.seestar.client import SeestarClient, SeestarError
+from webapp.seestar import discovery, keyfile, telemetry
+from webapp.seestar.client import (
+    AUTH_FAILED,
+    AUTH_KEY_NEEDED,
+    AUTH_REJECTED,
+    SeestarClient,
+    SeestarError,
+)
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +42,19 @@ _RECONNECT_CAP_S = 300.0  # ceiling on the per-scope reconnect backoff
 #: scopes can outlast any fixed number — so a thread still alive at the deadline
 #: is logged and left alone; both are daemons and do exit.
 _STOP_JOIN_TIMEOUT_S = 10.0
+#: How soon a handshake that got no usable answer is tried again on the same
+#: connection. Every other outcome stands until the link or the key changes.
+_AUTH_RETRY_S = 60.0
+
+
+#: Why a connected scope serves nothing, in plain words, when the handshake
+#: already says why (firmware 7.18+ answers commands only after it).
+_NO_TELEMETRY = {
+    AUTH_KEY_NEEDED: ("this Seestar's firmware answers only after AstroStack proves it holds "
+                      "the Seestar key — add the key file in Settings → This device"),
+    AUTH_REJECTED: ("this Seestar refused the key file in Settings — it isn't the key this "
+                    "scope's firmware expects; upload the right one in Settings → This device"),
+}
 
 
 def _reconnect_delay_s(fails: int, base: float, cap: float) -> float:
@@ -88,6 +107,13 @@ class SeestarManager:
         # poll cycle (see ``_reconnect_delay_s``).
         self._reconnect_fails: dict[str, int] = {}
         self._reconnect_at: dict[str, float] = {}
+        # Per-ip handshake record: (the client it ran on, outcome, the key's
+        # modulus or None, when). A new connection, a changed key or a stale
+        # failure makes it due again (``_auth_due``). One lock serialises the
+        # handshakes, so the scan and poll loops never sign two challenges on
+        # one socket at once.
+        self._auth: dict[str, tuple[SeestarClient, str, int | None, float]] = {}
+        self._handshake_lock = threading.Lock()
         self._stop = threading.Event()
         self._scan_now = threading.Event()
         self._scan_thread: threading.Thread | None = None
@@ -145,11 +171,13 @@ class SeestarManager:
         with self._lock:
             client = self._clients.pop(ip, None)
             self._last_ok.pop(ip, None)
+            self._auth.pop(ip, None)
             self._clear_backoff_locked(ip)
             dev = self._devices.get(ip)
             if dev is not None:
                 dev["connected"] = False
                 dev["reconnecting"] = False
+                dev["auth"] = None
         if client is not None:
             client.disconnect()
 
@@ -179,11 +207,14 @@ class SeestarManager:
     def _ensure_client(self, ip: str) -> SeestarClient:
         with self._lock:
             client = self._clients.get(ip)
-            if client is not None and client.is_connected:
-                return client
-            client = SeestarClient(ip)
-            self._clients[ip] = client
-            self._last_ok.pop(ip, None)  # re-log telemetry state after a fresh connect
+            live = client is not None and client.is_connected
+            if not live:
+                client = SeestarClient(ip)
+                self._clients[ip] = client
+                self._last_ok.pop(ip, None)  # re-log telemetry state after a fresh connect
+        if live:
+            self._ensure_auth(ip, client)
+            return client
         client.connect()  # may raise SeestarError → surfaced to caller
         with self._lock:
             dev = self._devices.setdefault(ip, _new_device(ip))
@@ -191,7 +222,44 @@ class SeestarManager:
             dev["reconnecting"] = False
             dev["error"] = None
             self._clear_backoff_locked(ip)
+        self._ensure_auth(ip, client)
         return client
+
+    # ---- the firmware 7.18+ handshake (⭐ Seestar-page upgrade, slice 2) ----
+
+    def _current_key(self) -> keyfile.RsaPrivateKey | None:
+        state_dir = getattr(self._get_settings(), "state_dir", None)
+        return keyfile.load_key(state_dir) if state_dir is not None else None
+
+    def _auth_due(self, ip: str, client: SeestarClient,
+                  key: keyfile.RsaPrivateKey | None) -> bool:
+        record = self._auth.get(ip)
+        if record is None or record[0] is not client:
+            return True  # never run on this connection
+        _, status, key_n, at = record
+        if key_n != (key.n if key is not None else None):
+            return True  # the key was added, replaced or removed since
+        return status == AUTH_FAILED and self._now() - at >= _AUTH_RETRY_S
+
+    def _auth_status(self, ip: str) -> str | None:
+        with self._lock:
+            record = self._auth.get(ip)
+        return record[1] if record is not None else None
+
+    def _ensure_auth(self, ip: str, client: SeestarClient) -> None:
+        """Run the handshake on ``client`` when it is due. Best-effort: the
+        outcome is recorded on the device (``auth``) and never raised — a scope
+        that refuses still serves its broadcast events."""
+        key = self._current_key()
+        with self._handshake_lock:
+            if not client.is_connected or not self._auth_due(ip, client, key):
+                return
+            status = client.handshake(key, timeout=_POLL_TIMEOUT)
+            with self._lock:
+                self._auth[ip] = (client, status, key.n if key is not None else None,
+                                  self._now())
+                if self._clients.get(ip) is client:
+                    self._devices.setdefault(ip, _new_device(ip))["auth"] = status
 
     def _poll_reconnect(self, ip: str, client: SeestarClient, base_s: float) -> bool:
         """Reconnect a dropped client with capped exponential backoff. Returns
@@ -265,6 +333,7 @@ class SeestarManager:
             for ip, client in items:
                 if not self._poll_reconnect(ip, client, base):
                     continue
+                self._ensure_auth(ip, client)
                 tel, errors = collect_telemetry(client)
                 if tel is not None:
                     self._store_telemetry(ip, tel, error="; ".join(errors) or None)
@@ -277,7 +346,9 @@ class SeestarManager:
                     # Connected but the device serves nothing. Expected when the
                     # scope's local API is unavailable; an environmental state,
                     # not an app error — so log it once, concisely, at INFO.
-                    detail = "device not serving telemetry (port 4700 returned no data)"
+                    detail = _NO_TELEMETRY.get(
+                        self._auth_status(ip),
+                        "device not serving telemetry (port 4700 returned no data)")
                     if self._last_ok.get(ip) is not False:
                         log.info("seestar %s: connected but %s", ip, detail)
                     self._last_ok[ip] = False
@@ -290,9 +361,11 @@ class SeestarManager:
             self._clients.clear()
             self._reconnect_fails.clear()
             self._reconnect_at.clear()
+            self._auth.clear()
             for dev in self._devices.values():
                 dev["connected"] = False
                 dev["reconnecting"] = False
+                dev["auth"] = None
         for client in clients:
             client.disconnect()
 
@@ -339,6 +412,9 @@ def _new_device(ip: str) -> dict[str, Any]:
         "id": ip, "ip": ip, "device_name": None, "model": None, "firmware": None,
         "reachable": False, "connected": False, "reconnecting": False,
         "last_seen_utc": None, "telemetry": None, "error": None,
+        # The firmware 7.18+ handshake's outcome — a client.AUTH_* value, or
+        # None while not connected / not yet tried.
+        "auth": None,
     }
 
 
