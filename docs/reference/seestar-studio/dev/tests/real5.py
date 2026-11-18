@@ -1,0 +1,17 @@
+from rl import *
+t0 = time.strftime('%H:%M:%S')
+print("--- stop view"); act("stop_view"); s = wait(lambda s: s["view"]["state"] in ("idle", "cancel") or s["view"]["stage"] is None, 40, "view stopped"); brief(s)
+print(json.dumps(rpc("get_view_state"))[:400])
+print("--- scenery mode"); act("start_view", {"mode": "scenery"})
+s = wait(lambda s: s["view"]["stage"] == "RTSP", 40, "RTSP stage"); brief(s)
+print(json.dumps(rpc("get_view_state"))[:600])
+try: urllib.request.urlopen(B + "/api/video_frame", timeout=8).read()
+except Exception as e: print("     first frame req:", e)
+s = wait(lambda s: s["video"]["live"] and s["video"]["source"] == "video", 45, "rtsp live"); print("     video", s["video"])
+try:
+    fr = urllib.request.urlopen(B + "/api/video_frame", timeout=8).read(); print("     frame bytes", len(fr)); open("rtsp.jpg", "wb").write(fr)
+except Exception as e: print("     frame:", e)
+print("     snapshot", post("/api/snapshot", {}))
+print("--- record"); act("record_start", {"raw": False}); time.sleep(8); print("     ops", st()["ops"]); act("record_stop"); time.sleep(4)
+print("--- stop view"); act("stop_view"); s = wait(lambda s: s["view"]["state"] == "idle" or s["view"]["stage"] is None, 40, "view stopped"); brief(s)
+log(40, t0)
