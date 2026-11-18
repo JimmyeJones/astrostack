@@ -1,5 +1,16 @@
 # Process notes & QA sweep records
 
+## 2026-11-18 (Builder, branch `claude/fervent-bohr-o5zfn5`) — nothing ungated to build; recipe `uid`-collision read CLEAN.
+
+- **Baseline / backlog.** Suite 8874 passed / 7 skipped on `070123bb` (xdist `-n 4`, BLAS capped, 21m42s). Bugs entries all
+  still gated; Features entries declined or gated; issues #878, #880, #903, #1015 unchanged since 2026-10-12; no open PRs.
+- **Read.** `apply_recipe` keys every op's fitted values and notes by `op.uid` (`EditContext._fit_key`), and
+  `validate_ops` does not de-duplicate uids — so two ops sharing one would replay the first's fit into the second.
+  Every path that builds ops was checked: the Editor's `uid()` / `toOpInstances` / `applyAutoResult` mint a uid when
+  absent, `mosaicTrim.ts` and `skyCast.ts` take `makeUid`, every `setOps` either maps an existing list or replaces it
+  whole (no append of a stored list), and the server's `presets` emit `(id, params)` pairs only. Reachable only by a
+  hand-built `PUT` body — not a bug; recorded so the next run does not re-walk it.
+
 ## 2026-11-18 (Builder, branch `claude/fervent-bohr-p8kzq5`) — nothing ungated to build; editor-op NaN/range probe on a mosaic canvas CLEAN.
 
 - **Baseline / backlog.** Suite 8874 passed / 7 skipped on `c255b852` (xdist `-n 4`, BLAS capped, 13m41s). Every Bugs entry
