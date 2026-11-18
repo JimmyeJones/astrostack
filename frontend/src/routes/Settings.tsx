@@ -27,6 +27,7 @@ import { MoreSettingsSection } from "../components/settings/MoreSettings";
 import { FramePickySection } from "../components/settings/FramePicky";
 import { HandsOffSection } from "../components/settings/HandsOff";
 import { NasSection } from "../components/settings/NasSection";
+import { SeestarKeyBox } from "../components/settings/SeestarKey";
 import { PicturesSection } from "../components/settings/PicturesMade";
 import {
   ObservingSiteSection, PLAN_SITE_QUERY_KEY,
@@ -1240,6 +1241,7 @@ export function SettingsView() {
                 checked={bool("seestar_control_enabled")} disabled={!bool("seestar_enabled")}
                 onChange={(e) => set("seestar_control_enabled", e.currentTarget.checked)} />
             </Group>
+            <SeestarKeyBox />
             <TextInput label={lbl("seestar_scan_subnet", "Scan subnet (CIDR)")}
               value={(form.seestar_scan_subnet as string) ?? ""} placeholder="auto-detect"
               onChange={(e) => set("seestar_scan_subnet", e.currentTarget.value)} />

@@ -1530,6 +1530,13 @@ export interface SeestarDevice {
   error: string | null;
 }
 
+/** `GET /api/seestar/key` — whether the interop key is installed. The key itself is never sent back. */
+export interface SeestarKeyStatus {
+  installed: boolean;
+  /** Plain words when a stored key can no longer be read, else null. */
+  problem: string | null;
+}
+
 export interface SeestarDevices {
   enabled: boolean;
   control_enabled: boolean;
@@ -4710,6 +4717,11 @@ export const api = {
 
   // seestar telescope
   getSeestarDevices: () => req<SeestarDevices>("/api/seestar/devices"),
+  getSeestarKey: () => req<SeestarKeyStatus>("/api/seestar/key"),
+  uploadSeestarKey: (pem: string) =>
+    req<SeestarKeyStatus>("/api/seestar/key", { method: "POST", body: JSON.stringify({ pem }) }),
+  removeSeestarKey: () =>
+    req<SeestarKeyStatus & { removed: boolean }>("/api/seestar/key", { method: "DELETE" }),
   seestarScan: () => req<{ scanning: boolean }>("/api/seestar/scan", { method: "POST" }),
   seestarConnect: (ip: string) =>
     req<{ connected: string }>(`/api/seestar/${ip}/connect`, { method: "POST" }),

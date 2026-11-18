@@ -1,5 +1,32 @@
 # Shipped — the record
 
+## 2026-11-18 (Builder, branch `claude/kind-goodall-z6mkal`)
+
+### v0.508.0 — ⭐ Seestar-page upgrade, slice 1: the Seestar key file, uploaded through Settings
+
+**What.** First slice of the owner-asked Seestar-page upgrade. The existing *Telescope (Seestar)* group on
+Settings → This device gets a **Seestar key file** box (`components/settings/SeestarKey.tsx`): a badge saying
+*installed* / *not installed*, one plain sentence (with no key: "AstroStack can only listen to what the telescope
+announces on its own"), **Add your Seestar key file** / **Replace the key file**, and **Remove the key**. Choosing a
+file saves it at once. The server side is `webapp/seestar/keyfile.py` plus `GET/POST/DELETE /api/seestar/key`:
+the upload (a JSON body, which is also the app's CSRF guard) must parse as an unencrypted RSA private key, either
+PKCS#8 (the owner's format) or PKCS#1. The parse is a minimal standard-library DER reader, and a sign-and-verify round
+trip proves the numbers work together. The key is stored as `state/seestar/seestar.pem`: the file is mode 0600, the
+folder 0700, and the write is atomic. A refused upload leaves the old key alone. The API answers only
+`{installed, problem}`. The key is **never served back or logged**, and the key object's `repr` shows only its bit size.
+It is not in the settings export (config fields only) or the deploy backup (`*.sqlite*` and `config.json` only), and
+the read-only token's allowlist does not include it. Plain-words refusals cover a public key or certificate, a
+passphrase-protected key, a non-RSA key, more than one key, a damaged or truncated file, and an oversized file.
+`keyfile.load_key` returns the `n, e, d` that slice 2's handshake signs with. No new dependency.
+
+**Tests.** `tests/webapp/test_seestar_key.py` (22): PKCS#8 and PKCS#1 keys generated in the test, every refusal,
+0600/0700 modes and atomic replacement, and an **independent check**: `openssl genpkey` writes a key and our modulus
+must match `openssl rsa -modulus`. Over the API, the key is checked to be absent from every response the app serves
+(`/key`, `/devices`, `/settings`, `/settings/export`, `/logs`, `/diagnostics`) and from the log. A test also checks
+that with a password set the endpoints need it, and that the read-only token gets 403 on all three methods.
+Frontend: `seestarKey.test.ts` checks the wording, and `Settings.test.tsx` uploads a chosen file and shows a
+refusal. Upgrade-safe: no setting, schema, layout or default change; endpoints are additive.
+
 ## 2026-11-17 (Builder, branch `claude/fervent-bohr-e4d7pd`)
 
 ### v0.507.12 — Moon & Sun, declutter slice 7: one notice board per capture card; the ⭐ declutter entry closes
