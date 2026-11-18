@@ -2,7 +2,7 @@
 
 ## 2026-11-18 (Builder, branch `claude/fervent-bohr-mj7qy0`) — nothing ungated to build; dogfood `--build --combine` and `--empty` CLEAN after the declutter.
 
-- **Baseline / backlog.** Suite SUITE_RESULT on `2004a3b9` (v0.507.12; xdist `-n 4`, BLAS capped). Every Bugs entry is
+- **Baseline / backlog.** Suite 8874 passed / 7 skipped on `2004a3b9` (v0.507.12; xdist `-n 4`, BLAS capped, 16m13s). Every Bugs entry is
   still gated on the owner or a diagnostic; the Features entries are declined or gated. No open PRs.
 - **Why this pass.** The previous run named `--combine` and `--empty` as the two flags not yet run through the
   v0.507.6–.12 notice boards. Both exit 0, nothing overflowing, no console errors on any probed page.
