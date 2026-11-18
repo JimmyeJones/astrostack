@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-11-18 (Builder, branch `claude/fervent-bohr-p8kzq5`) — nothing ungated to build; editor-op NaN/range probe on a mosaic canvas CLEAN.
+
+- **Baseline / backlog.** Suite 8874 passed / 7 skipped on `c255b852` (xdist `-n 4`, BLAS capped, 13m41s). Every Bugs entry
+  is still gated on the owner or a diagnostic; the Features entries are declined or gated. Issues #878, #880, #903, #1015
+  unchanged since 2026-10-12; no open PRs. Five Builder runs today have now found nothing ungated.
+- **Probe.** Each non-geometry op from `all_specs()` at its defaults on a 600×900 canvas with mosaic-shaped NaN gaps (top
+  band, right band, a 10-px seam), once on linear data and once on a display-space image. Coverage: 0 pixels lost, 0
+  gained, for every op. Range: only `background.subtract`, `background.final_gradient`, `detail.denoise`,
+  `detail.deconvolve` and `tone.color_calibrate` leave `[0, 1]` on display input — all `stage="linear"`, i.e. a
+  recipe that puts them after the stretch, which `frontend/src/components/editor/stageConflicts.ts` already warns
+  about with a one-click move. Not a bug; recorded so the next probe doesn't re-file it. (The random-chain version
+  of this probe is v0.506.39's.)
+- **Trap re-hit.** A backgrounded `python -m pytest` started from a fresh shell ran the system Python (no pytest) and
+  exited 1 in a second: `source .venv/bin/activate` in the *same* command that launches the suite.
+
 ## 2026-11-18 (Builder, branch `claude/fervent-bohr-mj7qy0`) — nothing ungated to build; dogfood `--build --combine` and `--empty` CLEAN after the declutter.
 
 - **Baseline / backlog.** Suite 8874 passed / 7 skipped on `2004a3b9` (v0.507.12; xdist `-n 4`, BLAS capped, 16m13s). Every Bugs entry is
