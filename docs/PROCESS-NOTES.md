@@ -1,5 +1,40 @@
 # Process notes & QA sweep records
 
+## 2026-11-18 (Scout, branch `claude/sweet-euler-oq82pp`) — QA rotation sweep (1), new angle — the one-click Auto recipe with a taste profile and a deep (>10 %) mosaic trim, preview vs `_render_recipe_fullres` at the owner's proxy step: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Baseline / inbox / PRs.** Suite 8874 passed / 7 skipped on `cc21a3e8` (xdist `-n 4`, BLAS capped, 16m59s). Inbox: the
+  same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  `Diagnostic result:` issue yet. One open PR, #1517 (another run's v0.507.13, head pushed within two hours — a live
+  claim, left alone; it merged mid-run as v0.507.13 and filed the ⭐ OWNER-ASKED Seestar-page upgrade, now the front of
+  the queue in `docs/FOCUS.md`; its reference copy grepped for site coordinates, host paths, private keys and email —
+  none; the only LAN-address string is the stock example default). **Dogfood `--build --mosaic`:** CLEAN (exit 0, nothing overflowing, no console errors, Auto trim
+  7.9 %; standing non-findings only — no ASTAP here, `[phone] /life-list [Still to shoot]` 14,513 px by design).
+- **Sweep (1), the angle the 11-14 `r0r7nj` (1) left as "not yet run":** owner-scale Auto parity *with a taste profile and
+  a deep trim*. Driver (scratch, not landed): a synthetic 2×2 mosaic with **staggered** panels (depth 20/35/45/60, ±120 px
+  ragged edges, NaN outside coverage, panel-step sky, gradient, nebula, ~14 k Gaussian stars at FWHM 3.5 px) and its
+  `_framecov` / `_coverage` siblings; trim from the real `_trim_rect_for_run` (kept area **76 %**, a 24 % trim), measure
+  coverage from `_auto_measure_coverage`, grain ratio from `source_grain_ratio`, recipe from `presets.auto_recipe` with
+  `auto_prefs.profile_of_biases` for three tastes — neutral; brightness/saturation/sharpen/highlights +3 with denoise −3;
+  brightness −3, denoise +3, green −3, highlights +2. Preview through `apply_recipe(for_preview=True)` with the preview's
+  strided coverage maps; export through `_render_recipe_fullres`.
+  - **4800×7200, step 5:** every taste — output shape exactly ×5.001 (1233×852 vs 6166×4261), no NaN left in either,
+    no op error, per-channel medians within **0.003**, luminance p99 within **0.011** (neutral 0.818 vs 0.828; dark
+    taste 0.661 vs 0.671; bright taste 0.810 vs 0.815). Export ~100 s.
+  - **The one larger gap, not filed:** the bright taste adds `detail.sharpen` 0.3 and the preview clips 0.11 % of pixels
+    (p99.9 0.986) where the export clips none (0.925) — the strided proxy samples star peaks (recorded 2026-11-14) and
+    `sharpen_understates_on_proxy` already captions sharpen on a decimated preview. The preview errs harsher, the safe way.
+  - **Where the residual p99 gap comes from** (step-2 prefix bisection, 2400×1600): dropping `detail.denoise` takes it
+    from 0.018 to 0.002; wavelet denoise *alone* is in parity (p99 0.5746 vs 0.5759 at strength 0.6, as
+    `denoisePreview.ts` claims). The gap is `background.final_gradient` leaving the proxy's sky 0.0003 higher and its MAD
+    5 % larger than the full fit, which the denoise widens to 11 % and the STF stretch turns into ~3/255 at p99 —
+    under the earlier composed-Auto sweeps' accepted band; medians unaffected.
+  - **Read, not filed:** the "less smoothing" bias did not move the denoise (0.6 both ways) because the measured strength
+    sits over `_AUTO_DENOISE_MAX` — the documented "this picture is at its limit" case (v0.492.53).
+- **Not yet run in a sweep (1):** the saved-recipe branch of the archive's North-up turn
+  (`render_run_recipe_fullres_png`, still read only); the same parity on real stacker output (correlated grain,
+  `grain_ratio` < 1) rather than white synthetic noise.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-18 (Builder, branch `claude/fervent-bohr-o5zfn5`) — nothing ungated to build; recipe `uid`-collision read CLEAN.
 
 - **Baseline / backlog.** Suite 8874 passed / 7 skipped on `070123bb` (xdist `-n 4`, BLAS capped, 21m42s). Bugs entries all
