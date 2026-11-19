@@ -82,6 +82,35 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 Scout 2026-11-19 (sweep 2), REPRODUCED — on a mosaic, the streak guard's rescue of a stationary object
+  leaves 17–32 % of the object panel's subs rejected when the night crosses the meridian; the same field shot
+  single is rescued in full.** *(Pillar: autonomy + image quality, PRIORITY 2/4. Severity medium: good subs of the
+  panel that holds the object are silently dropped as "satellite trail", so that panel stacks thinner, on by
+  default. Confidence: high on the mechanism, medium on how often it happens — it needs alt-az tracking and the
+  detector flagging the object, as the module itself expects for edge-on galaxies and long nebulae. Size **S–M**.)*
+  `qc/runner.reconcile_streak_rejections` has two rescues. The **fraction** tier (`STREAK_MASS_REJECT_FRACTION`
+  0.5) uses a **whole-target** share. A mosaic object sits in one panel of four (25 %) or nine (11 %), so that tier
+  can never fire, and only the **position** rescue (`stationary_streak_frames`) is left. The position rescue
+  clusters the flagged component's frame position (`streak_cx/cy`) within `STATIONARY_CLUSTER_RADIUS` 0.10, and a
+  cluster must span `STATIONARY_MIN_SPAN_S` 1 h. On an alt-az mount the field turns about the frame centre. A
+  single field's object sits at the centre and does not move. **A mosaic panel's object is off-centre by
+  construction**, so it moves along an arc. Near transit that arc is fast (78° in 3 h at dec +20, lat 40), each
+  0.10 piece of it spans less than an hour, and those frames stay `auto:streak`. **Measured** through the real
+  `reconcile_streak_rejections` on a `Project` (S30 portrait frame 1080×1920, a 20 s cadence, panels interleaved
+  as the Seestar's mosaic mode shoots them, object offset (0.15, 0.075) or (0.3, 0.15) frame from its panel's
+  centre, HA −1.5 h…+1.5 h, scratch probe not landed). Single field: 540/540 rescued in all four cases (the
+  fraction tier). 2×2: left rejected **37/135 (27 %)** at dec +20 and **42/135 (31 %)** at dec −5 with the larger
+  offset. 3×3: **17/60 (28 %)** and **19/60 (32 %)**. Away from transit (HA +1…+4 h, ≤ 31° of turn) nothing is
+  lost. **Fix options:** (a) run the fraction tier **per panel**, like `qc/grading._pointing_groups` does for the
+  flux metrics. Note that streak-rejected subs are never plate-solved (`solve/runner.build_solve_arglist` skips
+  rejected frames), so the groups must come from the header hint (`ra_hint_deg`/`dec_hint_deg`). First check that
+  this hint is the *panel's* pointing and not the mosaic centre (`fits_loader._target_ra_deg` reads `OBJCTRA`
+  first). If it is the mosaic centre, use (b). (b) Make the
+  cluster rotation-aware, for example by matching on distance from the frame centre in pixels, and re-check the
+  chance score (`_chance_cluster_p`) for an annulus instead of a disc. (a) is the smaller change and mirrors
+  grading. The regression test is the probe's 2×2 dec −5 case end to end. A single field stays byte-identical.
+  Un-reject only, never a `user_override` — the contract does not change.
+
 - **⭐ 🔴 OWNER-REPORTED, MEASURED ON HIS LIBRARY (2026-11-01) — "colourful mosaic" blotches across the sky of a
   single-field stack are a fixed colour pattern on the Seestar's sensor that the stacker never removes.**
   *(Pillar: image quality, PRIORITY 4, with an editor face. Severity high: he sees it on about 25 % of his

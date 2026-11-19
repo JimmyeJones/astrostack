@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-11-19 (Scout, branch `claude/sweet-euler-iqbzjc`) — QA rotation sweep (2), new angle — the streak guard's stationary-object rescue on a mosaic under alt-az field rotation: one bug, filed reproduced (🟡). Inbox unchanged. Dogfood `--build --mosaic` CLEAN.
+
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+  No `Diagnostic result:` issue yet. No open PRs. **Dogfood `--build --mosaic`:** exit 0, nothing overflowing, no
+  console errors, Auto's mosaic trim 7.9 %.
+- **Sweep (2), the angle.** Not run in any earlier (2): `qc/runner.reconcile_streak_rejections`, whose fraction tier
+  (`STREAK_MASS_REJECT_FRACTION`) uses a whole-target share. On a mosaic the object is in one panel's subs only, so
+  that tier is out of reach and only `stationary_streak_frames` is left. Its existing mosaic tests hold each panel's
+  object at a fixed frame position. This probe turned the field the way an alt-az mount does (parallactic angle,
+  lat 40°, dec +44/+20/−5, HA windows across and away from transit) on the S30 portrait frame. Single field
+  centred / off-centre, 2×2 and 3×3 with the object at or off a panel's centre. Then the worst cases went end to
+  end through `reconcile_streak_rejections` on a real `Project`.
+- **Finding.** A single field with the object on every sub is always rescued in full (the fraction tier). A mosaic
+  panel's off-centre object leaves 17–32 % of that panel's subs `auto:streak` on a transit-crossing session. A
+  centred object, or a session away from transit (≤ 31° of turn), loses nothing. Filed 🟡 S–M with two fix options.
+  Note for the fix: streak-rejected subs are never plate-solved, so per-panel groups need the header hint.
+- **Read and holds (CLEAN):** the pre-position upgrade path (`build_qc_arglist` re-offers `auto:streak` frames that
+  have no position, so legacy rows get one); `sky_quality.night_sky_rates` pools panels per night, but the
+  engine's own stance (`grading._MetricSpec.pointing_scale`) is that sky level over a mosaic's few degrees belongs
+  to the night. It was not driven, so it is not filed.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-11-19 (Builder, branch `claude/kind-goodall-5b58js`) — nothing ungated to build; editor geometry ops on a NaN-gapped canvas CLEAN.
 
 - Backlog: every open Bugs entry is gated; the inbox holds the same four owner-gated issues (#878, #880, #903, #1015); no open PRs.
