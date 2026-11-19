@@ -291,6 +291,11 @@ class _FakeClient:
             raise SeestarError("equ timed out")
         return {"ra": 1.0, "dec": 2.0}
 
+    def get_disk_volume(self, timeout: float = 0):
+        if "disk" in self.fail:
+            raise SeestarError("method not found")
+        return {"totalMB": 51854, "freeMB": 35690}
+
 
 def test_collect_telemetry_all_ok():
     tel, errors = collect_telemetry(_FakeClient(set()))

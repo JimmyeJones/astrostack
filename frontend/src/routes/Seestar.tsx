@@ -1,5 +1,5 @@
 import {
-  Alert, Anchor, Badge, Button, Card, Center, Group, Loader, NumberInput, Paper,
+  Alert, Anchor, Badge, Button, Card, Center, Group, Image, Loader, NumberInput, Paper,
   Progress, RingProgress, SimpleGrid, Stack, Text, TextInput, Title,
 } from "@mantine/core";
 import {
@@ -10,7 +10,9 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type SeestarAuth, type SeestarDevice } from "../api/client";
+import {
+  api, type SeestarAuth, type SeestarDevice, type SeestarLatestImage,
+} from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
 
@@ -35,6 +37,37 @@ export function authLine(auth: SeestarAuth | null | undefined):
     case "failed": return { text: "Couldn't check the key yet; trying again shortly", color: "dimmed", fix: false };
     default: return null;
   }
+}
+
+/** "2 h 05 min" / "12 min" / "40 s" — total integration, in plain words. */
+export function integrationText(seconds: number | null | undefined): string | null {
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return null;
+  if (seconds < 60) return `${Math.round(seconds)} s`;
+  const min = Math.floor(seconds / 60);
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} min`;
+}
+
+/** The newest picture the scope holds — its own live stack while it stacks —
+ *  fetched from the scope only when it changes. Hides itself when the scope
+ *  can't serve it (204, timeout) rather than showing a broken image. */
+function ScopePicture({ ip, img }: { ip: string; img: SeestarLatestImage }) {
+  const [failedFor, setFailedFor] = useState<string | null>(null);
+  if (failedFor === img.thumb) return null;
+  const label = [img.name, img.count != null ? `${img.count} frames` : null]
+    .filter(Boolean).join(" · ");
+  return (
+    <div style={{ marginTop: 8 }}>
+      <Anchor href={api.seestarImageUrl(ip, "full", img.full)} target="_blank" rel="noreferrer">
+        <Image src={api.seestarImageUrl(ip, "thumb", img.thumb)} alt={`Newest picture on the scope: ${label}`}
+          radius="sm" mah={240} fit="contain" bg="#000" onError={() => setFailedFor(img.thumb)} />
+      </Anchor>
+      <Text size="xs" c="dimmed" mt={2}>
+        {img.stacked ? "Newest stacked picture on the scope" : "Newest picture on the scope"}
+        {label ? ` — ${label}` : ""} · click for full size
+      </Text>
+    </div>
+  );
 }
 
 function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnabled: boolean }) {
@@ -141,16 +174,22 @@ function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnable
             </SimpleGrid>
           </Group>
 
-          {t.target_name || t.stacked_frames != null ? (
+          {t.target_name || t.stacked_frames != null || t.latest_image ? (
             <Paper withBorder mt="md" p="sm" radius="md">
               <Group justify="space-between">
                 <Text size="sm" fw={600}>{t.target_name || "—"}</Text>
-                <Badge variant="light" color="violet">{t.stage || "—"}</Badge>
+                <Badge variant="light" color="violet">{t.stage || (t.state === "idle" ? "idle" : "—")}</Badge>
               </Group>
               <Group gap="lg" mt={4}>
                 <Text size="sm">Stacked: <b>{t.stacked_frames ?? "—"}</b></Text>
                 {t.dropped_frames != null ? (
                   <Text size="sm" c="dimmed">dropped {t.dropped_frames}</Text>
+                ) : null}
+                {integrationText(t.integration_s) ? (
+                  <Text size="sm" c="dimmed">
+                    {integrationText(t.integration_s)} total
+                    {t.exposure_s ? ` (${t.exposure_s} s subs)` : ""}
+                  </Text>
                 ) : null}
                 {t.ra_hours != null && t.dec_deg != null ? (
                   <Text size="sm" c="dimmed">
@@ -158,7 +197,7 @@ function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnable
                   </Text>
                 ) : null}
               </Group>
-              {t.stacked_frames != null ? (
+              {t.stacked_frames != null && t.state !== "idle" ? (
                 // Live telemetry carries no target sub-count, so there's no honest
                 // denominator for a percentage. The old bar showed `frames % 100`,
                 // which sawtooths back to empty every 100 subs (99 → full, 100 →
@@ -166,6 +205,7 @@ function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnable
                 // count is already spelled out in the "Stacked: N" line above.
                 <Progress mt={6} value={100} striped animated color="violet" size="sm" />
               ) : null}
+              {t.latest_image ? <ScopePicture ip={dev.ip} img={t.latest_image} /> : null}
             </Paper>
           ) : null}
         </>

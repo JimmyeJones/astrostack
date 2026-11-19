@@ -41,8 +41,10 @@ _UDP_INTRO_PORT = 4720
 _UDP_INTRO_MSG = {"id": 1, "method": "scan_iscope", "params": ""}
 # Sub-states get_device_state should return. Real firmware expects a "keys"
 # param and may not reply at all if it's missing (seen as an RPC timeout), so
-# we always send it — matching the seestar_alp reference client.
-_DEFAULT_STATE_KEYS = ["device", "setting", "pi_status", "storage"]
+# we always send it — matching the seestar_alp reference client. Never
+# "setting": on real firmware it carries the scope's hotspot password (Seestar
+# Studio's notes), nothing here reads it, and the reply reaches the browser.
+_DEFAULT_STATE_KEYS = ["device", "pi_status", "storage"]
 
 # The firmware 7.18+ handshake (``SeestarClient.handshake``) ends in one of
 # these. They are what ``/api/seestar/devices`` reports as a device's ``auth``.
@@ -276,6 +278,21 @@ class SeestarClient:
 
     def get_equ_coord(self, timeout: float = _RPC_TIMEOUT) -> dict:
         res = self._rpc("scope_get_equ_coord", timeout=timeout)
+        return res if isinstance(res, dict) else {}
+
+    def get_disk_volume(self, timeout: float = _RPC_TIMEOUT) -> dict:
+        """``{totalMB, freeMB}`` — where Seestar Studio reads storage on the
+        owner's S30 (firmware 9.75), whose ``get_device_state`` storage block
+        holds no volume list."""
+        res = self._rpc("get_disk_volume", timeout=timeout)
+        return res if isinstance(res, dict) else {}
+
+    def get_albums(self, timeout: float = _RPC_TIMEOUT) -> dict:
+        """The scope's own picture list: ``{path, list: [{group_name, files:
+        [{name, thn, count}]}]}``. ``thn`` is a thumbnail path on the scope's
+        HTTP server (port 80); the full picture is the same path without
+        ``_thn`` (verified in Seestar Studio)."""
+        res = self._rpc("get_albums", timeout=timeout)
         return res if isinstance(res, dict) else {}
 
     # ---- control (only used when the caller has gated it on) --------------
