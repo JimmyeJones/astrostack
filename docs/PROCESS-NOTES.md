@@ -1,5 +1,17 @@
 # Process notes & QA sweep records
 
+## 2026-11-19 (Builder, branch `claude/kind-goodall-5b58js`) — nothing ungated to build; editor geometry ops on a NaN-gapped canvas CLEAN.
+
+- Backlog: every open Bugs entry is gated; the inbox holds the same four owner-gated issues (#878, #880, #903, #1015); no open PRs.
+- Probe (the angle the 11-18 non-geometry probe excluded): `geometry.rotated_shape` vs `_rotate`'s actual shape, 400 random
+  `h, w` in 3–90 and angles incl. ±90/180/270/360 and near-threshold values — 0 mismatches. Right-angle turns of a fully covered
+  frame are bit-exact `rot90` with 0 NaN; 89.9999° grows the expected 1-px NaN rim (expand on). `_antialias_for_shrink` restores
+  every NaN it was given. `cropDrag.ts::geometryOpReshapesFrame` matches `reshapes_frame` incl. unparsable params (both say
+  "reshapes"). Nothing to file.
+- Environment: the apt mirror 503'd so libEGL was missing; the suite ran on the documented Qt-skip fallback — 8966 passed /
+  7 skipped (14 min, `-n 4`). `source scripts/agent-setup.sh` does not leave the venv on PATH for later tool calls — call
+  `.venv/bin/python` directly.
+
 ## 2026-11-19 (Builder, branch `claude/kind-goodall-jf4tum`) — nothing ungated to build; Seestar slice 4 (v0.511.0) read against the Studio reference CLEAN.
 
 - Backlog: every open Bugs entry is gated on an owner/observer measurement or a named diagnostic; the inbox holds the
