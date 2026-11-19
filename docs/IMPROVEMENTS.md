@@ -2448,10 +2448,9 @@ problems. Dogfood it every big-picture run and fix root causes.
      plain words.
   2. ✅ **v0.509.0 — shipped** (`SeestarClient.handshake`, `keyfile.sign_pkcs1v15_sha1`,
      `SeestarManager._ensure_auth`; each device's `auth` in `/api/seestar/devices`; record in `SHIPPED.md`).
-     **Next run: slice 3.**
-  3. **Monitor first**, all read-only and verified in Studio: state, battery, temperature, frames stacked,
-     storage, and the live stacked image from the scope's HTTP server. The image and polling are bounded,
-     and stop when the page closes.
+  3. ✅ **v0.510.0 — shipped** (`telemetry.latest_image`/`scrub`, `SeestarClient.get_albums`/`get_disk_volume`,
+     `SeestarManager.latest_image`, `GET /api/seestar/{ip}/image`, `ScopePicture`; record in `SHIPPED.md`).
+     **Next run: slice 4.**
   4. **Then only the controls Studio verified on the real scope** (see its table): GoTo + stack, stop and
      resume, park, focus, plate solve. Nothing that is "simulator only" or "not exercised". **Never port the
      skyline scan**, and read the skyline incident before touching motion: the firmware picks its own GoTo
@@ -3173,6 +3172,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.510.0 **⭐ Seestar-page upgrade slice 3: the read-only monitor — the scope's newest (live-stacked) picture relayed from its HTTP server (`GET /api/seestar/{ip}/image`, bounded, cached), storage from `get_disk_volume`, an idle/stopped view reads "idle", total integration; and the `setting` block (hotspot password) is no longer requested, with `telemetry.scrub` keeping private keys out of `raw`** — entry stays open for slice 4
 - ✅ v0.509.0 **⭐ Seestar-page upgrade slice 2: the firmware 7.18+ handshake (`SeestarClient.handshake`, signed by the standard-library `keyfile.sign_pkcs1v15_sha1`, byte-identical to OpenSSL); each device reports `auth`, and the Seestar page says in one line whether the scope accepted the key** — entry stays open for slices 3–4
 - ✅ v0.508.0 **⭐ Seestar-page upgrade slice 1: the Seestar key file uploads through Settings → This device (`SeestarKeyBox`, `POST/DELETE /api/seestar/key`), checked as an RSA key with the standard library (`webapp.seestar.keyfile`), stored 0600, never served back** — entry stays open for slices 2–4
 - ✅ v0.507.13 **The owner's own Seestar Studio (verified on his S30, firmware 9.75) is kept as protocol reference in `docs/reference/seestar-studio/` — scrubbed of his key, probes and data, outside ruff and pytest — and the ⭐ Seestar-page upgrade it serves is filed** (owner ask 2026-11-18)

@@ -13,9 +13,11 @@ effect without a restart. When disabled it tears down all connections and idles.
 
 from __future__ import annotations
 
+import http.client
 import logging
 import threading
 import time
+import urllib.parse
 from typing import Any, Callable
 
 from webapp.config import Settings
@@ -45,6 +47,15 @@ _STOP_JOIN_TIMEOUT_S = 10.0
 #: How soon a handshake that got no usable answer is tried again on the same
 #: connection. Every other outcome stands until the link or the key changes.
 _AUTH_RETRY_S = 60.0
+#: The scope's own picture list (``get_albums``) changes at most once a stacked
+#: frame, so it is asked for no more often than this — Seestar Studio's pace.
+_ALBUMS_EVERY_S = 10.0
+#: The scope's HTTP file server, which serves its stacked pictures.
+SCOPE_HTTP_PORT = 80
+_IMAGE_TIMEOUT_S = 8.0
+#: Ceilings on one picture fetched from the scope. A Seestar thumbnail is tens
+#: of KB and a full stacked JPEG a few MB; anything bigger is not one.
+_IMAGE_MAX_BYTES = {"thumb": 2 * 1024 * 1024, "full": 32 * 1024 * 1024}
 
 
 #: Why a connected scope serves nothing, in plain words, when the handshake
@@ -68,10 +79,14 @@ def _reconnect_delay_s(fails: int, base: float, cap: float) -> float:
     return min(max(delay, base), cap)
 
 
-def collect_telemetry(client: SeestarClient) -> tuple[dict[str, Any] | None, list[str]]:
+def collect_telemetry(client: SeestarClient, albums: dict | None = None,
+                      ) -> tuple[dict[str, Any] | None, list[str]]:
     """Best-effort telemetry: query each endpoint independently so an
     unsupported/slow method on one firmware doesn't blank the whole dashboard.
-    Returns ``(telemetry | None, errors)`` — None only if *every* call failed."""
+    Returns ``(telemetry | None, errors)`` — None only if *every* core call
+    failed. ``albums`` is the caller's latest ``get_albums`` reply (it is
+    polled on its own, slower clock). ``get_disk_volume`` is an extra: a
+    firmware without it costs the storage figure, never an error line."""
     errors: list[str] = []
 
     def safe(label: str, fn):  # noqa: ANN001
@@ -87,7 +102,39 @@ def collect_telemetry(client: SeestarClient) -> tuple[dict[str, Any] | None, lis
     eq = safe("equ_coord", lambda: client.get_equ_coord(timeout=_POLL_TIMEOUT))
     if ds is None and vs is None and eq is None:
         return None, errors
-    return telemetry.normalize(ds or {}, vs or {}, eq or {}), errors
+    try:
+        disk = client.get_disk_volume(timeout=_POLL_TIMEOUT)
+    except SeestarError as exc:
+        log.debug("seestar telemetry disk_volume failed: %s", exc)
+        disk = {}
+    return telemetry.normalize(ds or {}, vs or {}, eq or {}, disk, albums), errors
+
+
+def fetch_scope_file(host: str, path: str, max_bytes: int, port: int = SCOPE_HTTP_PORT,
+                     timeout: float = _IMAGE_TIMEOUT_S) -> bytes | None:
+    """GET one picture from the scope's HTTP file server. Read-only and
+    bounded: a timeout, a byte ceiling (a longer body is refused, not cut), and
+    only a JPEG or PNG is returned. Never raises; None on any failure."""
+    conn = http.client.HTTPConnection(host, port, timeout=timeout)
+    try:
+        conn.request("GET", "/" + urllib.parse.quote(path), headers={"Host": "seestar"})
+        resp = conn.getresponse()
+        if resp.status != 200:
+            return None
+        length = resp.getheader("Content-Length")
+        if length is not None and length.isdigit() and int(length) > max_bytes:
+            return None
+        body = resp.read(max_bytes + 1)
+    except (OSError, http.client.HTTPException) as exc:
+        log.debug("seestar %s: picture fetch failed: %s", host, exc)
+        return None
+    finally:
+        conn.close()
+    if len(body) > max_bytes:
+        return None
+    if not (body.startswith(b"\xff\xd8") or body.startswith(b"\x89PNG")):
+        return None
+    return body
 
 
 class SeestarManager:
@@ -114,6 +161,12 @@ class SeestarManager:
         # one socket at once.
         self._auth: dict[str, tuple[SeestarClient, str, int | None, float]] = {}
         self._handshake_lock = threading.Lock()
+        # Per-ip (monotonic time, last get_albums reply), on its own slower clock.
+        self._albums: dict[str, tuple[float, dict]] = {}
+        # Per-ip (scope path, bytes) of the last thumbnail served, so a page that
+        # re-asks for an unchanged picture costs the scope nothing. One per scope.
+        self._thumbs: dict[str, tuple[str, bytes]] = {}
+        self.http_port = SCOPE_HTTP_PORT
         self._stop = threading.Event()
         self._scan_now = threading.Event()
         self._scan_thread: threading.Thread | None = None
@@ -172,6 +225,8 @@ class SeestarManager:
             client = self._clients.pop(ip, None)
             self._last_ok.pop(ip, None)
             self._auth.pop(ip, None)
+            self._albums.pop(ip, None)
+            self._thumbs.pop(ip, None)
             self._clear_backoff_locked(ip)
             dev = self._devices.get(ip)
             if dev is not None:
@@ -180,6 +235,29 @@ class SeestarManager:
                 dev["auth"] = None
         if client is not None:
             client.disconnect()
+
+    def latest_image(self, ip: str, kind: str = "thumb") -> bytes | None:
+        """The newest picture the scope holds (``kind`` "thumb" or "full"),
+        fetched from its own HTTP server, or None. Only a scope this manager
+        already knows is ever contacted, and only at the path the scope itself
+        reported — never one from the caller."""
+        if kind not in _IMAGE_MAX_BYTES:
+            raise ValueError(f"unknown picture kind {kind!r}")
+        with self._lock:
+            dev = self._devices.get(ip)
+            tel = dev.get("telemetry") if dev is not None else None
+            info = tel.get("latest_image") if isinstance(tel, dict) else None
+            cached = self._thumbs.get(ip)
+        if not isinstance(info, dict) or not isinstance(info.get(kind), str):
+            return None
+        path = info[kind]
+        if kind == "thumb" and cached is not None and cached[0] == path:
+            return cached[1]
+        body = fetch_scope_file(ip, path, _IMAGE_MAX_BYTES[kind], port=self.http_port)
+        if body is not None and kind == "thumb":
+            with self._lock:
+                self._thumbs[ip] = (path, body)
+        return body
 
     def control(self, ip: str, action: str, params: dict[str, Any] | None = None) -> Any:
         """Run a control command on a device. Caller is responsible for having
@@ -261,6 +339,22 @@ class SeestarManager:
                 if self._clients.get(ip) is client:
                     self._devices.setdefault(ip, _new_device(ip))["auth"] = status
 
+    def _poll_albums(self, ip: str, client: SeestarClient) -> dict:
+        """The scope's picture list, asked for at most every
+        :data:`_ALBUMS_EVERY_S`; between asks (or when it fails) the last
+        answer stands, so the newest-picture line doesn't flicker."""
+        now = self._now()
+        last = self._albums.get(ip)
+        if last is not None and now - last[0] < _ALBUMS_EVERY_S:
+            return last[1]
+        try:
+            albums = client.get_albums(timeout=_POLL_TIMEOUT)
+        except SeestarError as exc:
+            log.debug("seestar %s: get_albums failed: %s", ip, exc)
+            albums = last[1] if last is not None else {}
+        self._albums[ip] = (now, albums)
+        return albums
+
     def _poll_reconnect(self, ip: str, client: SeestarClient, base_s: float) -> bool:
         """Reconnect a dropped client with capped exponential backoff. Returns
         True when the client is live and telemetry should be collected this cycle;
@@ -334,7 +428,7 @@ class SeestarManager:
                 if not self._poll_reconnect(ip, client, base):
                     continue
                 self._ensure_auth(ip, client)
-                tel, errors = collect_telemetry(client)
+                tel, errors = collect_telemetry(client, self._poll_albums(ip, client))
                 if tel is not None:
                     self._store_telemetry(ip, tel, error="; ".join(errors) or None)
                     if not self._last_ok.get(ip):
@@ -362,6 +456,8 @@ class SeestarManager:
             self._reconnect_fails.clear()
             self._reconnect_at.clear()
             self._auth.clear()
+            self._albums.clear()
+            self._thumbs.clear()
             for dev in self._devices.values():
                 dev["connected"] = False
                 dev["reconnecting"] = False

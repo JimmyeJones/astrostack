@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -120,6 +120,24 @@ def device_state(ip: str, request: Request) -> dict:
     if dev is None:
         raise HTTPException(status_code=404, detail=f"No device {ip}")
     return dev
+
+
+@router.get("/{ip}/image")
+def device_image(ip: str, request: Request,
+                 kind: str = Query("thumb", pattern="^(thumb|full)$")) -> Response:
+    """The newest picture the scope holds, relayed from its own HTTP server
+    (⭐ Seestar-page upgrade, slice 3). Read-only; only a scope the manager
+    already knows, at the path the scope reported. 204 when it holds none."""
+    _require_enabled(request)
+    mgr = deps.get_seestar_manager(request)
+    if not any(d["id"] == ip for d in mgr.snapshot()):
+        raise HTTPException(status_code=404, detail=f"No device {ip}")
+    body = mgr.latest_image(ip, kind)
+    if body is None:
+        return Response(status_code=204)
+    media = "image/png" if body.startswith(b"\x89PNG") else "image/jpeg"
+    return Response(content=body, media_type=media,
+                    headers={"Cache-Control": "private, max-age=60"})
 
 
 @router.get("/{ip}/events")

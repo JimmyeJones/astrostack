@@ -1514,6 +1514,21 @@ export interface SeestarTelemetry {
   dropped_frames: number | null;
   ra_hours: number | null;
   dec_deg: number | null;
+  /** Seconds per sub and total integration of the running stack (slice 3);
+   *  optional — an older backend omits them. */
+  exposure_s?: number | null;
+  integration_s?: number | null;
+  /** The newest picture the scope itself holds (slice 3), fetched through
+   *  `seestarImageUrl`. `thumb`/`full` are its paths on the scope. */
+  latest_image?: SeestarLatestImage | null;
+}
+
+export interface SeestarLatestImage {
+  name: string | null;
+  count: number | null;
+  stacked: boolean;
+  thumb: string;
+  full: string;
 }
 
 export interface SeestarDevice {
@@ -4737,6 +4752,11 @@ export const api = {
     req(`/api/seestar/${ip}/goto`, { method: "POST", body: JSON.stringify(body) }),
   seestarStop: (ip: string) => req(`/api/seestar/${ip}/stop`, { method: "POST" }),
   seestarPark: (ip: string) => req(`/api/seestar/${ip}/park`, { method: "POST" }),
+  /** The scope's newest picture, relayed from its own HTTP server. `version`
+   *  (the picture's path) changes the URL only when the picture does, so the
+   *  browser re-fetches it only then. */
+  seestarImageUrl: (ip: string, kind: "thumb" | "full", version: string) =>
+    `/api/seestar/${ip}/image?kind=${kind}&v=${encodeURIComponent(version)}`,
 
   // editor
   editorOps: () => req<EditOp[]>("/api/editor/ops/schema"),

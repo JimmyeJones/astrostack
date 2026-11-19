@@ -1,5 +1,50 @@
 # Shipped — the record
 
+## 2026-11-19 (Builder, branch `claude/kind-goodall-su6ltj`)
+
+### v0.510.0 — ⭐ Seestar-page upgrade, slice 3: the read-only monitor (the scope's own newest picture, verified field shapes, no private settings)
+
+**What.** The Seestar page now shows what Seestar Studio verified on the owner's S30 (firmware 9.75), read-only:
+- **The scope's newest picture** — its own live stack while it stacks. `SeestarClient.get_albums` is asked at most
+  every `_ALBUMS_EVERY_S` (10 s, Studio's pace; a failed ask keeps the last answer), and `telemetry.latest_image`
+  picks the newest file by its `YYYYMMDD-HHMMSS` stamp, preferring the stacked one (Studio's rule). Each device's
+  telemetry gains an additive `latest_image {name, count, stacked, thumb, full}`. `GET /api/seestar/{ip}/image?kind=
+  thumb|full` relays it from the scope's HTTP server (port 80) through `SeestarManager.latest_image` /
+  `fetch_scope_file`. It contacts only a scope the manager already knows, only at the path the scope reported (a
+  path with `..` is never picked). It has an 8 s timeout and a byte ceiling (2 MB thumb, 32 MB full; a longer body is
+  refused, not cut), and returns only a JPEG/PNG. One thumbnail per scope is cached, so re-asking for an unchanged
+  picture costs the scope nothing. It answers 204 when there is no picture, 404 for an unknown scope, and 409 while
+  the integration is off. On the page (`ScopePicture`) the thumbnail sits inside the existing target panel, its URL
+  changes only when the picture does, a click opens full size, and it hides itself if the scope can't serve it. It
+  is fetched only while the page is open: the devices query that carries it stops on unmount.
+- **Storage** comes from `get_disk_volume` (where the 9.75 firmware reports it; its `get_device_state` storage block
+  holds no volume list). An older firmware's `storage_volume` still wins. A firmware without the call costs the
+  figure, never an error line.
+- **An idle or stopped view reads "idle".** The view is `{}` after boot, and a stopped one lingers as `cancel` with
+  its old mode and stage. The target and its last count stay, and the animated "working" bar no longer runs under a
+  stopped view.
+- **Total integration**: `exposure_s` / `integration_s` from the stack's `Exposure.exp_ms`, shown as "2 h 05 min total
+  (10 s subs)" (`integrationText`).
+- **Privacy fix found on the way.** `get_device_state` was asked for its `setting` block, which on real firmware
+  carries the scope's **hotspot password** (Studio strips it). Nothing read it, and it went to the browser under
+  `telemetry.raw`. That key is no longer requested, and `telemetry.scrub` removes `setting`, `station` (home Wi-Fi
+  name and address), `location_lon_lat`, the serial and any password/ssid/token-like key at any depth from `raw`.
+
+No new card or alert: the clutter ratchet for `Seestar.tsx` is unchanged. API changes are additive only.
+
+**Tests.** `tests/webapp/test_seestar_monitor.py` (30), with shapes from Studio's `seestar_sim.py`. They cover:
+- nothing private in the telemetry JSON, and `scrub` at depth;
+- storage from `get_disk_volume`, with the older list still winning;
+- three idle shapes, the stopped view keeping its target, and integration;
+- the newest-picture pick, including a `..` path stamped 2099 that must lose, and odd replies;
+- the albums clock and the kept answer;
+- a real local HTTP stand-in for the scope: quoting, the ceiling, non-image, 404, a silent host;
+- the thumbnail cache (one hit for two asks), an unknown scope and an odd kind never contacting anything;
+- the endpoint end to end (409/422/404/200/204).
+
+Fail-before: with the old `telemetry.py`/`client.py`, the privacy, `setting`-key and idle tests fail (5 failed).
+`Seestar.test.tsx` adds the picture/full-size link, the idle badge with no bar, and `integrationText`.
+
 ## 2026-11-18 (Builder, branch `claude/kind-goodall-q448hg`)
 
 ### v0.509.0 — ⭐ Seestar-page upgrade, slice 2: the firmware 7.18+ handshake, signed with the standard library

@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SeestarView, authLine } from "./Seestar";
+import { SeestarView, authLine, integrationText } from "./Seestar";
 import * as client from "../api/client";
 import type { SeestarDevices } from "../api/client";
 
@@ -112,5 +112,45 @@ describe("SeestarView", () => {
     expect(authLine("failed")?.text).toMatch(/trying again/);
     expect(authLine(null)).toBeNull();
     expect(authLine(undefined)).toBeNull();
+  });
+
+  it("shows the scope's newest picture, links full size, and says idle after a stop", async () => {
+    vi.spyOn(client.api, "getSeestarDevices").mockResolvedValue({
+      enabled: true, control_enabled: false,
+      devices: [{
+        id: "10.0.0.5", ip: "10.0.0.5", device_name: "Seestar S30", model: "Seestar S30",
+        firmware: "9.75", reachable: true, connected: true, last_seen_utc: null,
+        error: null, auth: "verified",
+        telemetry: {
+          device_name: "Seestar S30", model: "Seestar S30", firmware: "9.75",
+          temp_c: 38, battery_pct: 71, charging: false, charger_status: "Discharging",
+          free_storage_mb: 35690, total_storage_mb: 51854, mode: null, state: "idle",
+          stage: null, target_name: "M 42", stacked_frames: 12, dropped_frames: 0,
+          ra_hours: 5.6, dec_deg: -5.4, exposure_s: 10, integration_s: 7500,
+          latest_image: {
+            name: "M 42", count: 12, stacked: true,
+            thumb: "MyWorks/M 42/Stacked_12_thn.jpg", full: "MyWorks/M 42/Stacked_12.jpg",
+          },
+        },
+      }],
+    } as SeestarDevices);
+    renderSeestar();
+    const img = await screen.findByAltText(/Newest picture on the scope: M 42 · 12 frames/);
+    expect(img).toHaveAttribute("src",
+      "/api/seestar/10.0.0.5/image?kind=thumb&v=MyWorks%2FM%2042%2FStacked_12_thn.jpg");
+    expect(img.closest("a")).toHaveAttribute("href",
+      "/api/seestar/10.0.0.5/image?kind=full&v=MyWorks%2FM%2042%2FStacked_12.jpg");
+    expect(screen.getByText(/2 h 05 min total \(10 s subs\)/)).toBeInTheDocument();
+    expect(screen.getAllByText("idle").length).toBeGreaterThan(0);
+    // A stopped view is not "working": no animated bar.
+    expect(document.querySelector(".mantine-Progress-root")).toBeNull();
+  });
+
+  it("puts total integration into plain words", () => {
+    expect(integrationText(40)).toBe("40 s");
+    expect(integrationText(720)).toBe("12 min");
+    expect(integrationText(7500)).toBe("2 h 05 min");
+    expect(integrationText(0)).toBeNull();
+    expect(integrationText(null)).toBeNull();
   });
 });
