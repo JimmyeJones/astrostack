@@ -2,6 +2,9 @@
 
 ## 2026-11-19 (Scout, branch `claude/sweet-euler-iqbzjc`) — QA rotation sweep (2), new angle — the streak guard's stationary-object rescue on a mosaic under alt-az field rotation: one bug, filed reproduced (🟡). Inbox unchanged. Dogfood `--build --mosaic` CLEAN.
 
+- **Baseline.** Suite 8975 passed / 7 skipped on `c5c85f1c` (xdist `-n 4`, BLAS capped, 18m22s), plus one failure this run
+  caused: this entry left `PROCESS-NOTES.md` 12 lines inside the 500-line headroom guard, so the 2026-09-11/12 entries
+  (542 lines) moved to `archive/PROCESS-NOTES-2026-09.md`. The guard passes after the move.
 - **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
   No `Diagnostic result:` issue yet. No open PRs. **Dogfood `--build --mosaic`:** exit 0, nothing overflowing, no
   console errors, Auto's mosaic trim 7.9 %.
