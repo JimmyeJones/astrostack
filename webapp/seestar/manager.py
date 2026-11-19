@@ -26,6 +26,7 @@ from webapp.seestar.client import (
     AUTH_FAILED,
     AUTH_KEY_NEEDED,
     AUTH_REJECTED,
+    FOCUSER_RANGE,
     SeestarClient,
     SeestarError,
 )
@@ -275,10 +276,45 @@ class SeestarManager:
             if action == "stop":
                 return client.stop_view()
             if action == "park":
-                return client.park()
-        except (KeyError, ValueError) as exc:
+                return client.park(self._current_equ_mode(client))
+            if action == "stop_stack":
+                return client.stop_stack()
+            if action == "resume":
+                return client.resume_stack()
+            if action == "autofocus":
+                return client.autofocus()
+            if action == "focus":
+                return self._nudge_focus(client, int(params["steps"]))
+            if action == "solve":
+                return client.plate_solve()
+        except (KeyError, ValueError, TypeError) as exc:
             raise SeestarError(f"bad parameters for '{action}': {exc}") from exc
         raise SeestarError(f"unknown action '{action}'")
+
+    @staticmethod
+    def _current_equ_mode(client: SeestarClient) -> bool | None:
+        """The mount mode the scope is in *now*, read fresh — ``scope_park``
+        sets the mode it is given, so parking with a stale or guessed value
+        would quietly switch an EQ-mode scope to alt-az (or back). ``None``
+        when the firmware does not say, and the bare park is sent instead."""
+        mode = client.get_mount(timeout=_POLL_TIMEOUT).get("equ_mode")
+        return mode if isinstance(mode, bool) else None
+
+    @staticmethod
+    def _nudge_focus(client: SeestarClient, steps: int) -> dict[str, int]:
+        """Move the focuser ``steps`` from where it is now. The firmware only
+        takes an absolute position, so the current one is read first, fresh;
+        an unknown position refuses rather than guessing."""
+        current = client.get_focuser_position(timeout=_POLL_TIMEOUT)
+        if current is None:
+            raise SeestarError("the scope didn't say where its focuser is — try again")
+        target = current + steps
+        lo, hi = FOCUSER_RANGE
+        if not lo <= target <= hi:
+            raise SeestarError(
+                f"the focuser is at {current}; moving {steps:+d} would leave its {lo}–{hi} range")
+        client.move_focuser(target)
+        return {"from": current, "to": target}
 
     # ---- internals --------------------------------------------------------
 

@@ -3,8 +3,8 @@ import {
   Progress, RingProgress, SimpleGrid, Stack, Text, TextInput, Title,
 } from "@mantine/core";
 import {
-  IconAlertTriangle, IconBattery2, IconPlayerStop, IconPlugConnected,
-  IconPlugConnectedX, IconRadar2, IconTelescope, IconTemperature,
+  IconAlertTriangle, IconBattery2, IconFocus2, IconPlayerPause, IconPlayerPlay, IconPlayerStop,
+  IconPlugConnected, IconPlugConnectedX, IconRadar2, IconTarget, IconTelescope, IconTemperature,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -70,6 +70,24 @@ function ScopePicture({ ip, img }: { ip: string; img: SeestarLatestImage }) {
   );
 }
 
+/** The controls Seestar Studio verified on the owner's S30 (⭐ Seestar-page
+ *  slice 4), each with what to tell the owner once the scope has it. */
+export type ScopeAction = "stop_stack" | "resume" | "autofocus" | "focus_in" | "focus_out" | "solve";
+
+function focusSent(res: unknown): string {
+  const r = (res as { result?: { from?: number; to?: number } } | null)?.result;
+  return r?.to != null ? `Focuser moved to ${r.to}` : "Focuser moved";
+}
+
+export const SCOPE_ACTIONS: Record<ScopeAction, { run: (ip: string) => Promise<unknown>; sent: (res: unknown) => string }> = {
+  stop_stack: { run: (ip) => api.seestarStopStack(ip), sent: () => "Stacking paused — the picture so far is kept" },
+  resume: { run: (ip) => api.seestarResume(ip), sent: () => "Stacking resumed" },
+  autofocus: { run: (ip) => api.seestarAutofocus(ip), sent: () => "Autofocus started — it takes about a minute" },
+  focus_in: { run: (ip) => api.seestarFocus(ip, -10), sent: focusSent },
+  focus_out: { run: (ip) => api.seestarFocus(ip, 10), sent: focusSent },
+  solve: { run: (ip) => api.seestarSolve(ip), sent: () => "Plate solve started — the scope is checking where it points" },
+};
+
 function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnabled: boolean }) {
   const qc = useQueryClient();
   const t = dev.telemetry;
@@ -102,6 +120,16 @@ function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnable
     mutationFn: () => api.seestarPark(dev.ip),
     onSuccess: () => notifications.show({ message: "Park sent", color: "teal" }), onError: onErr,
   });
+  // One mutation for the slice-4 controls; the notice says what the scope is now doing.
+  const action = useMutation({
+    mutationFn: (a: ScopeAction) => SCOPE_ACTIONS[a].run(dev.ip),
+    onSuccess: (res, a) => {
+      notifications.show({ message: SCOPE_ACTIONS[a].sent(res), color: "teal" });
+      invalidate();
+    },
+    onError: onErr,
+  });
+  const busy = (a: ScopeAction) => action.isPending && action.variables === a;
 
   const auth = authLine(dev.auth);
   const battery = t?.battery_pct ?? null;
@@ -230,13 +258,53 @@ function DeviceCard({ dev, controlEnabled }: { dev: SeestarDevice; controlEnable
               onClick={() => { if (window.confirm("Slew the scope and start imaging this target?")) goto.mutate(); }}>
               Goto &amp; image
             </Button>
+          </Group>
+          <Text size="xs" c="dimmed" mt="sm" mb={4}>While it images</Text>
+          <Group gap="xs">
+            <Button size="xs" variant="light" loading={busy("stop_stack")}
+              leftSection={<IconPlayerPause size={14} />}
+              title="Stop adding frames but keep the picture stacked so far"
+              onClick={() => action.mutate("stop_stack")}>
+              Pause stacking
+            </Button>
+            <Button size="xs" variant="light" loading={busy("resume")}
+              leftSection={<IconPlayerPlay size={14} />}
+              title="Carry on stacking the same target — the frame count is kept"
+              onClick={() => action.mutate("resume")}>
+              Resume stacking
+            </Button>
             <Button size="xs" variant="light" color="orange" loading={stop.isPending}
-              leftSection={<IconPlayerStop size={14} />} onClick={() => stop.mutate()}>
+              leftSection={<IconPlayerStop size={14} />} title="End the whole session"
+              onClick={() => stop.mutate()}>
               Stop
             </Button>
             <Button size="xs" variant="subtle" color="red" loading={park.isPending}
+              title="Fold the arm down; the scope stays in the mount mode it is in now"
               onClick={() => { if (window.confirm("Park the telescope?")) park.mutate(); }}>
               Park
+            </Button>
+          </Group>
+          <Text size="xs" c="dimmed" mt="sm" mb={4}>Focus and pointing</Text>
+          <Group gap="xs">
+            <Button size="xs" variant="light" loading={busy("autofocus")}
+              leftSection={<IconFocus2 size={14} />}
+              title="Let the scope find sharp focus on its own (takes about a minute)"
+              onClick={() => action.mutate("autofocus")}>
+              Autofocus
+            </Button>
+            <Button size="xs" variant="default" loading={busy("focus_in")}
+              title="Move the focuser 10 steps in" onClick={() => action.mutate("focus_in")}>
+              Focus −10
+            </Button>
+            <Button size="xs" variant="default" loading={busy("focus_out")}
+              title="Move the focuser 10 steps out" onClick={() => action.mutate("focus_out")}>
+              Focus +10
+            </Button>
+            <Button size="xs" variant="light" loading={busy("solve")}
+              leftSection={<IconTarget size={14} />}
+              title="Work out exactly where the scope is pointing from the stars in view"
+              onClick={() => action.mutate("solve")}>
+              Plate solve
             </Button>
           </Group>
         </Paper>

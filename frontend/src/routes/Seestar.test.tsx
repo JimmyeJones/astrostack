@@ -1,7 +1,8 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { notifications } from "@mantine/notifications";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SeestarView, authLine, integrationText } from "./Seestar";
 import * as client from "../api/client";
@@ -19,6 +20,57 @@ function renderSeestar() {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+const CONTROLLABLE = {
+  enabled: true, control_enabled: true,
+  devices: [{
+    id: "192.168.1.50", ip: "192.168.1.50", device_name: "Seestar S30",
+    model: "Seestar S30", firmware: "9.75", reachable: true, connected: true,
+    last_seen_utc: null, error: null, telemetry: null, auth: "verified",
+  }],
+} as unknown as SeestarDevices;
+
+describe("SeestarView — the controls Studio verified (slice 4)", () => {
+  it.each([
+    ["Pause stacking", "seestarStopStack", /Stacking paused/],
+    ["Resume stacking", "seestarResume", /Stacking resumed/],
+    ["Autofocus", "seestarAutofocus", /Autofocus started/],
+    ["Plate solve", "seestarSolve", /Plate solve started/],
+  ] as const)("%s sends its command and says so", async (label, method, notice) => {
+    vi.spyOn(client.api, "getSeestarDevices").mockResolvedValue(CONTROLLABLE);
+    const spy = vi.spyOn(client.api, method).mockResolvedValue({ ok: true });
+    const show = vi.spyOn(notifications, "show").mockReturnValue("");
+    renderSeestar();
+    fireEvent.click(await screen.findByRole("button", { name: label }));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("192.168.1.50"));
+    await waitFor(() => expect(show).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringMatching(notice), color: "teal" })));
+  });
+
+  it("nudges the focus 10 steps either way and reports where it went", async () => {
+    vi.spyOn(client.api, "getSeestarDevices").mockResolvedValue(CONTROLLABLE);
+    const spy = vi.spyOn(client.api, "seestarFocus")
+      .mockResolvedValue({ ok: true, result: { from: 1560, to: 1550 } });
+    const show = vi.spyOn(notifications, "show").mockReturnValue("");
+    renderSeestar();
+    fireEvent.click(await screen.findByRole("button", { name: "Focus −10" }));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("192.168.1.50", -10));
+    await waitFor(() => expect(show).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Focuser moved to 1550" })));
+    fireEvent.click(screen.getByRole("button", { name: "Focus +10" }));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("192.168.1.50", 10));
+  });
+
+  it("shows none of them while control is off", async () => {
+    vi.spyOn(client.api, "getSeestarDevices").mockResolvedValue(
+      { ...CONTROLLABLE, control_enabled: false } as SeestarDevices);
+    renderSeestar();
+    await screen.findByText("Seestar S30");
+    for (const label of ["Pause stacking", "Resume stacking", "Autofocus", "Plate solve", "Focus −10"]) {
+      expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
+    }
+  });
+});
 
 describe("SeestarView", () => {
   it("prompts to enable the integration when it is off", async () => {

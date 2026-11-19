@@ -57,6 +57,17 @@ AUTH_FAILED = "failed"            # no usable answer (timeout, dropped link, odd
 _CODE_METHOD_NOT_FOUND = 103
 
 
+#: The focuser's travel on the S30 (Seestar Studio refuses anything outside it).
+FOCUSER_RANGE = (1200, 2600)
+
+
+def _first_present(d: dict, *keys: str) -> Any:
+    for k in keys:
+        if d.get(k) is not None:
+            return d[k]
+    return None
+
+
 class SeestarError(RuntimeError):
     """A Seestar RPC call failed or the device is unreachable."""
 
@@ -313,8 +324,56 @@ class SeestarClient:
     def stop_view(self) -> Any:
         return self._rpc("iscope_stop_view")
 
-    def park(self) -> Any:
-        return self._rpc("scope_park")
+    def park(self, equ_mode: bool | None = None) -> Any:
+        """Park the arm. ``scope_park {equ_mode}`` also SETS the mount mode
+        (Seestar Studio, verified on the owner's S30), so a caller that knows
+        the current mode must pass it; ``None`` sends the bare call this client
+        always sent, for a firmware that does not report its mode."""
+        if equ_mode is None:
+            return self._rpc("scope_park")
+        return self._rpc("scope_park", {"equ_mode": bool(equ_mode)})
+
+    # ---- the controls Seestar Studio verified on the real scope (⭐ slice 4) --
+    # Shapes are Studio's ``build_action`` verbatim; each was exercised on the
+    # owner's S30 (firmware 9.75). Nothing "simulator only" belongs here.
+
+    def get_mount(self, timeout: float = _RPC_TIMEOUT) -> dict:
+        """The ``mount`` block of ``get_device_state`` (``equ_mode``,
+        ``close``, ``tracking``) — ``{}`` when the firmware has none."""
+        res = self._rpc("get_device_state", {"keys": ["mount"]}, timeout)
+        mount = res.get("mount") if isinstance(res, dict) else None
+        return mount if isinstance(mount, dict) else {}
+
+    def get_focuser_position(self, timeout: float = _RPC_TIMEOUT) -> int | None:
+        res = self._rpc("get_focuser_position", timeout=timeout)
+        if isinstance(res, dict):
+            res = _first_present(res, "step", "position")
+        if isinstance(res, bool) or not isinstance(res, (int, float)):
+            return None
+        return int(res)
+
+    def stop_stack(self) -> Any:
+        """Stop stacking but keep the view (and the frames stacked so far)."""
+        return self._rpc("iscope_stop_view", {"stage": "Stack"})
+
+    def resume_stack(self) -> Any:
+        """Carry on stacking the current target without starting the count over."""
+        return self._rpc("iscope_start_stack", {"restart": False})
+
+    def autofocus(self) -> Any:
+        return self._rpc("start_auto_focuse")  # sic — the firmware's spelling
+
+    def move_focuser(self, position: int) -> Any:
+        """Move the focuser to an ABSOLUTE position (the firmware takes no
+        relative step). Refuses a position outside :data:`FOCUSER_RANGE`."""
+        lo, hi = FOCUSER_RANGE
+        if not lo <= position <= hi:
+            raise SeestarError(
+                f"{self.host}: focuser position {position} is outside {lo}–{hi}")
+        return self._rpc("move_focuser", {"step": int(position), "ret_step": True})
+
+    def plate_solve(self) -> Any:
+        return self._rpc("start_solve")
 
     # ---- the firmware 7.18+ handshake (⭐ Seestar-page upgrade, slice 2) ----
 
