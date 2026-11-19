@@ -190,6 +190,25 @@ STREAK_RECONCILE_MIN_FRAMES = 10
 STREAK_RECONCILE_SMALL_MIN_FRAMES = 3
 STREAK_MASS_REJECT_FRACTION_SMALL = 0.8
 
+# The same majority, asked of each **mosaic panel** (Scout 2026-11-19). A mosaic's
+# object sits in one panel of four (25 % of the target) or nine (11 %), so the
+# whole-target share above can never fire for it, and only the position guard
+# below is left — which an alt-az field rotation defeats for a panel's object,
+# because that object is off the frame centre by construction and sweeps an arc
+# as the field turns (measured: 17–32 % of the object panel's subs stayed
+# rejected across a transit; a single field is rescued in full). So the majority
+# is also asked panel by panel, exactly as ``qc/grading`` grades the flux metrics
+# against each panel rather than the whole target. A streak-rejected sub is never
+# plate-solved, so the panels come from the telescope's own header pointing
+# (``ra_hint_deg``/``dec_hint_deg``) through the same soundness gate
+# (``stack.pointings.pointing_groups``): a target whose hints do not split into
+# two or more substantial groups — a single field, or a mosaic whose subs all
+# carry the mosaic's centre — gets no per-panel verdict and behaves exactly as
+# before. A panel's flagged subs must also span :data:`STATIONARY_MIN_SPAN_S`,
+# so a burst of trails over one short stretch of one panel cannot pass for an
+# object: a panel is a smaller population than a target, and a stationary
+# object is in that panel all night.
+
 
 # ---------------------------------------------------------------------------
 # The *stationary object* reconciliation — the half the fraction tiers can't do.
@@ -478,11 +497,14 @@ def reconcile_unreadable_frames(project) -> tuple[list[int], list[int]]:
 def reconcile_streak_rejections(project) -> list[int]:
     """Re-accept auto:streak frames the detector can't have meant.
 
-    Two independent guards, tried in order and both un-reject-only:
+    Three independent guards, tried in order and all un-reject-only:
 
     1. **Fraction** — a streak flagged on a majority of the target can't be a
        transient trail (:data:`STREAK_MASS_REJECT_FRACTION` and its small-target
        tier). Unchanged.
+    1b. **Fraction per mosaic panel** — failing that, the same majority asked of
+       each panel the header pointings split the target into, over an hour or
+       more (:func:`_reconcile_per_panel`); a no-op on a single field.
     2. **Position** — failing that, flagged components that sit at one spot in
        the frame across hours are a stationary object however small a share of
        the target they are (:func:`stationary_streak_frames`). This is what
@@ -515,7 +537,11 @@ def reconcile_streak_rejections(project) -> list[int]:
     else:
         fires = False
     if not fires:
-        return _reconcile_stationary(project, streaked)
+        by_panel = _reconcile_per_panel(project, eligible, streaked)
+        if by_panel:
+            done = set(by_panel)
+            streaked = [f for f in streaked if f.id not in done]
+        return by_panel + _reconcile_stationary(project, streaked)
     restored: list[int] = []
     stamp = restoration_stamp()
     for f in streaked:
@@ -534,6 +560,66 @@ def reconcile_streak_rejections(project) -> list[int]:
         "(a majority — a stationary extended object, not transient trails)",
         len(restored), len(eligible),
     )
+    return restored
+
+
+def _reconcile_per_panel(project, eligible: list, streaked: list) -> list[int]:
+    """The fraction guard asked of each mosaic panel — see the constants above.
+
+    ``eligible``/``streaked`` are the same populations the whole-target tier
+    used. Returns the ids re-accepted; ``[]`` when the target's header pointings
+    do not split into panels, which is every single-field target.
+    """
+    from seestack.activity_calendar import parse_utc
+    from seestack.stack.pointings import pointing_groups
+
+    if not streaked:
+        return []
+    labels = pointing_groups(
+        [(f.ra_hint_deg, f.dec_hint_deg) for f in eligible],
+        min_members=STREAK_RECONCILE_MIN_FRAMES,
+    )
+    if labels is None:
+        return []
+    panel_of = {
+        f.id: label for f, label in zip(eligible, labels, strict=True)
+        if f.id is not None and label >= 0
+    }
+    sizes: dict[int, int] = {}
+    for label in panel_of.values():
+        sizes[label] = sizes.get(label, 0) + 1
+    flagged: dict[int, list] = {}
+    for f in streaked:
+        label = panel_of.get(f.id)
+        if label is not None:
+            flagged.setdefault(label, []).append(f)
+
+    restored: list[int] = []
+    stamp = restoration_stamp()
+    for label, members in sorted(flagged.items()):
+        # Every labelled panel is substantial (``pointing_groups`` holds it to
+        # the main floor), so only the main tier's majority applies here.
+        if not len(members) > STREAK_MASS_REJECT_FRACTION * sizes[label]:
+            continue
+        times = [parse_utc(str(f.timestamp_utc)) if f.timestamp_utc else None
+                 for f in members]
+        if any(t is None for t in times):
+            continue  # undated: the span can't be answered, so no verdict
+        if (max(times) - min(times)).total_seconds() < STATIONARY_MIN_SPAN_S:
+            continue  # a burst of trails in one stretch of one panel
+        for f in members:
+            # Same as the whole-target tier: clear only the streak reason, keep
+            # ``streak_detected`` so the UI still counts them, stamp the return.
+            project.update_frame(f.id, accept=True, reject_reason=None,
+                                 restored_utc=stamp)
+            restored.append(f.id)
+    if restored:
+        log.info(
+            "streak reconcile: re-accepted %d frames auto-rejected as streaks "
+            "(a majority of their own mosaic panel — a stationary extended "
+            "object in that panel, not transient trails)",
+            len(restored),
+        )
     return restored
 
 
