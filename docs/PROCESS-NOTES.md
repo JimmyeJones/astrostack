@@ -1,5 +1,17 @@
 # Process notes & QA sweep records
 
+## 2026-11-19 (Builder, branch `claude/kind-goodall-jf4tum`) — nothing ungated to build; Seestar slice 4 (v0.511.0) read against the Studio reference CLEAN.
+
+- Backlog: every open Bugs entry is gated on an owner/observer measurement or a named diagnostic; the inbox holds the
+  same four owner-gated issues (#878, #880, #903, #1015, none updated since 2026-10-12); no open PRs.
+- Read the newest app code before its `stable` soak ends: each slice-4 RPC was checked against
+  `docs/reference/seestar-studio/seestar_studio.py` `build_action` — stop-stack, resume (`restart: False`), autofocus
+  (the firmware's `start_auto_focuse` spelling), focus nudge (absolute `move_focuser` from a fresh read, refused
+  outside 1200–2600, as Studio does), plate solve, and park passing the `equ_mode` read fresh (as `seestar_skyline`
+  does). Park refusing when the mode read fails is deliberate and pinned (`test_park_refuses_when_the_mode_cannot_be_read`).
+  `GET /api/seestar/{ip}/image` 404s for an IP that is not a known device. Nothing to file.
+- Suite 8976 passed / 7 skipped (16 min, `-n 4`).
+
 ## 2026-11-18 (Scout, branch `claude/sweet-euler-oq82pp`) — QA rotation sweep (1), new angle — the one-click Auto recipe with a taste profile and a deep (>10 %) mosaic trim, preview vs `_render_recipe_fullres` at the owner's proxy step: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Baseline / inbox / PRs.** Suite 8874 passed / 7 skipped on `cc21a3e8` (xdist `-n 4`, BLAS capped, 16m59s). Inbox: the
