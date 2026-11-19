@@ -82,34 +82,17 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟡 Scout 2026-11-19 (sweep 2), REPRODUCED — on a mosaic, the streak guard's rescue of a stationary object
-  leaves 17–32 % of the object panel's subs rejected when the night crosses the meridian; the same field shot
-  single is rescued in full.** *(Pillar: autonomy + image quality, PRIORITY 2/4. Severity medium: good subs of the
-  panel that holds the object are silently dropped as "satellite trail", so that panel stacks thinner, on by
-  default. Confidence: high on the mechanism, medium on how often it happens — it needs alt-az tracking and the
-  detector flagging the object, as the module itself expects for edge-on galaxies and long nebulae. Size **S–M**.)*
-  `qc/runner.reconcile_streak_rejections` has two rescues. The **fraction** tier (`STREAK_MASS_REJECT_FRACTION`
-  0.5) uses a **whole-target** share. A mosaic object sits in one panel of four (25 %) or nine (11 %), so that tier
-  can never fire, and only the **position** rescue (`stationary_streak_frames`) is left. The position rescue
-  clusters the flagged component's frame position (`streak_cx/cy`) within `STATIONARY_CLUSTER_RADIUS` 0.10, and a
-  cluster must span `STATIONARY_MIN_SPAN_S` 1 h. On an alt-az mount the field turns about the frame centre. A
-  single field's object sits at the centre and does not move. **A mosaic panel's object is off-centre by
-  construction**, so it moves along an arc. Near transit that arc is fast (78° in 3 h at dec +20, lat 40), each
-  0.10 piece of it spans less than an hour, and those frames stay `auto:streak`. **Measured** through the real
-  `reconcile_streak_rejections` on a `Project` (S30 portrait frame 1080×1920, a 20 s cadence, panels interleaved
-  as the Seestar's mosaic mode shoots them, object offset (0.15, 0.075) or (0.3, 0.15) frame from its panel's
-  centre, HA −1.5 h…+1.5 h, scratch probe not landed). Single field: 540/540 rescued in all four cases (the
-  fraction tier). 2×2: left rejected **37/135 (27 %)** at dec +20 and **42/135 (31 %)** at dec −5 with the larger
-  offset. 3×3: **17/60 (28 %)** and **19/60 (32 %)**. Away from transit (HA +1…+4 h, ≤ 31° of turn) nothing is
-  lost. **Fix options:** (a) run the fraction tier **per panel**, like `qc/grading._pointing_groups` does for the
-  flux metrics. Note that streak-rejected subs are never plate-solved (`solve/runner.build_solve_arglist` skips
-  rejected frames), so the groups must come from the header hint (`ra_hint_deg`/`dec_hint_deg`). First check that
-  this hint is the *panel's* pointing and not the mosaic centre (`fits_loader._target_ra_deg` reads `OBJCTRA`
-  first). If it is the mosaic centre, use (b). (b) Make the
-  cluster rotation-aware, for example by matching on distance from the frame centre in pixels, and re-check the
-  chance score (`_chance_cluster_p`) for an annulus instead of a disc. (a) is the smaller change and mirrors
-  grading. The regression test is the probe's 2×2 dec −5 case end to end. A single field stays byte-identical.
-  Un-reject only, never a `user_override` — the contract does not change.
+- **🟡 ⏸ Scout 2026-11-19 (sweep 2) — remaining half: the streak guard's stationary-object rescue on a mosaic whose
+  subs carry the *mosaic's centre* as their header pointing.** *(Pillar: autonomy + image quality, PRIORITY 2/4.
+  Size **M**.)* v0.511.1 asks the streak majority **per panel** (`qc/runner._reconcile_per_panel`, panels from
+  `ra_hint_deg`/`dec_hint_deg` via `pointing_groups`), which rescues the whole object panel across a transit — but
+  only when the hints split into panels. If every sub carries the mosaic's centre, only the position rescue
+  (`stationary_streak_frames`) acts and it still loses 17–32 % of the object panel near transit (pinned by
+  `tests/test_qc_streak_per_panel.py::test_hints_at_the_mosaic_centre_give_no_per_panel_verdict`).
+  **⏸ Waiting on diagnostic `mosaic_panel_hints` v2** (v0.506.10): if its verdict is `per_panel`, close this; if
+  `mosaic_centre`, build fix (b) — make the cluster rotation-aware (match on distance from the frame centre in
+  pixels, with a smooth-in-time angle) and re-derive `_chance_cluster_p` for an annulus, since an annulus alone is
+  far likelier to collect random trails than a disc. Full probe and first-half record in `SHIPPED.md` (v0.511.1).
 
 - **⭐ 🔴 OWNER-REPORTED, MEASURED ON HIS LIBRARY (2026-11-01) — "colourful mosaic" blotches across the sky of a
   single-field stack are a fixed colour pattern on the Seestar's sensor that the stacker never removes.**
@@ -3171,6 +3154,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.1 **Streak guard asks its majority per mosaic panel (`qc/runner._reconcile_per_panel`): a mosaic panel's stationary object is no longer partly dropped as "satellite trail" across a transit when the subs' header pointings split into panels** — the centre-hint half waits on `mosaic_panel_hints` v2. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.511.0 **⭐ Seestar-page upgrade slice 4: only the controls Studio verified on the real scope — park now keeps the scope's current mount mode (`scope_park {equ_mode}` read fresh by `SeestarClient.get_mount`; it used to send no mode), pause/resume stacking, autofocus, focus ±10, plate solve (`POST /api/seestar/{ip}/stop-stack|resume|autofocus|focus|solve`, control-gated)** — the upgrade's last slice
 - ✅ v0.510.0 **⭐ Seestar-page upgrade slice 3: the read-only monitor — the scope's newest (live-stacked) picture relayed from its HTTP server (`GET /api/seestar/{ip}/image`, bounded, cached), storage from `get_disk_volume`, an idle/stopped view reads "idle", total integration; and the `setting` block (hotspot password) is no longer requested, with `telemetry.scrub` keeping private keys out of `raw`** — entry stays open for slice 4
 - ✅ v0.509.0 **⭐ Seestar-page upgrade slice 2: the firmware 7.18+ handshake (`SeestarClient.handshake`, signed by the standard-library `keyfile.sign_pkcs1v15_sha1`, byte-identical to OpenSSL); each device reports `auth`, and the Seestar page says in one line whether the scope accepted the key** — entry stays open for slices 3–4
