@@ -2430,36 +2430,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-ASKED (2026-11-18) — upgrade AstroStack's Seestar page using his own Seestar Studio as the
-  protocol reference.** He built **Seestar Studio**, a local control and monitor app verified against his
-  real S30 on firmware 9.75, and chose **"Upgrade AstroStack's Seestar page"** over bringing all of Studio in.
-  A scrubbed copy is in [`docs/reference/seestar-studio/`](reference/seestar-studio/ABOUT.md). Read its
-  `AGENTS_GUIDE.md` first; its test-status table says what was verified on the scope. Today `webapp/seestar/`
-  (`client.py`, from seestar_alp) predates the firmware 7.18+ RSA handshake, so against his scope it gets
-  little beyond broadcast events. **Slices, one per run:**
-  1. ✅ **v0.508.0 — shipped** (`webapp/seestar/keyfile.py`, `GET/POST/DELETE /api/seestar/key`,
-     `SeestarKeyBox` on Settings → This device; record in `SHIPPED.md`). `keyfile.load_key` returns the `n, e, d`
-     slice 2 signs with. Original text:
-     **The key, uploaded through the web** (his answer). Settings → the existing Seestar group gets "Add your
-     Seestar key file". `POST /api/seestar/key` (password-gated; never on the read-only allowlist) stores it
-     as `state/seestar/seestar.pem` with mode 0600, checks that it parses as a PKCS#8 RSA key, and supports
-     replace and remove. It is **never served back, logged, or included** in any API response, backup or
-     diagnostic; the API reports only "installed / not installed". No key means broadcast-only mode, said in
-     plain words.
-  2. ✅ **v0.509.0 — shipped** (`SeestarClient.handshake`, `keyfile.sign_pkcs1v15_sha1`,
-     `SeestarManager._ensure_auth`; each device's `auth` in `/api/seestar/devices`; record in `SHIPPED.md`).
-  3. ✅ **v0.510.0 — shipped** (`telemetry.latest_image`/`scrub`, `SeestarClient.get_albums`/`get_disk_volume`,
-     `SeestarManager.latest_image`, `GET /api/seestar/{ip}/image`, `ScopePicture`; record in `SHIPPED.md`).
-     **Next run: slice 4.**
-  4. **Then only the controls Studio verified on the real scope** (see its table): GoTo + stack, stop and
-     resume, park, focus, plate solve. Nothing that is "simulator only" or "not exercised". **Never port the
-     skyline scan**, and read the skyline incident before touching motion: the firmware picks its own GoTo
-     route. Always pass the current `equ_mode` to `scope_park`, and never forward the `get_setting` hotspot
-     password to the browser.
-  **Rules:** the page follows "Recursive organization" (≤ 5 top-level groups; the clutter ratchet must not
-  rise for `Seestar.tsx`). Talking to the scope on his LAN is local; nothing reaches the internet. Use
-  Studio's `seestar_sim.py` as the fixture shape for tests. Size **L** overall, **M** per slice.
-
 *(Scout 2026-10-31: thirteen closed or shipped entries that had piled up in this section — the Settings
 redesign, "Bring my pictures up to date", the noise-delta picture, "Was the moon out?", the caption/lightbox pair,
 the card-signal slices, the removed-overlay halves, the Universe fly-to trio, the plateau nudge, data-driven
@@ -3172,6 +3142,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.0 **⭐ Seestar-page upgrade slice 4: only the controls Studio verified on the real scope — park now keeps the scope's current mount mode (`scope_park {equ_mode}` read fresh by `SeestarClient.get_mount`; it used to send no mode), pause/resume stacking, autofocus, focus ±10, plate solve (`POST /api/seestar/{ip}/stop-stack|resume|autofocus|focus|solve`, control-gated)** — the upgrade's last slice
 - ✅ v0.510.0 **⭐ Seestar-page upgrade slice 3: the read-only monitor — the scope's newest (live-stacked) picture relayed from its HTTP server (`GET /api/seestar/{ip}/image`, bounded, cached), storage from `get_disk_volume`, an idle/stopped view reads "idle", total integration; and the `setting` block (hotspot password) is no longer requested, with `telemetry.scrub` keeping private keys out of `raw`** — entry stays open for slice 4
 - ✅ v0.509.0 **⭐ Seestar-page upgrade slice 2: the firmware 7.18+ handshake (`SeestarClient.handshake`, signed by the standard-library `keyfile.sign_pkcs1v15_sha1`, byte-identical to OpenSSL); each device reports `auth`, and the Seestar page says in one line whether the scope accepted the key** — entry stays open for slices 3–4
 - ✅ v0.508.0 **⭐ Seestar-page upgrade slice 1: the Seestar key file uploads through Settings → This device (`SeestarKeyBox`, `POST/DELETE /api/seestar/key`), checked as an RSA key with the standard library (`webapp.seestar.keyfile`), stored 0600, never served back** — entry stays open for slices 2–4

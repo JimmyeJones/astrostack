@@ -1,5 +1,69 @@
 # Shipped — the record
 
+## 2026-11-19 (Builder, branch `claude/kind-goodall-pbifbb`)
+
+### v0.511.0 — ⭐ Seestar-page upgrade, slice 4: only the controls Seestar Studio verified on the real scope
+
+**What.** The Seestar page's Control panel (shown only with `seestar_control_enabled` on and the scope connected)
+gains the controls Studio's test table marks "verified on the real scope", in Studio's exact command shapes:
+- **Park keeps the scope's mount mode (a fix).** `scope_park {equ_mode}` SETS the mode it is given; AstroStack sent
+  a bare `scope_park`. `SeestarManager._current_equ_mode` now reads `mount.equ_mode` fresh with
+  `SeestarClient.get_mount` (`get_device_state {keys: ["mount"]}`) right before parking and passes it. A firmware
+  with no mount block gets the bare call it always got; a read that fails refuses the park rather than guessing.
+- **Pause / resume stacking**: `iscope_stop_view {stage: "Stack"}` (keeps the view and the frames stacked so far —
+  the old Stop still ends everything) and `iscope_start_stack {restart: false}` (never restarts the count).
+- **Autofocus** (`start_auto_focuse`, the firmware's spelling) and **focus −10 / +10**: the firmware takes only an
+  absolute position, so `_nudge_focus` reads `get_focuser_position` fresh and moves to `current + steps` with
+  `move_focuser {step, ret_step: true}`; an unknown position or a target outside `FOCUSER_RANGE` (1200–2600, Studio's
+  bound) is refused before anything moves. The endpoint takes `steps` in [-200, 200], non-zero.
+- **Plate solve** (`start_solve`).
+- Endpoints `POST /api/seestar/{ip}/stop-stack|resume|autofocus|focus|solve`, all behind `_require_control` like goto
+  (409 while control is off); none is on the read-only token's GET allowlist. The page groups them in the existing
+  Control panel under "While it images" and "Focus and pointing" (`SCOPE_ACTIONS`), each with a plain tooltip and
+  a one-line notice; no new card, note or alert (the clutter ceiling for `Seestar.tsx` is unchanged).
+
+**Not built, on purpose:** anything Studio marks "simulator only" or "not exercised", the skyline scan, free
+slewing (the firmware picks its own GoTo route — the skyline incident), and showing a plate-solve *result* (Studio's
+`get_solve_result` reply is known only from its simulator).
+
+**Tests.** `tests/webapp/test_seestar_controls.py` (29) drives a stateful scope after Studio's `seestar_sim.py`:
+park in both mount modes keeps the mode (fails before the fix: 3 of 4 park tests red with `client.park()`), the bare
+call without a mount block, a refused park when the mode can't be read, each command's shape, focus nudges from a
+fresh read (int and `{step}` replies) and refusals at both range ends, and the endpoints' gating and validation.
+Vitest: each button calls its endpoint and says so; none shows with control off.
+
+**The entry, as it stood (all four slices now shipped):**
+
+- **⭐ OWNER-ASKED (2026-11-18) — upgrade AstroStack's Seestar page using his own Seestar Studio as the
+  protocol reference.** He built **Seestar Studio**, a local control and monitor app verified against his
+  real S30 on firmware 9.75, and chose **"Upgrade AstroStack's Seestar page"** over bringing all of Studio in.
+  A scrubbed copy is in [`docs/reference/seestar-studio/`](reference/seestar-studio/ABOUT.md). Read its
+  `AGENTS_GUIDE.md` first; its test-status table says what was verified on the scope. Today `webapp/seestar/`
+  (`client.py`, from seestar_alp) predates the firmware 7.18+ RSA handshake, so against his scope it gets
+  little beyond broadcast events. **Slices, one per run:**
+  1. ✅ **v0.508.0 — shipped** (`webapp/seestar/keyfile.py`, `GET/POST/DELETE /api/seestar/key`,
+     `SeestarKeyBox` on Settings → This device; record in `SHIPPED.md`). `keyfile.load_key` returns the `n, e, d`
+     slice 2 signs with. Original text:
+     **The key, uploaded through the web** (his answer). Settings → the existing Seestar group gets "Add your
+     Seestar key file". `POST /api/seestar/key` (password-gated; never on the read-only allowlist) stores it
+     as `state/seestar/seestar.pem` with mode 0600, checks that it parses as a PKCS#8 RSA key, and supports
+     replace and remove. It is **never served back, logged, or included** in any API response, backup or
+     diagnostic; the API reports only "installed / not installed". No key means broadcast-only mode, said in
+     plain words.
+  2. ✅ **v0.509.0 — shipped** (`SeestarClient.handshake`, `keyfile.sign_pkcs1v15_sha1`,
+     `SeestarManager._ensure_auth`; each device's `auth` in `/api/seestar/devices`; record in `SHIPPED.md`).
+  3. ✅ **v0.510.0 — shipped** (`telemetry.latest_image`/`scrub`, `SeestarClient.get_albums`/`get_disk_volume`,
+     `SeestarManager.latest_image`, `GET /api/seestar/{ip}/image`, `ScopePicture`; record in `SHIPPED.md`).
+  4. ✅ **v0.511.0 — shipped** (park passes the fresh `equ_mode` via `SeestarClient.get_mount`;
+     `stop_stack`/`resume_stack`/`autofocus`/`move_focuser`/`plate_solve`; `POST /api/seestar/{ip}/stop-stack|
+     resume|autofocus|focus|solve`; `SCOPE_ACTIONS` on the page; record in `SHIPPED.md`). **The upgrade's four
+     slices are done.** Not built, on purpose: anything Studio marks "simulator only" or "not exercised", the
+     skyline scan, free slewing, and showing a plate-solve *result* (Studio's `get_solve_result` shape is
+     simulator-shaped only) — a later run may file the last one as a lead once it is seen on the real scope.
+  **Rules:** the page follows "Recursive organization" (≤ 5 top-level groups; the clutter ratchet must not
+  rise for `Seestar.tsx`). Talking to the scope on his LAN is local; nothing reaches the internet. Use
+  Studio's `seestar_sim.py` as the fixture shape for tests. Size **L** overall, **M** per slice.
+
 ## 2026-11-19 (Builder, branch `claude/kind-goodall-su6ltj`)
 
 ### v0.510.0 — ⭐ Seestar-page upgrade, slice 3: the read-only monitor (the scope's own newest picture, verified field shapes, no private settings)

@@ -1,7 +1,8 @@
 """Seestar telescope endpoints: discovery, telemetry, and gated control.
 
 Monitoring (list devices, read telemetry, SSE stream) is always available when
-``seestar_enabled`` is on. Control commands (goto / start / stop / park) are
+``seestar_enabled`` is on. Control commands (goto / start / stop / park, and
+slice 4's stop-stack / resume / autofocus / focus / solve) are
 additionally gated behind ``seestar_control_enabled`` so that simply watching a
 scope can never disturb an in-progress session; a disabled control returns 409.
 """
@@ -187,6 +188,51 @@ def stop(ip: str, request: Request) -> dict:
 def park(ip: str, request: Request) -> dict:
     _require_control(request)
     return _run_control(request, ip, "park", {})
+
+
+# ---- the controls Seestar Studio verified on the real scope (⭐ slice 4) ----
+#
+# Only what Studio's test table marks "verified on the real scope": stop and
+# resume stacking, focus, plate solve (GoTo + stack and park are above; park
+# now passes the scope's current ``equ_mode``). Nothing simulator-only, and no
+# skyline scan or free slewing — the firmware picks its own GoTo route.
+
+
+class FocusNudge(BaseModel):
+    #: Focuser steps from where it is now; Studio's buttons are ±1/±10/±50.
+    steps: int = Field(ge=-200, le=200)
+
+
+@router.post("/{ip}/stop-stack")
+def stop_stack(ip: str, request: Request) -> dict:
+    _require_control(request)
+    return _run_control(request, ip, "stop_stack", {})
+
+
+@router.post("/{ip}/resume")
+def resume(ip: str, request: Request) -> dict:
+    _require_control(request)
+    return _run_control(request, ip, "resume", {})
+
+
+@router.post("/{ip}/autofocus")
+def autofocus(ip: str, request: Request) -> dict:
+    _require_control(request)
+    return _run_control(request, ip, "autofocus", {})
+
+
+@router.post("/{ip}/focus")
+def focus(ip: str, body: FocusNudge, request: Request) -> dict:
+    _require_control(request)
+    if body.steps == 0:
+        raise HTTPException(status_code=422, detail="steps must not be 0")
+    return _run_control(request, ip, "focus", body.model_dump())
+
+
+@router.post("/{ip}/solve")
+def solve(ip: str, request: Request) -> dict:
+    _require_control(request)
+    return _run_control(request, ip, "solve", {})
 
 
 def _run_control(request: Request, ip: str, action: str, params: dict) -> dict:

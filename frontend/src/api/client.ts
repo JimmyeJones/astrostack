@@ -4752,6 +4752,14 @@ export const api = {
     req(`/api/seestar/${ip}/goto`, { method: "POST", body: JSON.stringify(body) }),
   seestarStop: (ip: string) => req(`/api/seestar/${ip}/stop`, { method: "POST" }),
   seestarPark: (ip: string) => req(`/api/seestar/${ip}/park`, { method: "POST" }),
+  // ⭐ Seestar-page slice 4 — only the controls Seestar Studio verified on the real scope.
+  seestarStopStack: (ip: string) => req(`/api/seestar/${ip}/stop-stack`, { method: "POST" }),
+  seestarResume: (ip: string) => req(`/api/seestar/${ip}/resume`, { method: "POST" }),
+  seestarAutofocus: (ip: string) => req(`/api/seestar/${ip}/autofocus`, { method: "POST" }),
+  seestarFocus: (ip: string, steps: number) =>
+    req<{ ok: boolean; result: { from: number; to: number } }>(
+      `/api/seestar/${ip}/focus`, { method: "POST", body: JSON.stringify({ steps }) }),
+  seestarSolve: (ip: string) => req(`/api/seestar/${ip}/solve`, { method: "POST" }),
   /** The scope's newest picture, relayed from its own HTTP server. `version`
    *  (the picture's path) changes the URL only when the picture does, so the
    *  browser re-fetches it only then. */
