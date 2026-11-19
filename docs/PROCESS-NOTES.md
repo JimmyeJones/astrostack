@@ -1,5 +1,16 @@
 # Process notes & QA sweep records
 
+## 2026-11-19 (Builder, branch `claude/kind-goodall-cymu9s`) — nothing ungated to build; the v0.511.1 per-panel streak tier read CLEAN.
+
+- Backlog: every open Bugs entry is gated (the streak entry's remaining half waits on `mosaic_panel_hints` v2); the inbox holds
+  the same four owner-gated issues (#878, #880, #903, #1015); no open PRs; no `Diagnostic result:` issue.
+- Read: `qc/runner._reconcile_per_panel` is asked only when the whole-target tier does not fire, uses the same eligible
+  population (no `qc_error`, no user override), holds each panel to the main tier's majority, and needs an hour's span of
+  dated subs. `activity_calendar.parse_utc` always returns an aware UTC time (naive is read as UTC), so the span subtraction
+  can't mix naive and aware. Scratch probe: 60 subs at RA 359.96–0.02 and 60 at RA 1.5 → `pointing_groups` gives two panels,
+  with the RA-0 straddle kept as one. Nothing to file.
+- Suite 8985 passed / 7 skipped (18 min, `-n 4`).
+
 ## 2026-11-19 (Scout, branch `claude/sweet-euler-iqbzjc`) — QA rotation sweep (2), new angle — the streak guard's stationary-object rescue on a mosaic under alt-az field rotation: one bug, filed reproduced (🟡). Inbox unchanged. Dogfood `--build --mosaic` CLEAN.
 
 - **Baseline.** Suite 8975 passed / 7 skipped on `c5c85f1c` (xdist `-n 4`, BLAS capped, 18m22s), plus one failure this run
