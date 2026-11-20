@@ -1,5 +1,44 @@
 # Shipped — the record
 
+## 2026-11-20 (Builder, branch `claude/kind-goodall-cxwiw2`)
+
+### v0.511.2 — a Moon & Sun stack whose second read dies says so
+
+**What.** `seestack/video/lucky.stack_video` decodes a capture twice; pass 1 (`grade_video`) already warned through
+`cut_short_warning`, pass 2 (`iter_frames(..., wanted=keep_idx)`) had no check, and `iter_frames` ends quietly when
+an externally killed ffmpeg closes its pipe. Pass 2 now counts the keepers it actually received (`done`): the same
+file under the same deterministic `select` must hand back every keeper, so no slack. Short → a plain warning
+("N of the K sharpest frames could not be read the second time through (the decoder stopped early) and are not in
+the stack — stack it again") and a log line; **none** arrived → a `ValueError` naming the file and the read, not
+the alignment message that sent the owner to his mount. A clean read is unchanged.
+
+**Tests.** `tests/test_video_cut_short.py` (+4) with a stub `SEESTACK_FFMPEG_PATH` that runs the real ffmpeg but,
+on its second call only, lets N bytes through and exits 137: mp4 (kept 4, keeper 1 arrives, 9–11 don't) warns;
+cut at 0 bytes raises the read error without "drifting"; the pal8 raw AVI warns; a clean read adds nothing. The
+first three were red before the fix (`warnings []`, and the drifting message).
+
+<details><summary>The Scout's original entry</summary>
+
+- **🟢 Scout 2026-11-20 (sweep 3), reproduced — a Moon & Sun stack whose decoder dies in the *second* read
+  stacks fewer of the sharpest frames than it kept, silently, or fails with "the disk may be drifting".**
+  *(Pillar: trust, PRIORITY 3/4. Size **S**. Confidence: reproduced.)* `seestack/video/lucky.stack_video`
+  decodes the capture twice: pass 1 (`grade_video`) has `cut_short_warning`, pass 2 (the `iter_frames(...,
+  wanted=keep_idx)` loop) has no check at all, and `iter_frames` never reads ffmpeg's exit status. Probe (session
+  scratchpad, not landed): a stub `SEESTACK_FFMPEG_PATH` that runs the real ffmpeg but stops after 60 % of the
+  bytes and exits 137 on the second call only, on `videosynth`'s 12-frame `lunar_video` (mp4) and
+  `solar_raw_video` (pal8 AVI), `keep_percent=30`: **kept 4, stacked 2, `n_align_failed` 0, `warnings []`** —
+  the page says "Stacked the sharpest 2 of 12 frames" with nothing about the two never read. Stopped at 0–10 %:
+  `ValueError: None of the sharpest frames … could be aligned — the disk may be drifting out of frame`, which
+  sends the owner to his mount for a read failure. Dying in pass 1 warns correctly (control). Causes a NAS can
+  produce: ffmpeg OOM-killed, an I/O error on the share mid-read, the file replaced between passes (the source
+  stamp is taken before pass 1, so it matches). **Fix shape:** count the keepers pass 2 actually received; if
+  short of `n_keep` beyond `cut_short_warning`'s slack, append a plain warning ("N of the sharpest frames could
+  not be read the second time through — stack it again"); if *no* keeper arrived, raise a read error naming the
+  file instead of the alignment one. Regression test with the same die-on-call stub (`tests/test_video_cut_short.py`
+  has the fixtures). No `incoming/` write anywhere on the path (ffmpeg reads only; stdout is a pipe).
+
+</details>
+
 ## 2026-11-19 (Builder, branch `claude/kind-goodall-by7o8f`)
 
 ### v0.511.1 — the streak guard's majority, asked per mosaic panel
