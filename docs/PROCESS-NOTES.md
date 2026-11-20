@@ -1,5 +1,11 @@
 # Process notes & QA sweep records
 
+## 2026-11-20 (Builder, branch `claude/kind-goodall-8gnyg2`) — nothing ungated to build; dogfood `--build --mosaic --editor` CLEAN.
+
+- **Start of run:** `origin/main` at #1527; no open PRs; the issue inbox is the same four (#878, #880, #903, #1015), none updated since 2026-10-12, no `Diagnostic result:` issue. Bugs holds only the gated mosaic-centre-hint half of the 11-19 streak entry and observer-gated LEADs.
+- **What ran:** the §2 big-picture review — `scripts/agent-dogfood.sh --build --mosaic --editor`. Mosaic trim 7.9 % (under the ~15 % bar); the editor drive (every Add-menu op, undo/redo) clean on the field and the 2×2 mosaic; no overflow, no console errors. The "what the app SAYS" blocks read as one paragraph: the next-best-move, readiness and stack-health sentences agree (thin panel → more passes; darks → hot pixels, not grain), and "What Auto did" names the panel levelling and the 8 % ragged-edge trim it applied.
+- **Outcome:** nothing to fix or file; docs only.
+
 ## 2026-11-19 (Builder, branch `claude/kind-goodall-cymu9s`) — nothing ungated to build; the v0.511.1 per-panel streak tier read CLEAN.
 
 - Backlog: every open Bugs entry is gated (the streak entry's remaining half waits on `mosaic_panel_hints` v2); the inbox holds
