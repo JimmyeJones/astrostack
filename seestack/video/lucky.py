@@ -709,10 +709,34 @@ def stack_video(
         if progress is not None:
             progress("stack", done, n_keep)
 
+    # Pass 2 reads the same file with the same deterministic ``select``, so every
+    # keeper pass 1 chose must come back. Fewer means the decoder stopped early
+    # this time (OOM-killed, an I/O error on the share mid-read, the file swapped
+    # between passes) — ``iter_frames`` ends quietly on that, exactly as on a
+    # clean end of file, so the shortfall is the only sign of it. ``done`` counts
+    # the keepers this pass received; no slack, since none is legitimately lost.
+    n_unread = max(0, n_keep - done)
+    if n_unread:
+        log.warning(
+            "%s: the second read stopped early — %d of the %d sharpest frames never "
+            "arrived", src.name, n_unread, n_keep,
+        )
     if n_stacked == 0:
+        if n_unread:
+            raise ValueError(
+                f"{n_unread} of the {n_keep} sharpest frames in {src.name} could not "
+                f"be read the second time through (the decoder stopped early), so "
+                f"there was nothing to stack. Stack it again."
+            )
         raise ValueError(
             f"None of the sharpest frames in {src.name} could be aligned — the "
             f"disk may be drifting out of frame."
+        )
+    if n_unread:
+        warnings.append(
+            f"{n_unread} of the {n_keep} sharpest frames could not be read the second "
+            f"time through (the decoder stopped early) and are not in the stack — "
+            f"stack it again."
         )
     if n_align_failed:
         warnings.append(

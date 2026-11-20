@@ -82,24 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟢 Scout 2026-11-20 (sweep 3), reproduced — a Moon & Sun stack whose decoder dies in the *second* read
-  stacks fewer of the sharpest frames than it kept, silently, or fails with "the disk may be drifting".**
-  *(Pillar: trust, PRIORITY 3/4. Size **S**. Confidence: reproduced.)* `seestack/video/lucky.stack_video`
-  decodes the capture twice: pass 1 (`grade_video`) has `cut_short_warning`, pass 2 (the `iter_frames(...,
-  wanted=keep_idx)` loop) has no check at all, and `iter_frames` never reads ffmpeg's exit status. Probe (session
-  scratchpad, not landed): a stub `SEESTACK_FFMPEG_PATH` that runs the real ffmpeg but stops after 60 % of the
-  bytes and exits 137 on the second call only, on `videosynth`'s 12-frame `lunar_video` (mp4) and
-  `solar_raw_video` (pal8 AVI), `keep_percent=30`: **kept 4, stacked 2, `n_align_failed` 0, `warnings []`** —
-  the page says "Stacked the sharpest 2 of 12 frames" with nothing about the two never read. Stopped at 0–10 %:
-  `ValueError: None of the sharpest frames … could be aligned — the disk may be drifting out of frame`, which
-  sends the owner to his mount for a read failure. Dying in pass 1 warns correctly (control). Causes a NAS can
-  produce: ffmpeg OOM-killed, an I/O error on the share mid-read, the file replaced between passes (the source
-  stamp is taken before pass 1, so it matches). **Fix shape:** count the keepers pass 2 actually received; if
-  short of `n_keep` beyond `cut_short_warning`'s slack, append a plain warning ("N of the sharpest frames could
-  not be read the second time through — stack it again"); if *no* keeper arrived, raise a read error naming the
-  file instead of the alignment one. Regression test with the same die-on-call stub (`tests/test_video_cut_short.py`
-  has the fixtures). No `incoming/` write anywhere on the path (ffmpeg reads only; stdout is a pipe).
-
 - **🟡 ⏸ Scout 2026-11-19 (sweep 2) — remaining half: the streak guard's stationary-object rescue on a mosaic whose
   subs carry the *mosaic's centre* as their header pointing.** *(Pillar: autonomy + image quality, PRIORITY 2/4.
   Size **M**.)* v0.511.1 asks the streak majority **per panel** (`qc/runner._reconcile_per_panel`, panels from
@@ -3172,6 +3154,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.2 **Moon & Sun: a decoder dying in `stack_video`'s second read now says how many of the sharpest frames never arrived (a warning), and when none did it raises a read error naming the file instead of "the disk may be drifting"** — full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.511.1 **Streak guard asks its majority per mosaic panel (`qc/runner._reconcile_per_panel`): a mosaic panel's stationary object is no longer partly dropped as "satellite trail" across a transit when the subs' header pointings split into panels** — the centre-hint half waits on `mosaic_panel_hints` v2. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.511.0 **⭐ Seestar-page upgrade slice 4: only the controls Studio verified on the real scope — park now keeps the scope's current mount mode (`scope_park {equ_mode}` read fresh by `SeestarClient.get_mount`; it used to send no mode), pause/resume stacking, autofocus, focus ±10, plate solve (`POST /api/seestar/{ip}/stop-stack|resume|autofocus|focus|solve`, control-gated)** — the upgrade's last slice
 - ✅ v0.510.0 **⭐ Seestar-page upgrade slice 3: the read-only monitor — the scope's newest (live-stacked) picture relayed from its HTTP server (`GET /api/seestar/{ip}/image`, bounded, cached), storage from `get_disk_volume`, an idle/stopped view reads "idle", total integration; and the `setting` block (hotspot password) is no longer requested, with `telemetry.scrub` keeping private keys out of `raw`** — entry stays open for slice 4

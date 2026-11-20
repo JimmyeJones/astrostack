@@ -98,3 +98,87 @@ def test_the_whole_file_and_an_ordinary_mp4_warn_nothing(tmp_path):
     assert not any("cut short" in w for w in grade_video(full).warnings)
     mp4 = lunar_video(tmp_path / "moon.mp4", n_frames=12, sharp_indices=(3,))
     assert not any("cut short" in w for w in stack_video(mp4).warnings)
+
+
+# ---- the decoder dying in pass 2 (the second read) ---------------------------
+#
+# ``stack_video`` decodes the capture twice. A death in pass 1 is caught by
+# ``cut_short_warning`` above; one in pass 2 — ffmpeg OOM-killed, an I/O error on
+# the share mid-read — used to stack fewer of the sharpest frames than it kept
+# with ``warnings: []``, or blame alignment ("the disk may be drifting") when no
+# keeper arrived at all.
+
+
+def _die_on_second_call(tmp_path: Path, monkeypatch, *, keep_bytes: int) -> None:
+    """Point ``SEESTACK_FFMPEG_PATH`` at a stub that runs the real ffmpeg, except on
+    its second call, where it lets ``keep_bytes`` of output through and exits 137."""
+    import shutil
+
+    real = shutil.which("ffmpeg")
+    count = tmp_path / "ffmpeg-calls"
+    stub = tmp_path / "ffmpeg-stub"
+    stub.write_text(
+        "#!/bin/sh\n"
+        f"n=$(cat '{count}' 2>/dev/null || echo 0); n=$((n+1)); echo $n > '{count}'\n"
+        f"if [ \"$n\" -eq 2 ]; then '{real}' \"$@\" | head -c {int(keep_bytes)}; exit 137; fi\n"
+        f"exec '{real}' \"$@\"\n"
+    )
+    stub.chmod(0o755)
+    monkeypatch.setenv("SEESTACK_FFMPEG_PATH", str(stub))
+
+
+@needs_ffmpeg
+def test_a_decoder_dying_in_the_second_read_says_frames_are_missing(tmp_path, monkeypatch):
+    clip = lunar_video(tmp_path / "moon.mp4", n_frames=12, sharp_indices=(1, 9, 10, 11))
+    info = probe_video(clip)
+    frame_bytes = info.width * info.height * 3
+    # Seven frames get through pass 2: keeper 1 arrives, keepers 9–11 never do.
+    _die_on_second_call(tmp_path, monkeypatch, keep_bytes=7 * frame_bytes)
+    result = stack_video(clip, LuckyOptions(keep_percent=30), info=info)
+    assert result.n_kept == 4
+    assert result.n_stacked < result.n_kept
+    assert result.n_align_failed == 0
+    missing = result.n_kept - result.n_stacked
+    assert any(
+        f"{missing} of the 4 sharpest frames could not be read the second time through" in w
+        for w in result.warnings
+    ), result.warnings
+
+
+@needs_ffmpeg
+def test_a_decoder_dying_before_any_keeper_is_a_read_error_not_a_drifting_disk(
+    tmp_path, monkeypatch,
+):
+    clip = lunar_video(tmp_path / "moon.mp4", n_frames=12, sharp_indices=(8, 9, 10, 11))
+    info = probe_video(clip)
+    _die_on_second_call(tmp_path, monkeypatch, keep_bytes=0)
+    with pytest.raises(ValueError) as exc:
+        stack_video(clip, LuckyOptions(keep_percent=30), info=info)
+    msg = str(exc.value)
+    assert "drifting" not in msg
+    assert "moon.mp4" in msg
+    assert "could not be read the second time through" in msg
+
+
+@needs_ffmpeg
+def test_a_raw_avi_whose_second_read_dies_warns_too(tmp_path, monkeypatch):
+    clip = solar_raw_video(
+        tmp_path / "sun.avi", n_frames=12, w=64, h=48, sharp_indices=(1, 9, 10, 11),
+    )
+    info = probe_video(clip)
+    # A Bayer stream comes off the wire as one byte per pixel; stopping at 60 % of
+    # the larger RGB size still cuts the read well short of frame 9.
+    _die_on_second_call(tmp_path, monkeypatch, keep_bytes=7 * info.width * info.height)
+    result = stack_video(clip, LuckyOptions(keep_percent=30), info=info)
+    assert result.n_stacked < result.n_kept
+    assert any("could not be read the second time through" in w for w in result.warnings), (
+        result.warnings
+    )
+
+
+@needs_ffmpeg
+def test_a_clean_second_read_adds_no_missing_frames_warning(tmp_path):
+    clip = lunar_video(tmp_path / "moon.mp4", n_frames=12, sharp_indices=(1, 9, 10, 11))
+    result = stack_video(clip, LuckyOptions(keep_percent=30))
+    assert result.n_stacked == result.n_kept
+    assert not any("second time through" in w for w in result.warnings)
