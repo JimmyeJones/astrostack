@@ -1,5 +1,11 @@
 # Process notes & QA sweep records
 
+## 2026-11-20 (Builder, branch `claude/kind-goodall-bc5xvt`) — nothing ungated to build; the four least-probed tone ops on a mosaic canvas CLEAN.
+
+- **Start of run:** `origin/main` at #1528; no open PRs; the issue inbox is the same four (#878, #880, #903, #1015), none updated since 2026-10-12, no `Diagnostic result:` issue. Nothing ungated in Bugs.
+- **What ran:** a scratch probe of the ops with the fewest mentions in these notes and the archive (`tone.white_balance` 5, `tone.levels` 6, `tone.neutralize_background` 6, `tone.saturation` 9) on a 3000×4800 canvas with a ragged NaN border, a 2×2 panel cast and a nebula: WB → STF → neutralize → levels (black 0.05, white 0.9, γ 1.3) → saturation 2.5, and WB at the schema extremes (3, 0, 3) → asinh, each at full size and on the step-3 proxy. No covered pixel went non-finite, no gap filled, output stayed in `[0, 1]`, and preview and full sky medians agree to ≤3e-4 per channel. Neutralize brings the whole-frame sky to grey (0.153/0.149/0.149); the per-panel casts it leaves are `background.level_coverage`'s job (a single global gain cannot remove them), not a defect.
+- **Outcome:** nothing to fix or file; docs only.
+
 ## 2026-11-20 (Builder, branch `claude/kind-goodall-8gnyg2`) — nothing ungated to build; dogfood `--build --mosaic --editor` CLEAN.
 
 - **Start of run:** `origin/main` at #1527; no open PRs; the issue inbox is the same four (#878, #880, #903, #1015), none updated since 2026-10-12, no `Diagnostic result:` issue. Bugs holds only the gated mosaic-centre-hint half of the 11-19 streak entry and observer-gated LEADs.
