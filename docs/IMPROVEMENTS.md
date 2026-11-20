@@ -82,6 +82,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟢 Scout 2026-11-20 (sweep 3), reproduced — a Moon & Sun stack whose decoder dies in the *second* read
+  stacks fewer of the sharpest frames than it kept, silently, or fails with "the disk may be drifting".**
+  *(Pillar: trust, PRIORITY 3/4. Size **S**. Confidence: reproduced.)* `seestack/video/lucky.stack_video`
+  decodes the capture twice: pass 1 (`grade_video`) has `cut_short_warning`, pass 2 (the `iter_frames(...,
+  wanted=keep_idx)` loop) has no check at all, and `iter_frames` never reads ffmpeg's exit status. Probe (session
+  scratchpad, not landed): a stub `SEESTACK_FFMPEG_PATH` that runs the real ffmpeg but stops after 60 % of the
+  bytes and exits 137 on the second call only, on `videosynth`'s 12-frame `lunar_video` (mp4) and
+  `solar_raw_video` (pal8 AVI), `keep_percent=30`: **kept 4, stacked 2, `n_align_failed` 0, `warnings []`** —
+  the page says "Stacked the sharpest 2 of 12 frames" with nothing about the two never read. Stopped at 0–10 %:
+  `ValueError: None of the sharpest frames … could be aligned — the disk may be drifting out of frame`, which
+  sends the owner to his mount for a read failure. Dying in pass 1 warns correctly (control). Causes a NAS can
+  produce: ffmpeg OOM-killed, an I/O error on the share mid-read, the file replaced between passes (the source
+  stamp is taken before pass 1, so it matches). **Fix shape:** count the keepers pass 2 actually received; if
+  short of `n_keep` beyond `cut_short_warning`'s slack, append a plain warning ("N of the sharpest frames could
+  not be read the second time through — stack it again"); if *no* keeper arrived, raise a read error naming the
+  file instead of the alignment one. Regression test with the same die-on-call stub (`tests/test_video_cut_short.py`
+  has the fixtures). No `incoming/` write anywhere on the path (ffmpeg reads only; stdout is a pipe).
+
 - **🟡 ⏸ Scout 2026-11-19 (sweep 2) — remaining half: the streak guard's stationary-object rescue on a mosaic whose
   subs carry the *mosaic's centre* as their header pointing.** *(Pillar: autonomy + image quality, PRIORITY 2/4.
   Size **M**.)* v0.511.1 asks the streak majority **per panel** (`qc/runner._reconcile_per_panel`, panels from
