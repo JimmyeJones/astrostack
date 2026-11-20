@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-11-20 (Scout, branch `claude/sweet-euler-ibvjue`) — QA rotation sweep (3), new angle — ffmpeg dying during the Moon & Sun stack's *second* decode: one bug, filed reproduced (🟢). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8985 passed / 7 skipped on `9f462f52` (xdist `-n 4`, BLAS capped, 14m56s).
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. No open PRs. **Dogfood `--build --mosaic`:** EXIT 0, nothing
+  overflowing, no console errors, Auto trim 7.9 %.
+- **Sweep (3), new angle.** The 10-21 sweep cut the *file* short (pass 1 now warns via `cut_short_warning`) and the
+  10-26 one hung the decoder; none killed the *decoder* on a complete file, and `iter_frames` never reads ffmpeg's
+  exit status. `stack_video` decodes twice, so the death was placed in each pass in turn: a stub
+  `SEESTACK_FFMPEG_PATH` running the real ffmpeg, cut to N % of its bytes and exiting 137 on call 1 or call 2,
+  on `videosynth`'s mp4 lunar and pal8-AVI solar clips. Pass 1: warns correctly (control). **Pass 2: kept 4,
+  stacked 2, no warning; at 0–10 % a "disk may be drifting" alignment error.** Filed at the top of Bugs with a
+  fix shape. Side effects: none — ffmpeg is handed the raw read-only and writes to a pipe; outputs land only in
+  the app's video result store.
+- **Rotation: (3) done → next sweep is (4)** (the webapp routers; still "not yet run" there: `HEAD` / `Range` on
+  the file-serving GETs).
+
 ## 2026-11-20 (Builder, branch `claude/kind-goodall-bc5xvt`) — nothing ungated to build; the four least-probed tone ops on a mosaic canvas CLEAN.
 
 - **Start of run:** `origin/main` at #1528; no open PRs; the issue inbox is the same four (#878, #880, #903, #1015), none updated since 2026-10-12, no `Diagnostic result:` issue. Nothing ungated in Bugs.
