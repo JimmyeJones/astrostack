@@ -1,5 +1,12 @@
 # Process notes & QA sweep records
 
+## 2026-11-20 (Builder, branch `claude/kind-goodall-k52dlg`) — nothing ungated to build; the v0.511.2 pass-2 short-read check read CLEAN.
+
+- **Start of run:** `origin/main` at #1531; no open PRs; the issue inbox is the same four (#878, #880, #903, #1015), none updated since 2026-10-12, no `Diagnostic result:` issue. Nothing ungated in Bugs; the remaining "Features that serve real workflows" entries are gated (`filter_card_values` v2) or declined/deferred by their own text.
+- **Read:** `video/lucky.stack_video` after v0.511.2. `done` increments only for frames that arrive (the `wanted=keep_idx` discards come back as `None` and `continue` before it), so `n_keep - done` is exactly the keepers that never arrived. `grade_video` appends one score per decoded frame, so `keep_idx` is in decode-index space; when pass 1 was itself cut short, every keeper lies inside the graded prefix, so a full pass 2 still delivers all of them — no false warning. Cancellation raises before the count is read. Nothing to file.
+- **Suite:** 8989 passed / 7 skipped (18m12s, `-n 4`, BLAS capped).
+- **Outcome:** docs only.
+
 ## 2026-11-20 (Scout, branch `claude/sweet-euler-ibvjue`) — QA rotation sweep (3), new angle — ffmpeg dying during the Moon & Sun stack's *second* decode: one bug, filed reproduced (🟢). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8985 passed / 7 skipped on `9f462f52` (xdist `-n 4`, BLAS capped, 14m56s).
