@@ -1,5 +1,11 @@
 # Process notes & QA sweep records
 
+## 2026-11-21 (Builder, branch `claude/kind-goodall-va056p`) — nothing ungated to build; stopped early.
+
+- **Start of run:** `origin/main` at #1534; no open PRs; the issue inbox is the same four (#878, #880, #903, #1015), none updated since 2026-10-12, no `Diagnostic result:` issue. Nothing ungated in Bugs; "Features that serve real workflows" is gated (`filter_card_values` v2) or declined/deferred by its own text.
+- **Suite:** 8989 passed / 7 skipped (19m14s, `-n 8`, BLAS capped). Note: `-n 4` reached only 42 % in 10 minutes on this box — give a background suite run at least a 30-minute limit.
+- **Outcome:** docs only.
+
 ## 2026-11-21 (Scout, branch `claude/sweet-euler-ddog9y`) — QA rotation sweep (4), new angle — the two routers added since the last (4) sweep, `seestar` (v0.508–v0.511) and `diagnostics`: CLEAN, nothing filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8989 passed / 7 skipped on `157eef45` (xdist `-n 4`, BLAS capped, 17m36s).
