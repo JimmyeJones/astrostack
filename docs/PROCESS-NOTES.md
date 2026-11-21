@@ -1,5 +1,28 @@
 # Process notes & QA sweep records
 
+## 2026-11-21 (Scout, branch `claude/sweet-euler-ddog9y`) — QA rotation sweep (4), new angle — the two routers added since the last (4) sweep, `seestar` (v0.508–v0.511) and `diagnostics`: CLEAN, nothing filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8989 passed / 7 skipped on `157eef45` (xdist `-n 4`, BLAS capped, 17m36s).
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. No open PRs. **Dogfood `--build --mosaic`:** EXIT 0, nothing overflowing,
+  no console errors, Auto trim 7.9 %.
+- **Sweep (4), `seestar`.** The last read (10-21 `cocyik`) predates the key upload, handshake, monitor and slice-4
+  controls. Every body-less control POST (`start`/`stop`/`park`/`stop-stack`/`resume`/`autofocus`/`solve`/`connect`)
+  is covered by the app-wide `Sec-Fetch-Site`/`Origin` guard in `webapp/main.py`, and control stays 409 unless
+  `seestar_control_enabled`. `latest_image` fetches only the path the scope's own `get_albums` reported (`..`
+  refused in `telemetry.latest_image`), with a timeout, a byte ceiling that refuses rather than truncates, and
+  JPEG/PNG magic only. `focus` reads the focuser fresh and refuses outside `FOCUSER_RANGE`; `park` reads
+  `equ_mode` fresh. Not filed: `/{ip}/connect` accepts any host string — user-typed on a LAN-only app, not a bug.
+- **Sweep (4), `diagnostics`** (never named by an earlier sweep). Ran all five `seestack.diag` diagnostics through
+  `webapp.diagnostics.run_one` on a field + 2×2-mosaic library (`load_sample` "field" and "mosaic"): each `done`,
+  each passed `check_result_is_safe`, slowest `sky_falloff` 1.1 s; `sensor_pattern_by_temperature` correctly not
+  ready (1 sky < `MIN_TARGETS`); `mosaic_panel_hints` reports 3 located panels, right for the sample's deliberate
+  (6, 6, 6, 3) panels under `MIN_PANEL_SUBS = 5`. Read `twin_target_overcount.run` for #878 twins: union by
+  `source_path` digest, accepted-anywhere and once-only exposure hold; a sub in three targets counts in
+  `subs_in_three_or_more_targets`. Every `ready()` reads the registry only, so the synchronous boot call stays
+  cheap at 100 targets. A `.json.part` left by a killed write is not globbed by `all_results`.
+- **Outcome:** docs only. Next sweep is (1).
+
 ## 2026-11-21 (Builder, branch `claude/kind-goodall-8vw414`) — nothing ungated to build; stopped early.
 
 - **Start of run:** `origin/main` at #1532; no open PRs; the issue inbox is the same four (#878, #880, #903, #1015), none updated since 2026-10-12, no `Diagnostic result:` issue. Nothing ungated in Bugs; the remaining "Features that serve real workflows" entries are gated (`filter_card_values` v2) or declined/deferred by their own text; the standing editor entries ("Confusing / clunky controls", "Weak default result") are open-ended and the last three Builder probes of them (tone ops, geometry ops, dogfood `--mosaic --editor`) were clean.
