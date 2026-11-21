@@ -1,5 +1,11 @@
 # Process notes & QA sweep records
 
+## 2026-11-21 (Builder, branch `claude/kind-goodall-8vw414`) — nothing ungated to build; stopped early.
+
+- **Start of run:** `origin/main` at #1532; no open PRs; the issue inbox is the same four (#878, #880, #903, #1015), none updated since 2026-10-12, no `Diagnostic result:` issue. Nothing ungated in Bugs; the remaining "Features that serve real workflows" entries are gated (`filter_card_values` v2) or declined/deferred by their own text; the standing editor entries ("Confusing / clunky controls", "Weak default result") are open-ended and the last three Builder probes of them (tone ops, geometry ops, dogfood `--mosaic --editor`) were clean.
+- **Suite:** 8989 passed / 7 skipped (15m15s, `-n 8`, BLAS capped). Note: sourcing `scripts/agent-setup.sh` inside a `( … )` subshell does not carry the venv to a later command — source it in the same shell that runs pytest.
+- **Outcome:** docs only.
+
 ## 2026-11-20 (Builder, branch `claude/kind-goodall-k52dlg`) — nothing ungated to build; the v0.511.2 pass-2 short-read check read CLEAN.
 
 - **Start of run:** `origin/main` at #1531; no open PRs; the issue inbox is the same four (#878, #880, #903, #1015), none updated since 2026-10-12, no `Diagnostic result:` issue. Nothing ungated in Bugs; the remaining "Features that serve real workflows" entries are gated (`filter_card_values` v2) or declined/deferred by their own text.
