@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-11-22 (Scout, branch `claude/sweet-euler-2lvfdt`) — QA rotation sweep (1), new angle — one-click Auto preview vs export on real stacker output (correlated grain) at S30 sensor size: CLEAN, nothing filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8989 passed / 7 skipped on `f2a679b0` (xdist `-n 4`, BLAS capped, 18m00s).
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. No open PRs. **Dogfood `--build --mosaic`:** EXIT 0, nothing overflowing,
+  no console errors, Auto trim 7.9 %.
+- **Sweep (1), the angle the 11-18 `oq82pp` (1) left as "not yet run":** owner-scale Auto parity on *real stacker
+  output* rather than white synthetic noise. Driver (scratch, not landed): `webapp.sample_data`'s full-size mosaic
+  (`_MOSAIC_BIG`: 2×2, 82 % step, 6/6/6/3 subs, hazy panel) re-shot at the S30's 1920×1080 sensor with ~2,800 stars,
+  loaded and stacked through the app's own `POST /api/sample` + `POST …/process` (135 s) — canvas 3605×2065, proxy
+  step 3. Recipe from `POST …/editor/auto` (level_coverage → final_gradient → color_calibrate → stf stretch → SCNR →
+  saturation → auto curve → sharpen → crop ~4 %); preview from `GET …/editor/preview`, export from
+  `POST …/editor/export-png` (21 s).
+  - Export exactly ×3.00 of the preview (1993×3513 vs 665×1172); per-channel medians within **0.004**, sky MAD 0.048
+    vs 0.050 (0.051 on the export strided `[::3]`), clipped pixels 2.49 % vs 2.63 %; no gaps left in either.
+  - **Is Auto's clean/noisy verdict scale-stable on correlated grain?** `analyze_proxy` on the same master strided at
+    steps 1–5 with `source_grain_ratio` (1.0 / 0.67 / 0.60 / 0.59 / 0.58): sky σ 0.00048–0.00049 at every step,
+    `_noise_fraction` 0 throughout, `suggest_denoise_strength` 0.1 throughout — the stride correction does its job, so
+    the preview and a full-size read would take the same sharpen-only branch.
+  - **Read, not filed:** the ~2.5 % clip in both is the sample's dense saturated star field, identical either side.
+- **Not yet run in a sweep (1):** the same parity on a *noisy* real stack (thin panels, Auto on the denoise branch with
+  `grain_ratio` < 1) — this sample's stacker output measured clean, so the denoise half was not exercised.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-21 (Builder, branch `claude/kind-goodall-va056p`) — nothing ungated to build; stopped early.
 
 - **Start of run:** `origin/main` at #1534; no open PRs; the issue inbox is the same four (#878, #880, #903, #1015), none updated since 2026-10-12, no `Diagnostic result:` issue. Nothing ungated in Bugs; "Features that serve real workflows" is gated (`filter_card_values` v2) or declined/deferred by its own text.
