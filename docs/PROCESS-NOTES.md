@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-11-23 (Scout, branch `claude/sweet-euler-rk51kw`) — QA rotation sweep (2), new angle — the panel-depth card's *median* yardstick on a mosaic grown around one deep panel: one bug, filed reproduced (🟡). Inbox unchanged. Dogfood `--build --mosaic` CLEAN.
+
+- **Suite:** 8989 passed / 7 skipped on `26d3d413` (xdist `-n 4`, BLAS capped, 13m58s).
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. No open PRs. **Dogfood `--build --mosaic`:** EXIT 0, nothing overflowing,
+  no console errors, Auto trim 7.9 %; the mosaic-map card's `behind` sentence on the sample reads correctly.
+- **Sweep (2), the angle.** Not run in an earlier (2): `seestack/mosaicmap.mosaic_depth_map` takes the *median panel*
+  as the yardstick, so the thinnest panel can't drag its own comparison down. The inverse case is a mosaic whose
+  *majority* is shallow, which is what a mosaic grown around a deep field looks like. Driver (scratch): S30-shaped 3×3
+  and 2×2 grids of 10 s subs, called straight into `mosaic_depth_map`, which `target_mosaic_map` serves verbatim.
+- **Finding.** 6 h centre / 1 h × 8 gives `thin=None` and the all-clear *"similar amount of time — around 1.0 h
+  each"*, while `panelShade` (min–max) draws the centre black and the rest pale. Same at 2 h outside, and on a 2×2 at
+  6/1/1/1 h. 2×2 at 6/6/1/1 h is called correctly. Filed 🟡 S with the fix (test the deepest panel too).
+- **Read and holds (CLEAN):** `stack/weighting` already takes stars/sky/transparency medians per panel;
+  `thinpicture.picture_is_thin` is an average by design, and the per-panel shortfall is the map card's job, which
+  is this finding.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-11-22 (Scout, branch `claude/sweet-euler-2lvfdt`) — QA rotation sweep (1), new angle — one-click Auto preview vs export on real stacker output (correlated grain) at S30 sensor size: CLEAN, nothing filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8989 passed / 7 skipped on `f2a679b0` (xdist `-n 4`, BLAS capped, 18m00s).
