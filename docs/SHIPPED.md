@@ -1,5 +1,46 @@
 # Shipped — the record
 
+## 2026-11-23 (Builder, branch `claude/fervent-gauss-l0maeq`)
+
+### v0.511.3 — a mosaic grown around one deep panel is no longer called even
+
+**What.** `seestack/mosaicmap.mosaic_depth_map` only compared the *thinnest* panel with the median, so on a
+mosaic where most panels are the shallow ones (6 h centre, 1 h × 8) the median was shallow and the card said
+"All 9 panels … similar amount of time" while drawing the centre black. It now also tests the **deepest** panel
+against the median by the same two bars (`THIN_FRACTION`, `THIN_MIN_SHORTFALL_S`). Clearing both → *"Your 3×3
+mosaic is deepest at the middle: about 6.0 h there against about 1.0 h on the rest. The rest of the picture will
+look grainier next to it until it catches up…"*; clearing only the fraction → the fact without the nag ("…only
+about 4 min ahead, so it hardly shows yet"), mirroring the `behind` branch. Precedence thin > deep > behind >
+ahead. `thin` and `aim_hint` are untouched (no single corner to aim at). Text only: no response-shape, config,
+schema or default change.
+
+**Tests.** `tests/test_mosaic_map.py` +7 (the 3×3 repro at 1 h and 2 h outside, the 2×2 deep corner, the
+minutes-ahead case, an even 3×3 keeping the all-clear, a thin corner still winning). Five were red on the old
+code in a scratch swap.
+
+<details><summary>The Scout's original entry</summary>
+
+- **🟡 Scout 2026-11-23 (sweep 2) — "Your mosaic, panel by panel" says every panel "had a similar amount of time"
+  on a mosaic grown around one deep panel, while it draws that panel black and the rest pale.**
+  *(Pillar: trust + friendliness, PRIORITY 3. Size **S**. Confidence: **reproduced** at the engine function the
+  endpoint serves verbatim, `webapp/routers/targets.py` `target_mosaic_map` → `seestack/mosaicmap.mosaic_depth_map`.)*
+  The thin-panel call compares the **thinnest** panel with the **median** panel (`THIN_FRACTION` 0.6). When most
+  panels are the shallow ones, the median *is* shallow, so nothing is called out and `_verdict_text` falls into the
+  all-clear. Repro (S30-shaped grid, 10 s subs): a 3×3 with 2,160 subs (6 h) on the centre and 360 (1 h) on each of
+  the other eight → `thin=None`, text *"All 9 panels of your 3×3 mosaic have had a similar amount of time — around
+  1.0 h each — so no part of the picture is being held back."* Same with 2 h outside, and on a 2×2 at 6 h / 1 h / 1 h
+  / 1 h. `mosaicMap.ts` `panelShade` shades against the mosaic's own min–max, so the card draws the centre at 1 and
+  the eight at 0 under that sentence: the "a sentence arguing with its own picture" case that the `behind` branch was
+  added for. The eight outer panels are √6 ≈ 2.4× grainier than the centre. That is the shape `field_fulls.py`
+  already names (a mosaic that grew from a deep smaller one). **Fix:** before the all-clear, also test the
+  **deepest** panel against the median by the same two bars (≥ 1/`THIN_FRACTION` × median and ≥
+  `THIN_MIN_SHORTFALL_S` ahead). If it passes, say so plainly: *"…deepest at the centre: about 6 h there against
+  about 1 h on the rest — the rest of the picture will look grainier next to it until it catches up."* Leave `thin`
+  and `aim_hint` alone: there is no single corner to aim at. Regression test in `tests/test_mosaic_map.py` with the
+  repro above, plus an even-mosaic case that keeps the all-clear.
+
+</details>
+
 ## 2026-11-20 (Builder, branch `claude/kind-goodall-cxwiw2`)
 
 ### v0.511.2 — a Moon & Sun stack whose second read dies says so

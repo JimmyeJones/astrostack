@@ -297,7 +297,9 @@ def aim_hint(m: MosaicDepthMap | None) -> str | None:
 
 def _verdict_text(panels: list[MosaicPanel], rows: int, cols: int,
                   median_s: float, thin: MosaicPanel | None,
-                  behind: MosaicPanel | None = None) -> str:
+                  behind: MosaicPanel | None = None,
+                  deep: MosaicPanel | None = None,
+                  ahead: MosaicPanel | None = None) -> str:
     """The card's sentence.
 
     ``thin`` is the panel worth acting on — materially thinner *and* behind by
@@ -307,7 +309,17 @@ def _verdict_text(panels: list[MosaicPanel], rows: int, cols: int,
     untruth nobody could see, because such a panel was usually below
     :data:`MIN_PANEL_FRAMES` and not on the map at all. Now that it is drawn — a
     visibly paler cell — an all-clear written under it is a sentence arguing with
-    its own picture, so it gets its own line: the fact, without the nag."""
+    its own picture, so it gets its own line: the fact, without the nag.
+
+    ``deep`` / ``ahead`` are the same two bars turned round, for the panel far
+    *above* the median. A mosaic grown around one deep panel (6 h on the centre,
+    1 h on each of the eight around it) has a *shallow* median, so the thinnest
+    panel is never thinner than it and the old code fell into the all-clear —
+    under a card that draws the centre black and the other eight pale, and with
+    those eight √6 ≈ 2.4× grainier than the centre. ``deep`` clears both bars
+    (ahead by the fraction *and* by enough to show); ``ahead`` only the
+    fraction. Neither sets :attr:`MosaicDepthMap.thin`: when most of the mosaic
+    is behind there is no single corner to aim at."""
     from seestack.sharecard import format_duration
 
     # "2×2" only when the mosaic really is one — four panels on a 2×2 grid. A
@@ -324,6 +336,15 @@ def _verdict_text(panels: list[MosaicPanel], rows: int, cols: int,
             f"{format_duration(median_s)} on a typical panel. That part of the "
             f"picture will look grainier than the rest until it catches up — "
             f"more time on this mosaic is what evens it out."
+        )
+    if deep is not None:
+        where = panel_position_words(deep.row, deep.col, rows, cols)
+        return (
+            f"Your {shape} mosaic is deepest at the {where}: about "
+            f"{format_duration(deep.exposure_s)} there against about "
+            f"{format_duration(median_s)} on the rest. The rest of the picture "
+            f"will look grainier next to it until it catches up — more time on "
+            f"this mosaic is what evens it out."
         )
     if behind is not None:
         where = panel_position_words(behind.row, behind.col, rows, cols)
@@ -354,6 +375,17 @@ def _verdict_text(panels: list[MosaicPanel], rows: int, cols: int,
         return (
             f"Your {shape} mosaic is a little behind at the {where}: about "
             f"{format_duration(behind.exposure_s)} there against "
+            f"{format_duration(median_s)} on a typical panel. {closing}"
+        )
+    if ahead is not None:
+        where = panel_position_words(ahead.row, ahead.col, rows, cols)
+        lead_s = max(ahead.exposure_s - median_s, 0.0)
+        lead_by = format_duration(lead_s) if lead_s >= 1.0 else ""
+        closing = (f"It's only about {lead_by} ahead, so it hardly shows yet."
+                   if lead_by else "It's barely ahead at all, so it hardly shows.")
+        return (
+            f"Your {shape} mosaic has had a little more time at the {where}: "
+            f"about {format_duration(ahead.exposure_s)} there against "
             f"{format_duration(median_s)} on a typical panel. {closing}"
         )
     return (
@@ -517,9 +549,19 @@ def mosaic_depth_map(
     # before — but the sentence stops calling the panels "similar" when the card
     # is drawing one of them visibly paler than the rest.
     behind = thinnest if materially_thinner and not worth_a_night else None
+    # The same two bars from the other side, for the panel far *above* the
+    # median: a mosaic grown around one deep panel has a shallow median, so the
+    # thin test above can never fire on it (see :func:`_verdict_text`).
+    deepest = max(panels, key=lambda p: (p.exposure_s, -p.row, -p.col))
+    materially_deeper = (median_s > 0.0
+                         and THIN_FRACTION * deepest.exposure_s > median_s)
+    ahead_by_a_night = (deepest.exposure_s - median_s) >= THIN_MIN_SHORTFALL_S
+    deep = deepest if materially_deeper and ahead_by_a_night else None
+    ahead = deepest if materially_deeper and not ahead_by_a_night else None
 
     return MosaicDepthMap(
         panels=panels, rows=rows, cols=cols,
         median_exposure_s=median_s, thin=thin,
-        text=_verdict_text(panels, rows, cols, median_s, thin, behind),
+        text=_verdict_text(panels, rows, cols, median_s, thin, behind,
+                           deep, ahead),
     )
