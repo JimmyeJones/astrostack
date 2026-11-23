@@ -440,3 +440,73 @@ def test_the_aim_hint_follows_the_thin_panel_around_the_grid():
         assert (m.thin.row, m.thin.col) == (row, col)
         hint = aim_hint(m)
         assert hint is not None and f"the {where}:" in hint
+
+
+# ── A mosaic grown around one deep panel (Scout 2026-11-23, sweep 2) ─────────
+#
+# The thin test compares the thinnest panel with the *median*. When most panels
+# are the shallow ones the median is shallow too, so nothing was ever called out
+# and the card said "similar amount of time" over a picture it draws as one black
+# cell among eight pale ones.
+
+_CENTRE_DEEP_3X3 = {(1, 1): 2160}        # 6 h on the centre, 360 subs (1 h) elsewhere
+
+
+def test_a_mosaic_grown_around_one_deep_panel_is_not_called_even():
+    m = mosaic_depth_map(_grid(3, 3, subs=360, per_panel=_CENTRE_DEEP_3X3))
+
+    assert m is not None
+    assert "similar amount of time" not in m.text
+    assert "deepest at the middle" in m.text
+    assert "about 6.0 h there against about 1.0 h" in m.text
+    assert "grainier" in m.text
+    # No single corner to aim at: the eight others are all behind.
+    assert m.thin is None and aim_hint(m) is None
+
+
+@pytest.mark.parametrize("outer_subs", [360, 720])     # 1 h and 2 h on the rest
+def test_the_deep_centre_is_named_whatever_the_rest_has(outer_subs):
+    m = mosaic_depth_map(_grid(3, 3, subs=outer_subs, per_panel=_CENTRE_DEEP_3X3))
+
+    assert m is not None
+    assert "similar amount of time" not in m.text
+    assert "deepest at the middle" in m.text
+
+
+def test_a_2x2_with_one_deep_corner_names_that_corner():
+    m = mosaic_depth_map(_grid(2, 2, subs=360, per_panel={(0, 0): 2160}))
+
+    assert m is not None
+    assert "similar amount of time" not in m.text
+    assert "deepest at the top-left" in m.text
+
+
+def test_a_panel_ahead_by_only_minutes_gets_the_fact_without_the_nag():
+    """The mirror of the young-mosaic case: ahead by the fraction but only by
+    minutes, so no "grainier" warning, and no all-clear either."""
+    m = mosaic_depth_map(_grid(3, 3, subs=12, per_panel={(1, 1): 36}))  # 6 min vs 2
+
+    assert m is not None
+    assert "similar amount of time" not in m.text
+    assert "grainier" not in m.text
+    assert "a little more time at the middle" in m.text
+    assert "only about 4 min ahead" in m.text
+
+
+def test_an_even_3x3_keeps_the_all_clear():
+    m = mosaic_depth_map(_grid(3, 3, subs=360, per_panel={(1, 1): 380, (0, 2): 350}))
+
+    assert m is not None
+    assert m.thin is None
+    assert "similar amount of time" in m.text
+    assert "deepest" not in m.text and "more time" not in m.text
+
+
+def test_a_thin_corner_still_wins_over_a_deep_one():
+    """Thin is the one with an aim hint; it keeps the sentence."""
+    m = mosaic_depth_map(_grid(3, 3, subs=360,
+                               per_panel={(1, 1): 2160, (2, 2): 60}))
+
+    assert m is not None
+    assert m.thin is not None and (m.thin.row, m.thin.col) == (2, 2)
+    assert "thinnest at the bottom-right" in m.text

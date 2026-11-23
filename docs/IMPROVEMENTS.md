@@ -82,25 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟡 Scout 2026-11-23 (sweep 2) — "Your mosaic, panel by panel" says every panel "had a similar amount of time"
-  on a mosaic grown around one deep panel, while it draws that panel black and the rest pale.**
-  *(Pillar: trust + friendliness, PRIORITY 3. Size **S**. Confidence: **reproduced** at the engine function the
-  endpoint serves verbatim, `webapp/routers/targets.py` `target_mosaic_map` → `seestack/mosaicmap.mosaic_depth_map`.)*
-  The thin-panel call compares the **thinnest** panel with the **median** panel (`THIN_FRACTION` 0.6). When most
-  panels are the shallow ones, the median *is* shallow, so nothing is called out and `_verdict_text` falls into the
-  all-clear. Repro (S30-shaped grid, 10 s subs): a 3×3 with 2,160 subs (6 h) on the centre and 360 (1 h) on each of
-  the other eight → `thin=None`, text *"All 9 panels of your 3×3 mosaic have had a similar amount of time — around
-  1.0 h each — so no part of the picture is being held back."* Same with 2 h outside, and on a 2×2 at 6 h / 1 h / 1 h
-  / 1 h. `mosaicMap.ts` `panelShade` shades against the mosaic's own min–max, so the card draws the centre at 1 and
-  the eight at 0 under that sentence: the "a sentence arguing with its own picture" case that the `behind` branch was
-  added for. The eight outer panels are √6 ≈ 2.4× grainier than the centre. That is the shape `field_fulls.py`
-  already names (a mosaic that grew from a deep smaller one). **Fix:** before the all-clear, also test the
-  **deepest** panel against the median by the same two bars (≥ 1/`THIN_FRACTION` × median and ≥
-  `THIN_MIN_SHORTFALL_S` ahead). If it passes, say so plainly: *"…deepest at the centre: about 6 h there against
-  about 1 h on the rest — the rest of the picture will look grainier next to it until it catches up."* Leave `thin`
-  and `aim_hint` alone: there is no single corner to aim at. Regression test in `tests/test_mosaic_map.py` with the
-  repro above, plus an even-mosaic case that keeps the all-clear.
-
 - **🟡 ⏸ Scout 2026-11-19 (sweep 2) — remaining half: the streak guard's stationary-object rescue on a mosaic whose
   subs carry the *mosaic's centre* as their header pointing.** *(Pillar: autonomy + image quality, PRIORITY 2/4.
   Size **M**.)* v0.511.1 asks the streak majority **per panel** (`qc/runner._reconcile_per_panel`, panels from
@@ -3173,6 +3154,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.3 **"Your mosaic, panel by panel" names a mosaic grown around one deep panel (`mosaicmap.mosaic_depth_map` tests the *deepest* panel against the median by the same two bars) instead of calling every panel "similar"** — full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.511.2 **Moon & Sun: a decoder dying in `stack_video`'s second read now says how many of the sharpest frames never arrived (a warning), and when none did it raises a read error naming the file instead of "the disk may be drifting"** — full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.511.1 **Streak guard asks its majority per mosaic panel (`qc/runner._reconcile_per_panel`): a mosaic panel's stationary object is no longer partly dropped as "satellite trail" across a transit when the subs' header pointings split into panels** — the centre-hint half waits on `mosaic_panel_hints` v2. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.511.0 **⭐ Seestar-page upgrade slice 4: only the controls Studio verified on the real scope — park now keeps the scope's current mount mode (`scope_park {equ_mode}` read fresh by `SeestarClient.get_mount`; it used to send no mode), pause/resume stacking, autofocus, focus ±10, plate solve (`POST /api/seestar/{ip}/stop-stack|resume|autofocus|focus|solve`, control-gated)** — the upgrade's last slice
