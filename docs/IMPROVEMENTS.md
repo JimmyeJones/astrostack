@@ -3154,6 +3154,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.4 **`InsightTabs` measures its groups in a layout effect, so a silent group's tab (the Dashboard's "Newest | Best" over nothing to rank) is never painted for a frame — the race that reddened `main`'s frontend CI on #1553** (`Dashboard.test` "gives no tab…"); +1 `flushSync` test, red before.
 - ✅ v0.511.3 **"Your mosaic, panel by panel" names a mosaic grown around one deep panel (`mosaicmap.mosaic_depth_map` tests the *deepest* panel against the median by the same two bars) instead of calling every panel "similar"** — full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.511.2 **Moon & Sun: a decoder dying in `stack_video`'s second read now says how many of the sharpest frames never arrived (a warning), and when none did it raises a read error naming the file instead of "the disk may be drifting"** — full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.511.1 **Streak guard asks its majority per mosaic panel (`qc/runner._reconcile_per_panel`): a mosaic panel's stationary object is no longer partly dropped as "satellite trail" across a transit when the subs' header pointings split into panels** — the centre-hint half waits on `mosaic_panel_hints` v2. Full entry in [`SHIPPED.md`](SHIPPED.md).

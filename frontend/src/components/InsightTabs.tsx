@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Tabs } from "@mantine/core";
 
 /**
@@ -69,8 +69,12 @@ export function InsightTabs({
 
   // Measure after every render, and again whenever a card mutates its own DOM
   // after an async fetch — the parent does not re-render for that, so the
-  // observer is what keeps the tab strip honest.
-  useEffect(measure);
+  // observer is what keeps the tab strip honest. A *layout* effect, so the
+  // re-render it triggers lands before the browser paints: as a passive effect
+  // the every-group fallback below was painted for a frame (a "Newest | Best"
+  // strip flashing over a Dashboard with nothing to rank) — and a test polling
+  // between the two renders saw it, which reddened main's frontend CI.
+  useLayoutEffect(measure);
   useEffect(() => {
     const root = container.current;
     if (!root || typeof MutationObserver === "undefined") return;

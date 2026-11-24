@@ -1,6 +1,8 @@
 import { MantineProvider } from "@mantine/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect, useState } from "react";
+import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
 import { InsightTabs, type InsightGroup } from "./InsightTabs";
 
@@ -37,6 +39,35 @@ function LateCard({ text }: { text: string }) {
 }
 
 describe("InsightTabs", () => {
+  it("never paints a tab for a silent group, not even on the first frame", () => {
+    // The pre-measurement fallback offers every group a tab. Measuring in a
+    // passive effect left that fallback on screen for a frame — a "Newest | Best"
+    // strip flashing over a Dashboard with nothing to rank, and the race that
+    // reddened main's frontend CI (Dashboard.test "gives no tab to a group whose
+    // cards have nothing to say"). Render outside act(): `flushSync` commits and
+    // runs layout effects (and the sync update they schedule) but not a passive
+    // effect's update, so the DOM here is what the browser would first paint.
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const g = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const was = g.IS_REACT_ACT_ENVIRONMENT;
+    g.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      flushSync(() => root.render(
+        <MantineProvider>
+          <InsightTabs groups={[group("newest", "Newest", "M31"), silent("best", "Best")]} />
+        </MantineProvider>,
+      ));
+      expect(host.querySelectorAll('[role="tab"]')).toHaveLength(0);
+      expect(host).toHaveTextContent("M31");
+    } finally {
+      flushSync(() => root.unmount());
+      g.IS_REACT_ACT_ENVIRONMENT = was;
+      host.remove();
+    }
+  });
+
   it("shows one group at a time instead of stacking them all", async () => {
     tabs([
       group("overview", "Overview", "Last night's session"),
