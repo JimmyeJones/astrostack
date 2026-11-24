@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-11-24 (Scout, branch `claude/sweet-euler-8tbxaq`) — QA rotation sweep (3), new angle — an ASTAP that is a *wrapper script* hitting the solve timeout: side effects CLEAN; one low-confidence note, nothing filed. Inbox unchanged. Dogfood `--build --mosaic` CLEAN.
+
+- **Suite:** 8996 passed / 7 skipped on `4607ff85` (xdist `-n 4`, BLAS capped, 19m12s).
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. No open PRs. **Dogfood `--build --mosaic`:** exit 0, nothing overflowing,
+  no console errors, Auto trim 7.9 %; the Target-page paragraph agrees with itself (thin top-right panel on the map,
+  the readiness card and the next move).
+- **Sweep (3), new angle.** Earlier (3) sweeps varied what the binary writes, prints, whether it starts, how it dies
+  or hangs, and the frames it is fed; none asked what the *timeout kill* reaches when `astap_path` is not the solver
+  itself but a launcher (a shell shim or `xvfb-run` around a GUI build, which the documented `/opt/astap` mount or
+  the Settings `astap_path` would allow). Scratch probe (deleted): a sub in `incoming/M_42_sub/`, `ASTAPSolver` with
+  `timeout_s=2` pointed at `#!/bin/sh` + `sleep 20 & wait`. `_solve_once` raises the ordinary "timed out" `ASTAPError`
+  after 2.0 s — no hang, `communicate` does not wait on the inherited pipe — and the scratch dir unwinds; **but the
+  child is still running afterwards** (`subprocess.run` kills the direct child only). Each timed-out rung on a hazy
+  panel would leave one such orphan burning a core until it finishes on its own.
+- **Why not filed.** The bundled image installs `astap_cli` as `/opt/astap/astap` — a plain binary that forks
+  nothing — and `docker/astap/README.md` tells an overriding user to mount "the executable"; no owner fact says he
+  overrides it. Mechanism certain, trigger not on the owner's shape (low confidence). Fix shape, if one ever lands:
+  `Popen(start_new_session=True)` + `os.killpg` on timeout in `_run_astap` (and the `/api/system` `-h` self-test).
+  ffmpeg needs nothing: `iter_frames`' watchdog kills a direct child, and `probe_video` is bounded the same way.
+  **Side effects:** none — the stub saw only the scratch copy; `incoming/` unchanged.
+- **Rotation: (3) done → next sweep is (4)** (the webapp routers; still "not yet run" there: `HEAD` / `Range` on
+  the file-serving GETs).
+
 ## 2026-11-23 (Scout, branch `claude/sweet-euler-rk51kw`) — QA rotation sweep (2), new angle — the panel-depth card's *median* yardstick on a mosaic grown around one deep panel: one bug, filed reproduced (🟡). Inbox unchanged. Dogfood `--build --mosaic` CLEAN.
 
 - **Suite:** 8989 passed / 7 skipped on `26d3d413` (xdist `-n 4`, BLAS capped, 13m58s).
