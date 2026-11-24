@@ -1,5 +1,23 @@
 # Shipped — the record
 
+## 2026-11-24 (Builder, branch `claude/fervent-gauss-5dl359`)
+
+### v0.511.4 — no tab-strip flash over a silent group; `main`'s frontend CI green again
+
+**What.** `main`'s CI went red on #1553 (a docs-only merge): `Dashboard.test.tsx` *"gives no tab to a group whose
+cards have nothing to say"* found the "Your pictures" strip's **Newest | Best** tabs although the Best strip had
+nothing to show. Green locally (5092/5092) — a timing race, and a real (one-frame) UI defect behind it.
+`frontend/src/components/InsightTabs.tsx` offers every group a tab before its first measurement (the "degrades
+safely" fallback) and measured in a passive `useEffect`, which React runs *after* paint: so every page using the
+strip (Dashboard, Target insights) committed — and painted — a tab for each group, then dropped the silent ones.
+A test polling between those two renders saw the fallback. The measurement is now a `useLayoutEffect`; the
+re-render it triggers lands before paint, so the fallback is never on screen once the DOM can be measured. The
+`MutationObserver` for late-arriving cards is unchanged. Frontend only: no API, config, schema or default change.
+
+**Tests.** `InsightTabs.test.tsx` +1: renders outside `act()` with `flushSync` (commits and runs layout effects
+plus their sync update, but not a passive effect's update) and asserts no tab for a speaking + silent pair. Red on
+the old code, green after.
+
 ## 2026-11-23 (Builder, branch `claude/fervent-gauss-l0maeq`)
 
 ### v0.511.3 — a mosaic grown around one deep panel is no longer called even
