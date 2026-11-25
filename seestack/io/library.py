@@ -703,10 +703,36 @@ class Library:
         return Project.open(self.targets_dir / entry.safe_name)
 
     def find_target(self, name_or_safe: str) -> TargetEntry | None:
+        """The target whose **folder** (``safe_name``) is ``name_or_safe``, else
+        the one whose display name is.
+
+        The folder wins because every URL, job and stored path names a target by
+        its safe name. Two different targets can answer to one string — "M 31"
+        lives in folder ``M_31`` and a later "M_31" gets ``M_31-<hash>`` from
+        :meth:`_allocate_safe_name` — and a bare ``name = ? OR safe_name = ?``
+        handed back whichever row SQLite met first: the "M 31" card's link then
+        opened the other target, Delete removed the wrong one and a re-scan of
+        "M 31" ingested next to the other target's name. A caller holding a
+        *display* name uses :meth:`find_target_by_name`.
+        """
         assert self._conn is not None
         row = self._conn.execute(
-            "SELECT * FROM targets WHERE name = ? OR safe_name = ?",
-            (name_or_safe, name_or_safe),
+            "SELECT * FROM targets WHERE safe_name = ? OR name = ? "
+            "ORDER BY (safe_name = ?) DESC LIMIT 1",
+            (name_or_safe, name_or_safe, name_or_safe),
+        ).fetchone()
+        return _row_to_target(row) if row else None
+
+    def find_target_by_name(self, name: str) -> TargetEntry | None:
+        """:meth:`find_target` for a caller holding a **display** name: the
+        target called ``name`` wins over one whose folder happens to be
+        spelled ``name``; the folder match is still the fallback, so a target
+        renamed since (its folder keeps the old spelling) is found as before."""
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT * FROM targets WHERE name = ? OR safe_name = ? "
+            "ORDER BY (name = ?) DESC LIMIT 1",
+            (name, name, name),
         ).fetchone()
         return _row_to_target(row) if row else None
 
