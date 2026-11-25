@@ -82,6 +82,26 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 Scout 2026-11-25 (sweep 4) — a target whose *display name* equals another target's *folder name* takes over
+  that target's URL: its card opens the wrong page, and Delete removes the wrong target.** *(Pillar: friendliness
+  + data safety inside `targets/`, PRIORITY 3. Severity medium — needs the name pair, but then it is silent and
+  Delete acts on the wrong one. Confidence: **reproduced** through the routes. Size **S**.)* `Library.find_target`
+  is `WHERE name = ? OR safe_name = ?` with `fetchone()`, and the name-index match comes back first.
+  `_allocate_safe_name` already gives the second spelling its own folder, but not its own *name*. Repro (empty
+  library, `client` fixture): `open_or_create_target("M 31")` → folder `M_31`; `open_or_create_target("M_31")` →
+  `M_31-dfde3992`. Then `GET /api/targets/M_31` (the "M 31" card's link, `Library.tsx:124`) answers the **other**
+  target, `DELETE /api/targets/M_31` deleted "M_31" and left "M 31", and a re-scan of "M 31" through
+  `open_or_create_target` returns the *other* entry next to the right project. So `_ingest_into_target` reports the
+  wrong name and roots `CacheManager` at the other target's folder. Any order gives it: whichever spelling arrives
+  second shadows the first one's URL. `rename_target` already refuses this shape (it checks both columns, with a
+  comment naming the risk); the create path does not. **Fix:** when the argument is some row's `safe_name`, return
+  that row first. Every router and `open_or_create_target` pass a safe name. Before changing it, audit the callers that
+  pass a *display* name (`scanner._ingest_into_target`'s `find_target(target_name)`, `merged_folder_destination`'s
+  `combined_into`, `open_target(name)` callers) for which row they want. Add a regression test with both
+  spellings in both orders, covering the target page, DELETE and a re-scan. How often it happens is unknown: the
+  usual way in is a typed upload folder or a non-Seestar tool that uses underscores (`M_31` next to the Seestar's
+  `M 31_sub`).
+
 - **🟡 ⏸ Scout 2026-11-19 (sweep 2) — remaining half: the streak guard's stationary-object rescue on a mosaic whose
   subs carry the *mosaic's centre* as their header pointing.** *(Pillar: autonomy + image quality, PRIORITY 2/4.
   Size **M**.)* v0.511.1 asks the streak majority **per panel** (`qc/runner._reconcile_per_panel`, panels from
