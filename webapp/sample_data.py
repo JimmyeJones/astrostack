@@ -880,7 +880,7 @@ def get_sample_status(lib: Library, shape: SampleShape = "field") -> SampleStatu
     """Report whether the demo target exists (by its reserved display name)."""
     if shape == "closing":
         return _closing_sample_status(lib)
-    entry = lib.find_target(sample_target_name(shape))
+    entry = lib.find_target_by_name(sample_target_name(shape))
     if entry is None:
         return SampleStatus(loaded=False)
     try:
@@ -1354,7 +1354,7 @@ def _closing_sample_status(lib: Library) -> SampleStatus:
     """
     total = 0
     for name in SAMPLE_CLOSING_TARGET_NAMES:
-        entry = lib.find_target(name)
+        entry = lib.find_target_by_name(name)
         if entry is None:
             return SampleStatus(loaded=False)
         try:
@@ -1365,7 +1365,7 @@ def _closing_sample_status(lib: Library) -> SampleStatus:
             total += sum(1 for _ in proj.iter_frames())
         finally:
             proj.close()
-    first = lib.find_target(SAMPLE_CLOSING_SHALLOW_TARGET_NAME)
+    first = lib.find_target_by_name(SAMPLE_CLOSING_SHALLOW_TARGET_NAME)
     return SampleStatus(
         loaded=True, safe=first.safe_name if first else None, n_frames=total)
 
@@ -1462,7 +1462,7 @@ def _load_closing_sample(
          _CLOSING_DEEP_EXPTIME_S, (ra, dec + _CLOSING_DEC_OFFSET_DEG)),
     )
     for name, n_subs, exptime_s, at in plan:
-        if lib.find_target(name) is not None:
+        if lib.find_target_by_name(name) is not None:
             continue                    # already there — rebuild only what's missing
         _load_one_closing_target(
             lib, name=name, center=at, n_subs=n_subs, exptime_s=exptime_s)
@@ -1483,7 +1483,7 @@ def remove_sample(lib: Library) -> bool:
     # leave the deeper half of it behind in the library for good.
     names.extend(SAMPLE_CLOSING_TARGET_NAMES)
     for name in names:
-        entry = lib.find_target(name)
+        entry = lib.find_target_by_name(name)
         if entry is None:
             continue
         removed = lib.delete_target(entry.safe_name, remove_files=True) or removed

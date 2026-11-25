@@ -1541,7 +1541,7 @@ def _ingest_into_target(
     # refuses it, even to look it up), and every file under it has the same bad
     # path — so it goes straight to the hold-back, which reports its files as
     # unreadable instead of failing the scan.
-    if not name_is_valid_text(target_name) or library.find_target(target_name) is None:
+    if not name_is_valid_text(target_name) or library.find_target_by_name(target_name) is None:
         held = _hold_back_unreadable_new_target(target_name, files)
         if held is not None:
             return held

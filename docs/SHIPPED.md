@@ -1,5 +1,28 @@
 # Shipped — the record
 
+## 2026-11-25 (Builder, branch `claude/fervent-gauss-4vxton`)
+
+### v0.511.5 — a target's URL always opens that target, whatever the other targets are called
+
+**What.** The Scout's 2026-11-25 sweep (4) 🟡: "M 31" lives in folder `M_31`, and a later "M_31" gets
+`M_31-<hash>` from `_allocate_safe_name` — but `Library.find_target` was `WHERE name = ? OR safe_name = ?` with
+`fetchone()`, so `find_target("M_31")` answered with the *display-name* match. The "M 31" card's link
+(`/api/targets/M_31`) opened the other target, `DELETE /api/targets/M_31` removed the wrong one, and a re-scan of
+"M 31" (`open_or_create_target` → `find_target(safe)`) reported the other target's name and rooted the cache at
+its folder. `find_target` now orders the folder (`safe_name`) match first — every router, job and
+`open_or_create_target` passes a safe name. The few callers holding a **display** name use the new
+`Library.find_target_by_name` (name match first, folder match as the fallback a renamed target needs): the
+scanner's "is this a new target?" hold-back check (`scanner._ingest_into_target`), the skipped-folders card
+(`webapp/skipped_folders.py`, which used to look up `make_safe_name(<display name>)` and so would have found the
+other target too) and the sample-demo status/remove (`webapp/sample_data.py`). Audited and unchanged: merge
+(`mergeInto`/`mergeSources` and the cleanup card send safe names; `merged_folder_destination` returns one), the
+GUI library dialog (safe names), every `open_target(entry.safe_name)`. No schema, config, API-shape or default
+change.
+
+**Tests.** `tests/webapp/test_target_name_folder_shadowing.py` (+7): both spellings in both orders through
+`GET /api/targets/{safe}`, `DELETE` and a re-scan, plus a renamed target still found by display name and folder.
+The "M 31"-first order fails on the old `find_target` (page, DELETE and re-scan), green after.
+
 ## 2026-11-24 (Builder, branch `claude/fervent-gauss-5dl359`)
 
 ### v0.511.4 — no tab-strip flash over a silent group; `main`'s frontend CI green again

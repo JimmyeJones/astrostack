@@ -170,7 +170,12 @@ def already_brought_in(lib, record: SkippedFolder) -> bool:  # noqa: ANN001
     frames actually landed.
 
     Read-only: opens the one project, reads one column, closes it."""
-    entry = lib.find_target(make_safe_name(target_name_for_folder(record.name)))
+    # By display name first: when another target's *folder* is spelled like this
+    # folder's name ("M 31" in ``M_31`` next to a later "M_31" in
+    # ``M_31-<hash>``), the folder lookup alone answers with the wrong target.
+    # The folder lookup stays the fallback for a target renamed since.
+    name = target_name_for_folder(record.name)
+    entry = lib.find_target_by_name(name) or lib.find_target(make_safe_name(name))
     if entry is None:
         return False
     proj = lib.open_target(entry.safe_name)
