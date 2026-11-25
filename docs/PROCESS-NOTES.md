@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-11-25 (Scout, branch `claude/sweet-euler-wi0jah`) — QA rotation sweep (4), new angle — the `{safe}` target path parameter (105 routes) when one target's display name is another's folder name: one bug, filed reproduced (🟡 S). Inbox unchanged. Dogfood `--build --mosaic` CLEAN.
+
+- **Suite:** 8996 passed / 7 skipped on `63f87ea9` (xdist `-n 4`, BLAS capped, 14m38s).
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing
+  owed. No `Diagnostic result:` issue yet. No open PRs. **Dogfood `--build --mosaic`:** exit 0, nothing overflowing,
+  no console errors, Auto trim 7.9 %.
+- **Sweep (4), angle not run before** (grep `find_target`, `shadow`, `case-variant` in this file: none as a sweep).
+  Earlier (4) sweeps fuzzed ids, numbers, methods, headers and filenames. None asked whether `{safe}` names exactly
+  one target. `make_safe_name` folds punctuation and whitespace, and `_allocate_safe_name` hash-suffixes a colliding
+  *folder*. But `Library.find_target` matches `name OR safe_name`, so a second target *called* `M_31` answers the
+  first target's (`M 31` → `M_31`) URL. Reproduced through `create_app()`: the "M 31" card's page served the other
+  target, and `DELETE /api/targets/M_31` removed the other target. Filed in Bugs. `rename_target` already refuses
+  the shape; only the create/scan path lets it in.
+- **Read, not filed:** a case-insensitive dataset (SMB-shared ZFS) would fold `M31`/`m31` folders that
+  `make_safe_name` keeps apart on purpose. Nothing says the owner's dataset is case-insensitive, so this stays a note.
+
 ## 2026-11-24 (Scout, branch `claude/sweet-euler-8tbxaq`) — QA rotation sweep (3), new angle — an ASTAP that is a *wrapper script* hitting the solve timeout: side effects CLEAN; one low-confidence note, nothing filed. Inbox unchanged. Dogfood `--build --mosaic` CLEAN.
 
 - **Suite:** 8996 passed / 7 skipped on `4607ff85` (xdist `-n 4`, BLAS capped, 19m12s).
