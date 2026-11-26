@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## 2026-11-26 (Builder, branch `claude/fervent-gauss-o8jycv`)
+
+### v0.511.8 — turning the password on no longer makes the app slow
+
+**What.** The full audit (2026-11-26, `backend.md` finding 4, measured: 30 parallel GETs 0.48 s without a
+password, 5.35 s with one) found the auth gate ran 200,000 PBKDF2 rounds (~190 ms) for *every* request,
+synchronously inside the async middleware, so requests queued behind each other and the Docker health
+probe queued behind them — the safe configuration was the slow one. Now `webapp.auth._verify` remembers
+credentials it has **accepted** in a 16-entry in-memory LRU keyed on `HMAC(process-random key, salt ‖
+stored hash ‖ password)`: no password is held, a wrong guess still pays the full KDF every time (brute-force
+rate unchanged), and changing/clearing the password or rotating the read-only token orphans every old
+entry because the stored hash and salt are part of the key. The gate's two checks moved into one
+function, `webapp.main._credential_verdict`, run with `run_in_threadpool`, so a KDF the cache cannot
+answer no longer blocks the event loop. **Tests:** `tests/webapp/test_auth_kdf_cache.py` — 20 accepted
+requests pay one KDF (20 before), a wrong password pays it every time, a changed password and a rotated
+token are refused even though the old one was cached, the cache is bounded, and `/api/health` answers
+while a 1.5 s password check is in flight (waited 1.56 s before). No config, schema, API or default
+change.
+
 ## 2026-11-26 (Builder, branch `agent/seestar-poll-oserror`)
 
 ### v0.511.7 — the Seestar page keeps updating after the scope has been switched off

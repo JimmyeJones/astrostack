@@ -346,7 +346,25 @@ def cross_site_reason(request) -> str | None:  # noqa: ANN001
     return None
 
 
+def _credential_verdict(settings, header: str | None) -> str:  # noqa: ANN001
+    """``"full"``, ``"readonly"`` or ``"none"`` for one ``Authorization`` header.
+
+    One function so the gate makes a single threadpool hop. The token is only
+    asked about when the password check has already said no, so the owner's own
+    browsing pays one KDF (and, once accepted, none — :func:`webapp.auth._verify`
+    remembers successes) and a request with no header pays none.
+    """
+    from webapp import auth
+
+    if auth.check_basic_auth(settings, header):
+        return "full"
+    if auth.check_readonly_auth(settings, header):
+        return "readonly"
+    return "none"
+
+
 def _install_auth_gate(app: FastAPI) -> None:
+    from starlette.concurrency import run_in_threadpool
     from starlette.responses import JSONResponse
 
     from webapp import auth
@@ -366,15 +384,15 @@ def _install_auth_gate(app: FastAPI) -> None:
             settings = store.get()
             if auth.is_enabled(settings):
                 header = request.headers.get("Authorization")
-                # Cost note: this only ever asks about the token when the password
-                # check has already said no, so the owner's own browsing pays one
-                # KDF as before and a request with no header pays none (both
-                # checks refuse an absent header before hashing). A request
-                # carrying the token pays two, which is fine for a diagnostics
-                # poll, and a *wrong* password pays two, which is not a problem to
-                # have.
-                if not auth.check_basic_auth(settings, header):
-                    if auth.check_readonly_auth(settings, header):
+                # Cost note (_credential_verdict): an accepted credential is
+                # remembered, so steady browsing pays no KDF; a wrong one pays two.
+                # Off the event loop: a KDF the cache cannot answer (the first
+                # request after boot, a wrong password, a new browser) is ~190 ms
+                # of CPU, and run inline it stalled every other request — the
+                # Docker health probe included — behind it (audit 2026-11-26).
+                verdict = await run_in_threadpool(_credential_verdict, settings, header)
+                if verdict != "full":
+                    if verdict == "readonly":
                         # A credential we recognise, on a request it may not make.
                         # 403, not 401: the caller is authenticated and retrying
                         # with the same token would be pointless, and the refusal
