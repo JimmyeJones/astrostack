@@ -2,6 +2,20 @@
 
 ## 2026-11-26 (Builder, branch `claude/fervent-gauss-o8jycv`)
 
+### v0.511.9 — a full disk no longer stops the app from starting
+
+**What.** The full audit (2026-11-26, `backend.md` finding 6, reproduced with a simulated ENOSPC) found
+`SettingsStore.__init__` re-saved `config.json` unconditionally on every boot and let the `OSError` escape
+the lifespan: a pool or dataset quota that filled during a big stack left the container restart-looping,
+with the Storage page — the friendly way to free space — unreachable. Now boot skips the save when the
+file on disk is already byte-for-byte what it would write, and a boot-time `ensure_dirs`/save that fails
+with `OSError` is logged and the app starts with the settings in memory. A real settings change still
+raises if it cannot save, as before. **Tests:** `tests/webapp/test_config_boot_full_disk.py` — a boot
+whose save hits ENOSPC keeps the owner's own value and leaves his file untouched, an identical config is
+not rewritten, a fresh or repaired config is still written, and the whole app answers `/api/health` and
+`/api/settings` with every config write failing. Three red before. No config, schema, API or default
+change.
+
 ### v0.511.8 — turning the password on no longer makes the app slow
 
 **What.** The full audit (2026-11-26, `backend.md` finding 4, measured: 30 parallel GETs 0.48 s without a

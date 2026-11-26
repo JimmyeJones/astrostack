@@ -533,6 +533,13 @@ def _load_resilient(text: str, root: str) -> "Settings":
     return Settings(data_root=root)
 
 
+def _read_text_or_none(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 class SettingsStore:
     """Thread-safe load/save wrapper around a single config.json."""
 
@@ -557,8 +564,22 @@ class SettingsStore:
         )
         if conflict is not None:
             log.warning("unsafe folder layout in config.json: %s", conflict)
-        self._settings.ensure_dirs()
-        self.save()
+        # Best-effort on boot. A full pool, a dataset quota or a read-only mount
+        # used to make this save raise out of the lifespan, so the container
+        # restart-looped and the Storage page — the friendly way to free space —
+        # was unreachable (full audit 2026-11-26, backend.md finding 6). The
+        # settings are already in memory; a save that fails here is retried by the
+        # next real one (a settings change), and a config that is already on disk
+        # byte-for-byte is not rewritten at all.
+        try:
+            self._settings.ensure_dirs()
+            if self._serialised() != _read_text_or_none(cfg_path):
+                self.save()
+        except OSError as exc:
+            log.warning(
+                "could not write the settings file on start-up (%s) — starting "
+                "anyway with the settings in memory; free some space and the next "
+                "settings change will save them", exc)
 
     def get(self) -> Settings:
         with self._lock:
@@ -588,11 +609,15 @@ class SettingsStore:
             self.save()
             return self._settings.model_copy(deep=True)
 
+    def _serialised(self) -> str:
+        """The exact text :meth:`save` writes."""
+        return json.dumps(json.loads(self._settings.model_dump_json()), indent=2)
+
     def save(self) -> None:
         with self._lock:
             self._settings.state_dir.mkdir(parents=True, exist_ok=True)
             path = self._settings.config_path
-            payload = json.dumps(json.loads(self._settings.model_dump_json()), indent=2)
+            payload = self._serialised()
             # Atomic *and* durable: a crash mid-write must not corrupt
             # config.json (which would silently revert all settings to defaults
             # on next boot), and neither must a power loss in the window between
