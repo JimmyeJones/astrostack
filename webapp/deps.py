@@ -22,6 +22,28 @@ def get_settings(request: Request) -> Settings:
     return request.app.state.settings_store.get()
 
 
+def refuse_on_unsafe_layout(settings: Settings) -> None:
+    """409 while the install sits in the unsafe nested folder layout.
+
+    ``SettingsStore.update`` refuses to *enter* that layout, but an install that
+    reached it earlier still boots (§9) — and there the library's own, correctly
+    scoped deletes resolve inside ``incoming/``: with ``incoming/`` under
+    ``library/targets`` the scan adopts each raw folder as a target's project
+    folder and "Delete target, remove files" ``rmtree``s the raws (full audit
+    2026-11-26, backend.md finding 9). Booting is fine; deleting is not
+    (AGENTS.md §10). Called by every endpoint that removes files under the
+    library, and by the scan.
+    """
+    conflict = settings.layout_conflict()
+    if conflict is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=("Stopped to protect your raw frames. " + conflict
+                    + " Until the folders are fixed in Settings, the app won't "
+                    "delete, merge, clear or scan anything."),
+        )
+
+
 def get_job_manager(request: Request) -> JobManager:
     return request.app.state.job_manager
 

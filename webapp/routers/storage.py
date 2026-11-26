@@ -428,6 +428,7 @@ def clear_cache(safe: str, request: Request, stage: str = "all") -> dict:
     stacked outputs are never touched — only re-creatable intermediates."""
     if stage not in _CLEARABLE:
         raise HTTPException(status_code=400, detail=f"stage must be one of {_CLEARABLE}")
+    deps.refuse_on_unsafe_layout(deps.get_settings(request))
     lib = deps.open_library(request)
     try:
         entry = lib.find_target(safe)
@@ -485,6 +486,7 @@ def prune_stack_runs(safe: str, body: PruneRequest, request: Request) -> dict:
         raise HTTPException(status_code=400, detail="Provide 'keep' or 'ids'")
     if body.keep is not None and body.keep < 0:
         raise HTTPException(status_code=400, detail="'keep' must be >= 0")
+    deps.refuse_on_unsafe_layout(deps.get_settings(request))
 
     lib, proj = deps.open_target_project(request, safe)
     # Nested, not two statements in one ``finally`` — if ``proj.close()`` ever

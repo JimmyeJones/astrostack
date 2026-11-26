@@ -106,13 +106,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `config.json.unreadable-<stamp>`, do not re-save, and start with the watcher and auto-stack paused; carry unknown
   top-level keys through `save()`. Add an upgrade test for each.
 
-- **🟠 Full audit 2026-11-26 — an install already in the unsafe nested layout still deletes.** *(Pillar: §10, the
-  `incoming/` guarantee. Size **S**. Low likelihood, total loss if hit. Reproduced by the audit, `backend.md` §9 (exp3:
-  `DELETE /api/targets/M_42?remove_files=true` → 200, 3 of 6 raw subs gone). Scout 2026-11-26 confirmed in code:
-  `nested_incoming_conflict` is called only in `webapp/config.py` (boot warning, save refusal). No destructive endpoint
-  checks it.)* Fix: while the conflict is non-None, refuse delete-target, merge, cache clear, prune and the scan with a
-  plain sentence, and show it on the Dashboard.
-
 - **🟠 Full audit 2026-11-26 — a failed update leaves the app stopped, and a retry destroys the way back.**
   *(Pillar: "just works", §9. Size **S–M**. Reproduced by the audit with the real scripts (`backend.md` §2,
   `subsystems.md` §4). Scout re-read `scripts/deploy.sh` 2026-11-26: `last-good` is written from the *checkout's*
@@ -3254,6 +3247,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.11 **An install already in the unsafe nested folder layout no longer deletes: while `Settings.layout_conflict()` is set, delete-target-with-files, merge, cache clear, prune, stack-run delete, reprocess-all and the scan (endpoint and watcher-queued `_pipeline_body`) refuse with a plain sentence (`deps.refuse_on_unsafe_layout`, 409), and the Dashboard's folder notice shows it, undismissable** (full audit 2026-11-26, backend.md finding 9) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.10 **Auto's wavelet denoise removes on the export the grain its preview showed removed: `_denoise` thresholds each wavelet band at its own MAD capped by a pixel-domain noise model (`wavelet_noise_caps`, `_bayes_shrink_correlated`), so a stacker's ~1 px-correlated grain is no longer left at 92–98 % on the saved picture** (Scout 2026-11-26 sweep 1) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.9 **The app boots on a full or read-only data disk: `SettingsStore.__init__` skips rewriting an identical `config.json` and makes the boot-time save best-effort (logs and continues) instead of restart-looping with Storage unreachable** (full audit 2026-11-26, backend.md finding 6) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.8 **With a password set, the auth gate no longer pays ~190 ms of PBKDF2 on the event loop per request — `auth._verify` remembers accepted credentials (successes only, keyed on the stored hash+salt) and `main._credential_verdict` runs in a threadpool** (full audit 2026-11-26, backend.md finding 4) — full entry in [`SHIPPED.md`](SHIPPED.md)

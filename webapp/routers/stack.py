@@ -5775,6 +5775,7 @@ def delete_stack_run(safe: str, run_id: int, request: Request) -> dict:
     from webapp.routers.storage import purge_stack_run
     from webapp.run_meta import delete_run_meta
 
+    deps.refuse_on_unsafe_layout(deps.get_settings(request))
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { folderReadiness, folderReadinessSignature } from "./folderReadiness";
+import { folderNoticeText, folderReadiness, folderReadinessSignature } from "./folderReadiness";
 import type { SystemInfo } from "../../api/client";
 
 function folders(
@@ -48,6 +48,17 @@ describe("folderReadiness", () => {
     }))).toEqual({ ready: false, kind: "incoming", problem: "missing" });
   });
 
+  it("puts the unsafe nested layout ahead of every other folder problem", () => {
+    const f = folders({ incoming: { path: "/x", exists: false, writable: false } });
+    expect(folderReadiness({ ...f!, layout_conflict: "Your library folder would sit inside the incoming folder." }))
+      .toEqual({ ready: false, kind: "layout", problem: "nested",
+        message: "Your library folder would sit inside the incoming folder." });
+  });
+
+  it("ignores a null layout_conflict (a safe install)", () => {
+    expect(folderReadiness({ ...folders()!, layout_conflict: null })).toEqual({ ready: true });
+  });
+
   it("does not nag when the backend omits the folders field (older backend)", () => {
     expect(folderReadiness(undefined)).toEqual({ ready: true });
   });
@@ -65,5 +76,21 @@ describe("folderReadinessSignature", () => {
       .toBe("incoming:unwritable");
     expect(folderReadinessSignature({ ready: false, kind: "library", problem: "missing" }))
       .toBe("library:missing");
+  });
+});
+
+describe("folderNoticeText", () => {
+  it("shows the server's sentence and says what the app now refuses", () => {
+    const t = folderNoticeText({ ready: false, kind: "layout", problem: "nested", message: "Pick a folder outside it." });
+    expect(t.title).toMatch(/could delete your raw frames/);
+    expect(t.body).toMatch(/^Pick a folder outside it\. /);
+    expect(t.body).toMatch(/won't delete, merge, clear or scan/);
+  });
+
+  it("keeps the four existing folder messages", () => {
+    expect(folderNoticeText({ ready: false, kind: "incoming", problem: "missing" }).title)
+      .toBe("Your incoming folder doesn't exist yet");
+    expect(folderNoticeText({ ready: false, kind: "library", problem: "unwritable" }).title)
+      .toBe("Your library folder isn't writable");
   });
 });
