@@ -33,6 +33,14 @@ token are refused even though the old one was cached, the cache is bounded, and 
 while a 1.5 s password check is in flight (waited 1.56 s before). No config, schema, API or default
 change.
 
+**Closed Bugs entry (cut whole, filed by the Scout 2026-11-26 while this was in flight):**
+
+- **🟡 Full audit 2026-11-26 — with a password set, every request runs a 200,000-round PBKDF2 on the event loop.**
+  *(Pillar: friendliness. Size **S**. Measured by the audit: 30 parallel GETs 0.48 s → 5.35 s (`backend.md` §4); Scout
+  measured one KDF at 58 ms here and confirmed `webapp/main.py::_auth_gate` calls `auth.check_basic_auth`
+  synchronously with no cache.)* A gallery of thumbnails queues behind it, and so does the Docker health probe. Fix:
+  cache a successful verdict keyed by an HMAC of the header for a few minutes, and run a cold check in a threadpool.
+
 ## 2026-11-26 (Builder, branch `agent/seestar-poll-oserror`)
 
 ### v0.511.7 — the Seestar page keeps updating after the scope has been switched off

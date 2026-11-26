@@ -1,5 +1,32 @@
 # Process notes & QA sweep records
 
+## 2026-11-26 (Scout, branch `claude/sweet-euler-m4byti`) — the full audit's unfiled defects filed as Bugs (each re-checked in code or re-run); QA rotation sweep (1), new angle — Auto's wavelet denoise on *correlated* grain: one bug, filed reproduced (🟠). Inbox unchanged. Dogfood `--build --mosaic` CLEAN.
+
+- **Inbox / PRs.** The same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated, so nothing is owed.
+  No `Diagnostic result:` issue. No open PRs. **Dogfood `--build --mosaic`:** EXIT 0, nothing overflowing, no console
+  errors, Auto trim 7.9 %.
+- **Audit filing.** The 2026-11-26 audit (`docs/audit/2026-11-26/`) had verified defects that no backlog entry held.
+  Before filing, each one was re-checked here. Re-run: `SettingsStore` boot under a patched ENOSPC
+  `write_text_durably` (raises), a truncated `config.json` (boots with `auto_stack` True, file overwritten, no copy kept),
+  and an unknown key (dropped after one boot); one PBKDF2 at 58 ms. Re-read: `deploy.sh`'s `last-good` ordering,
+  `build_solve_arglist`, the un-seeded `StabilityTracker`, `_estimate_peak_bytes`, `lucky.py`'s un-normalised
+  `driz.add`, no `{ip}` validation, and no destructive endpoint calling `nested_incoming_conflict`. Nine Bugs entries
+  went in; the six small items went into one ⚪ batch (the audit's own advice). The audit's picture-quality and
+  process recommendations change defaults or the rules, so they went under Needs owner sign-off as one pointer entry.
+- **Sweep (1), angle the 11-22 (1) left open ("a noisy real stack, Auto on the denoise branch").** 11-14 ran the noisy
+  branch on *white* synthetic grain and 11-22 ran real stacker grain on the *clean* branch, so neither crossed the two.
+  Probe (scratch): `seestack.edit.ops.detail._denoise` with Auto's `wavelet` / 0.6, sky 0.05 + σ 0.004 grain,
+  Gaussian-correlated at 0 / 0.7 / 0.8 / 1.0 px (`grain_lag_ratio` at step 5: 1.0 / 0.65 / ≈0.56 / 0.47; the app's own
+  sample stack measured 0.58 on 11-22, and both dogfood masters measure 0.66 at stride 2 today). Grain left on the same
+  sky pixels: white grain 0.44 at every step; correlated grain 0.92–0.98 on the export vs 0.44 on a step-5 preview, and
+  0.95 / 0.64 / 0.44 at steps 1 / 2 / 3 for 1080×1920. Cause: BayesShrink reads σ off the finest diagonal band, and a
+  correlated grain leaves little power there. Filed 🟠 in Bugs. The real dogfood masters are too small and too
+  star-filled to separate the grain cleanly (both read 0.98–0.99 either way), so the reproduction is on ratio-matched
+  synthetic grain, and the entry says so.
+- **Not yet run in a sweep (1):** the `tv` denoise method on correlated grain, and the chroma denoise
+  (`detail.chroma_denoise`, which works at 25 px scale and should be immune).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-11-25 (Scout, branch `claude/sweet-euler-wi0jah`) — QA rotation sweep (4), new angle — the `{safe}` target path parameter (105 routes) when one target's display name is another's folder name: one bug, filed reproduced (🟡 S). Inbox unchanged. Dogfood `--build --mosaic` CLEAN.
 
 - **Suite:** 8996 passed / 7 skipped on `63f87ea9` (xdist `-n 4`, BLAS capped, 14m38s).
