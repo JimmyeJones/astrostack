@@ -3145,6 +3145,14 @@ outright bug in existing behaviour, never to add capability.
   object card and its blurb, and `seestack/bg_advice.py` supplies the flatten nudge. If anything is still
   missing there, it is a copy or wiring task on bundled data, not a network one.
 
+- **🔒 Three security hardenings left over from the 2026-11-26 full audit (PR #1568 named them, never filed; filed
+  by Builder 2026-11-26).** v0.511.6 closed the worst route: `seestack.solve.astap.find_astap` executing any file
+  the ASTAP path setting named. Still open, and each one changes behaviour on his running install, so ask first:
+  (a) **writes to host-path settings** (`astap_path`, the incoming/library folders) need a credential even with
+  auth off, which changes how he edits Settings; (b) **a Host-header allow-list** against DNS rebinding, which
+  could lock out a hostname or IP he already uses; (c) **a non-root container user**, which changes file ownership
+  on his NAS and must be checked against `incoming/` read access (§10) before it ships. Size M each.
+
 _(Normal, tested changes merge to the default branch automatically — see
 AGENTS.md §8. Only the items above need a human's OK first.)_
 
