@@ -88,6 +88,41 @@ auditors' scratch space, which is not kept. The key pictures are copied into [`i
 5. **The Target page takes 9–18 s to load** (41 API calls), mostly planning data for a tab
    that isn't open. [ux.md]
 
+## Speed at his scale ([perf.md](perf.md))
+
+**Day-to-day use is fine.** The polled endpoints answer in 5–15 ms with 105 targets and 114k
+frames, boot takes ~1 s, and Auto runs in ~2 s.
+
+**Restacking is not.** These timings come from a 4-vCPU test box; his CPU is unknown, so each
+figure is a range:
+
+| Job | This box | 2.9× faster box |
+|---|---|---|
+| Plain stack, per sub | 2.2 s | 0.78 s |
+| His biggest target (35,894 subs), plain | ≈ 22 h | ≈ 8 h |
+| His biggest target, drizzle ×1.5 + reject | ≈ 51 h | ≈ 56 h |
+| Restack everything (~110k subs) | ≈ 68 h | ≈ 24 h |
+
+Every restack starts from scratch: `aligned_cache_path` is dead schema, and the default κ-σ
+stack reads and fully reprocesses every sub twice.
+
+**Biggest wins:**
+1. **Incremental "add tonight's subs to the master".** Save the accumulator sums and the
+   per-pixel mean/σ next to the run, then process only the new subs. 500 new subs would take
+   ~10 min instead of ~22 h. Size L.
+2. **On big targets, estimate κ-σ pass 1 from a sample of frames per panel.** About −45 % of
+   every big plain stack. Size M, needs a parity test.
+3. **Take drizzle's per-sub work off its single thread** and bound it to each sub's footprint.
+   Saves ~25–50 h on the biggest target. Size M.
+
+**Defects:**
+- The out-of-memory guard underestimates mosaics by 1.7–3.2×, and ignores the post-stack
+  steps that hit the same peak.
+- A full-res export of an edited 8000×6000 picture takes 199 s and peaks at 4.85 GB, with no
+  memory guard; its cache is thrown away on every update.
+- The watcher treats every file as new after a restart.
+- The biggest target's page downloads 20.6 MB of frame JSON with no gzip (~1.9 MB gzipped).
+
 ## Things that are broken or unsafe (ranked)
 
 1. 🔒 **Fixed in v0.511.6:** the ASTAP path setting could name any program, and the next plate
