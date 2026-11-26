@@ -1,5 +1,37 @@
 # Shipped — the record
 
+## 2026-11-26 (Builder, branch `claude/fervent-gauss-lgvhh2`)
+
+### v0.511.12 — a damaged `config.json` is kept, and a rollback keeps newer settings
+
+**What.** (b) `SettingsStore.__init__` now parses `config.json` first (`_parse_config`). A file that cannot be read
+or is not a JSON object (truncated, garbled, empty) is **left in place and copied** beside itself as
+`config.json.unreadable-<UTC stamp>` (`_keep_unreadable_copy`; one copy per distinct content, so a restart loop does
+not pile them up), boot does **not** re-save, and the in-memory settings are the defaults with `watcher_enabled`,
+`auto_stack` and `auto_edit_on_autostack` **off**, so nothing unattended runs on settings the owner never chose. An
+error line in the log says so; the first settings change saved writes a fresh file. (c) Top-level keys the running
+build does not know are kept on the store (`_unknown`) and written back by `_serialised`, so rolling back and forward
+again keeps every setting added in between. The per-field safety net (`_load_resilient` dropping one invalid value)
+is unchanged. **Tests:** `tests/webapp/test_config_unreadable_and_rollback.py` (7; 5 red before — the damaged file
+was overwritten with defaults, and the unknown keys vanished on boot). No schema, layout or API change; no default
+changes for a readable config. The audit's "password off" half is not changed here: an unreadable file still boots
+with auth off, as before, because the hash is in the file that cannot be read.
+
+**The entry as filed:**
+
+- **🟠 Full audit 2026-11-26 — `SettingsStore.__init__` re-saves `config.json` on every boot, with three
+  consequences.** *(Pillar: "just works" / upgrade safety, §9. Size **S**. Reproduced by the Scout 2026-11-26 through
+  `SettingsStore(data_root=…)`; audit `backend.md` §6, §10, §11.)*
+  (The full-disk boot half is done — see `SHIPPED.md`, "a full disk no longer stops the app from starting".)
+  (b) **A truncated `config.json` boots on defaults and is overwritten at once.** Result: `auto_stack` True (his is
+  off), password off, folders reset; no copy of the bad file is kept (`webapp/config.py::_load_resilient` →
+  `Settings(data_root=root)` → `save()`).
+  (c) **Rollback drops unknown keys.** A key the loaded build does not know is gone after one boot, so rolling back
+  and then forward again loses every setting added in between.
+  Fix for (b)/(c): on a parse failure keep
+  `config.json.unreadable-<stamp>`, do not re-save, and start with the watcher and auto-stack paused; carry unknown
+  top-level keys through `save()`. Add an upgrade test for each.
+
 ## 2026-11-26 (Builder, branch `claude/fervent-gauss-lvezh9`)
 
 ### v0.511.11 — an install already in the unsafe nested folder layout no longer deletes
