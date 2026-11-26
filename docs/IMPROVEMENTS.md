@@ -82,30 +82,16 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟠 Scout 2026-11-26 (sweep 1) — Auto's wavelet denoise shows smoothing in the preview that the export does not
-  have, on any stack whose grain is correlated, which is what the stacker produces.** *(Pillar: editor, PRIORITY 1.
-  Size **S–M**. Confidence: **reproduced** at op level; the grain correlation is **measured** on real stacker output.)*
-  `seestack/edit/ops/detail.py::_denoise` runs skimage `denoise_wavelet(..., method="BayesShrink",
-  rescale_sigma=True)`, which estimates the noise σ from the finest diagonal wavelet band. A stacker's reprojection
-  correlates the grain over about a pixel (`source_grain_ratio` 0.58 at step 5 on the app's own sample stack, 11-22
-  sweep; 0.66 at stride 2 on both dogfood masters today). That leaves little power in the finest band, so on the
-  full-size master σ is underestimated and almost nothing is removed. The strided proxy has decorrelated grain, so
-  the same op removes it properly. Repro (scratch, `_denoise` with Auto's `method="wavelet", strength=0.6`, sky 0.05
-  with σ 0.004 grain Gaussian-correlated at 0.8 px, measured on the same sky pixels):
-
-  | proxy step | grain left, white grain | grain left, stacker-like grain |
-  |---|---|---|
-  | 1 (export) | 0.44 | **0.95** |
-  | 2 (S30 single field) | 0.44 | 0.64 |
-  | 3 / 5 (mosaics) | 0.44 | 0.44 |
-
-  At 3000×4500, step 5: the preview leaves 44 % of the grain and the export leaves 92–98 % (correlation 0.7–1.0 px).
-  What he sees: Auto's preview looks smooth; the saved picture keeps nearly all its grain, so on the export Auto's
-  denoise does almost nothing. `tests/test_edit_proxy_parity.py::test_the_other_denoise_methods_preview_what_they_export`
-  pins wavelet parity on **white** grain only, which is why it stays green. Fix direction (Builder decides): pass
-  `sigma=` explicitly from a correlation-aware estimate (`estimate_noise_sigma` scaled by `grain_lag_ratio`, as
-  `analyze_proxy` already does), or skip the finest level(s) where the grain is correlated. Make preview and export
-  remove the same share; add the correlated-grain case to the parity file. Check `tv` the same way.
+- **🟡 Builder 2026-11-26 (found fixing v0.511.10) — the total-variation denoise has the same preview↔export gap
+  on a stacker's correlated grain that wavelet had.** *(Pillar: editor, PRIORITY 1. Size **S–M**. Confidence:
+  **reproduced** at op level; not Auto's method, so only someone who picks "Total-variation" sees it.)*
+  `seestack/edit/ops/detail.py::_denoise`'s `tv` branch runs `denoise_tv_chambolle` with a fixed
+  `weight=0.02+0.2·strength`; correlated grain has little high-frequency energy for TV to remove, the strided
+  proxy's grain is white. Share of the grain left at strength 0.6 (same scratch repro as the v0.511.10 entry in
+  `SHIPPED.md`), proxy step 1/2/3/5: white 0.16/0.17/0.17/0.17; 0.6 px 0.36/0.19/0.17/0.17; **0.8 px
+  0.67/0.25/0.18/0.18**; 1.0 px 0.56/0.32/0.21/0.17. Fix direction: scale `weight` by the measured grain gain
+  (`wavelet_noise_caps`' `G`) or denoise TV on the same noise model; add the correlated case to
+  `test_the_wavelet_denoise_exports_what_it_previews_on_stacker_grain`'s neighbour for `tv`.
 
 - **🟠 Full audit 2026-11-26 — `SettingsStore.__init__` re-saves `config.json` on every boot, with three
   consequences.** *(Pillar: "just works" / upgrade safety, §9. Size **S**. Reproduced by the Scout 2026-11-26 through
@@ -3268,6 +3254,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.10 **Auto's wavelet denoise removes on the export the grain its preview showed removed: `_denoise` thresholds each wavelet band at its own MAD capped by a pixel-domain noise model (`wavelet_noise_caps`, `_bayes_shrink_correlated`), so a stacker's ~1 px-correlated grain is no longer left at 92–98 % on the saved picture** (Scout 2026-11-26 sweep 1) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.9 **The app boots on a full or read-only data disk: `SettingsStore.__init__` skips rewriting an identical `config.json` and makes the boot-time save best-effort (logs and continues) instead of restart-looping with Storage unreachable** (full audit 2026-11-26, backend.md finding 6) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.8 **With a password set, the auth gate no longer pays ~190 ms of PBKDF2 on the event loop per request — `auth._verify` remembers accepted credentials (successes only, keyed on the stored hash+salt) and `main._credential_verdict` runs in a threadpool** (full audit 2026-11-26, backend.md finding 4) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.7 **The Seestar telemetry thread no longer dies the first time the scope goes offline — `SeestarClient.connect` raises `SeestarError` for a refused/timed-out socket and `SeestarManager._poll_one` is guarded per scope** (full audit 2026-11-26, subsystems §1) — full entry in [`SHIPPED.md`](SHIPPED.md).

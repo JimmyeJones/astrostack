@@ -140,9 +140,12 @@ def denoise_understates_on_proxy(method: str, strength: float,
 
     Only the **bilateral** method. Wavelet (the default) and total-variation were
     measured over the same grid and agree with their export to within 3 % at every
-    proxy step, because their thresholds are set from the grain they are given
-    rather than from a fixed neighbourhood — so flagging them would be a nag about
-    nothing. Bilateral is the one whose window shrinks with the proxy while the
+    proxy step on white grain, because their thresholds are set from the grain they
+    are given rather than from a fixed neighbourhood — so flagging them would be a
+    nag about nothing. On a stacker's *correlated* grain wavelet agrees too (since
+    ``_bayes_shrink_correlated``); total-variation does not yet — see the Bugs
+    entry in ``docs/IMPROVEMENTS.md`` — and is not flagged here, because the
+    advisory's wording is about the bilateral window. Bilateral is the one whose window shrinks with the proxy while the
     grain it is fighting does not: see ``_BILATERAL_ADVISORY_RATIO`` for the
     measurement and why the rule is the ratio of the two terms.
 
@@ -161,6 +164,172 @@ def denoise_understates_on_proxy(method: str, strength: float,
         return False
     return (float(strength) / bilateral_sigma_spatial(proxy_scale)
             ) >= _BILATERAL_ADVISORY_RATIO
+
+
+# --------------------------------------------------------------------------- #
+# Wavelet denoise on *correlated* grain — what a stacker actually hands us
+# --------------------------------------------------------------------------- #
+#
+# skimage's ``denoise_wavelet(method="BayesShrink")`` reads one noise σ off the
+# finest diagonal wavelet band and thresholds every band with it. That is right
+# for white (pixel-independent) grain and wrong for a stack: reprojection
+# correlates the grain over about a full-resolution pixel, which moves its power
+# out of the finest band and into the coarser ones. So on the full-size master σ
+# reads low *and* the coarser bands carry more noise than σ says — the export
+# removed almost nothing. The decimated preview proxy's grain is decorrelated by
+# the stride, so the same op removed it properly, and the preview promised a
+# smoothing the saved picture did not have. Measured (Auto's wavelet 0.6, grain
+# Gaussian-correlated at 0.8 px, share of the grain left, proxy step 1/2/3/5):
+# 0.95/0.64/0.44/0.44 before; white grain 0.44 at every step.
+#
+# The textbook answer for coloured noise is *level-dependent* thresholding — each
+# band's noise from that band's own MAD — and it closes the gap exactly, but on
+# its own it reads nebulosity in the coarse bands as noise (measured: a
+# nebula-filled synthetic field's error against the truth went 0.00225 → 0.00340
+# on white grain). So each band's noise is its own MAD **capped by a noise model
+# measured in the pixel domain**: the true pixel σ, from differences far enough
+# apart that the reprojection correlation has died out, and the grain's
+# low-frequency gain ``G = Σρ`` (the sum of its correlation over the
+# neighbourhood), which bounds how much noise any band can hold. White grain has
+# G ≈ 1, so the cap is σ and the result is what BayesShrink always gave (error
+# 0.00225 → 0.00222); correlated grain's cap lets the coarse bands be thresholded
+# at the noise they really carry (0.00384 → 0.00276, against the step-3
+# preview's 0.00297). Every estimate is a MAD, so stars and structure are
+# outvoted rather than averaged in.
+
+#: Full-resolution separation at which a stacker's grain is decorrelated — a
+#: reprojection kernel's correlation is gone by about 2 px (``seestack.edit.noise``:
+#: lag ratios 1.00/0.69/0.65/0.64 at lags 1..4), so 4 is comfortably past it.
+_GRAIN_DECORRELATED_PX = 4.0
+#: Half-plane offsets (dy, dx) whose correlation is summed into ``G``; the other
+#: half follows by symmetry.
+_GRAIN_GAIN_OFFSETS = ((0, 1), (1, 0), (1, 1), (1, -1), (0, 2), (2, 0),
+                       (1, 2), (2, 1), (1, -2), (2, -1), (2, 2), (2, -2))
+#: Difference pairs read per noise estimate. A MAD over this many samples is
+#: steady to well under 1 %, and it keeps the measurement flat in the canvas size.
+_GRAIN_PAIR_BUDGET = 1_500_000
+
+
+def _pair_sigma(plane: np.ndarray, dy: int, dx: int) -> float | None:
+    """σ of ``plane`` from MAD of pixel differences ``(dy, dx)`` apart (``dy >= 0``),
+    on an evenly row-strided subset of at most ``_GRAIN_PAIR_BUDGET`` pairs.
+
+    Exact-zero differences are dropped: on finite float data they come from the
+    flat median fill ``_with_nan_filled`` puts into a mosaic's gaps (or a clipped
+    plateau), and counting them would read a gap-heavy canvas as nearly noiseless.
+    """
+    h, w = plane.shape
+    lo, hi = max(0, -dx), w - max(0, dx)
+    if h - dy < 2 or hi - lo < 2:
+        return None
+    row_step = max(1, int(np.ceil((h - dy) * (hi - lo) / _GRAIN_PAIR_BUDGET)))
+    ys = np.arange(0, h - dy, row_step)
+    d = (plane[ys, lo:hi] - plane[ys + dy, lo + dx:hi + dx]).ravel()
+    d = d[np.isfinite(d) & (d != 0)]
+    if d.size < 64:
+        return None
+    sigma = 1.4826 * float(np.median(np.abs(d - np.median(d)))) / np.sqrt(2.0)
+    return sigma if np.isfinite(sigma) and sigma > 0 else None
+
+
+def _far_sigma(plane: np.ndarray, far: int) -> float | None:
+    """The pixel σ, read at a separation where the grain is decorrelated."""
+    vals = [s for s in (_pair_sigma(plane, 0, far), _pair_sigma(plane, far, 0))
+            if s is not None]
+    return float(np.mean(vals)) if vals else None
+
+
+def _decorrelated_lag(proxy_scale: float) -> int:
+    """``_GRAIN_DECORRELATED_PX`` in the pixels of a render at ``proxy_scale``
+    (never below 1), so every resolution reads the same physical noise."""
+    return max(1, int(np.ceil(_GRAIN_DECORRELATED_PX / max(1.0, float(proxy_scale)))))
+
+
+def wavelet_grain_gain(img: np.ndarray, proxy_scale: float) -> float | None:
+    """``G = Σρ`` for the grain of ``img`` on its own grid: 1 for white grain, about
+    8 for grain correlated over 0.8 px. ``None`` when it can't be measured.
+
+    **Grid-dependent** — a proxy's stride decorrelates the grain, so the same
+    picture reads G ≈ 1 there — which is why :func:`wavelet_noise_model` records
+    the grid it was measured on."""
+    lum = img.mean(axis=-1)
+    lum_sigma = _far_sigma(lum, _decorrelated_lag(proxy_scale))
+    if lum_sigma is None:
+        return None
+    gain = 1.0
+    for dy, dx in _GRAIN_GAIN_OFFSETS:
+        s = _pair_sigma(lum, dy, dx)
+        if s is not None:
+            gain += 2.0 * max(0.0, 1.0 - (s / lum_sigma) ** 2)
+    return float(gain)
+
+
+def wavelet_noise_model(img: np.ndarray, proxy_scale: float) -> dict | None:
+    """The whole-image noise model ``_bayes_shrink_correlated`` caps each band
+    with: ``{"scale", "sigmas", "gain"}`` — per-channel pixel σ (in ``img``'s
+    units), the grain gain ``G`` and the grid both were read on. ``None`` when
+    the image can't be measured; the caller then falls back to plain BayesShrink.
+
+    JSON-safe on purpose: it is carried through ``EditContext.fit`` to the
+    full-size loupe, whose window must not measure its own (a window on the
+    bright core reads its stars as grain). The σ is a pixel σ read where the grain
+    is decorrelated, so it means the same on every grid; ``gain`` does not, so
+    :func:`wavelet_noise_caps` reuses it only on the grid it was measured on."""
+    far = _decorrelated_lag(proxy_scale)
+    sigmas = []
+    for c in range(img.shape[-1]):
+        s = _far_sigma(img[..., c], far)
+        if s is None:
+            return None
+        sigmas.append(float(s))
+    gain = wavelet_grain_gain(img, proxy_scale)
+    if gain is None:
+        return None
+    return {"scale": float(proxy_scale), "sigmas": sigmas, "gain": gain}
+
+
+def wavelet_noise_caps(model: dict | None, img: np.ndarray,
+                       proxy_scale: float) -> list[float] | None:
+    """Per-channel upper bound on the noise σ any wavelet band of ``img`` can
+    hold, ``σ_channel · √G`` (see the block comment above), from ``model``.
+
+    A model measured on another grid (the loupe's full-size window borrowing the
+    preview proxy's) keeps its σ and measures ``G`` here, on the grid being
+    rendered; if that fails the grain is taken as white (G = 1), which is plain
+    BayesShrink's assumption."""
+    if not model:
+        return None
+    gain = model.get("gain")
+    if float(model.get("scale", 0.0)) != float(proxy_scale) or gain is None:
+        gain = wavelet_grain_gain(img, proxy_scale) or 1.0
+    root = float(np.sqrt(max(1.0, float(gain))))
+    return [float(s) * root for s in model["sigmas"]]
+
+
+def _bayes_shrink_correlated(plane: np.ndarray, cap: float) -> np.ndarray:
+    """skimage's BayesShrink (``db1``, ``dwtn_max_level − 3`` levels, soft
+    thresholds ``σ²/√max(var − σ², eps)``) with each band's noise σ taken from that
+    band's own MAD, capped at ``cap``. Same decomposition and threshold rule as
+    ``denoise_wavelet``, so on white grain it reproduces it."""
+    import pywt
+
+    wavelet = pywt.Wavelet("db1")
+    levels = max(pywt.dwtn_max_level(plane.shape, wavelet) - 3, 1)
+    coeffs = pywt.wavedecn(plane, wavelet=wavelet, level=levels)
+    out = [coeffs[0]]
+    for level in coeffs[1:]:
+        shrunk = {}
+        for key, band in level.items():
+            nz = np.abs(band[band != 0])
+            band_sigma = float(np.median(nz)) / 0.6745 if nz.size else 0.0
+            var = min(band_sigma, cap) ** 2
+            dvar = float(np.mean(band * band))
+            eps = float(np.finfo(band.dtype).eps)
+            thresh = var / np.sqrt(max(dvar - var, eps))
+            shrunk[key] = pywt.threshold(band, value=thresh, mode="soft")
+        out.append(shrunk)
+    rec = pywt.waverecn(out, wavelet)[tuple(slice(s) for s in plane.shape)]
+    return rec.astype(plane.dtype)
 
 
 def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
@@ -240,9 +409,23 @@ def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
                 # noise, then reinstate the unclipped star pixels so the blend never
                 # crushes them toward the clip.
                 clipped = np.minimum(norm, 1.0)
-                full = restoration.denoise_wavelet(
-                    clipped, channel_axis=-1, rescale_sigma=True,
-                    method="BayesShrink", mode="soft")
+                # Each band thresholded at the noise it really holds, so a
+                # stacker's correlated grain is removed on the export as it is on
+                # the preview (see ``_bayes_shrink_correlated``).
+                #
+                # The noise model is a whole-image measurement, so it goes through
+                # ``ctx.fit`` like the span above.
+                model = ctx.fit("wavelet_noise",
+                                lambda: wavelet_noise_model(clipped, ctx.proxy_scale))
+                caps = wavelet_noise_caps(model, clipped, ctx.proxy_scale)
+                if caps is None:
+                    full = restoration.denoise_wavelet(
+                        clipped, channel_axis=-1, rescale_sigma=True,
+                        method="BayesShrink", mode="soft")
+                else:
+                    full = np.empty_like(clipped)
+                    for c in range(clipped.shape[-1]):
+                        full[..., c] = _bayes_shrink_correlated(clipped[..., c], caps[c])
                 # A channel with no variance at all makes BayesShrink's threshold
                 # 0/0, and skimage hands back NaN for every pixel of it — which the
                 # fallback stretch then reads as "no coverage" in all three
@@ -690,8 +873,9 @@ register(OpSpec(
         "inside skimage are not reachable through its public API: "
         "`denoise_tv_chambolle` stops on a whole-array energy, so a window "
         "converges a different number of iterations, and BayesShrink keeps its "
-        "per-subband coefficient variance and decomposes a smaller array to fewer "
-        "levels. The figures live in tests/test_edit_window_fidelity.py, in "
+        "per-subband coefficient variance (and each band's own noise MAD; the "
+        "noise model capping it is carried) and decomposes a smaller array to "
+        "fewer levels. The figures live in tests/test_edit_window_fidelity.py, in "
         "_NOT_WINDOW_FAITHFUL and _DENOISE_SPAN_GAIN, where they are asserted — "
         "one home per number, because the two this field used to repeat had both "
         "gone wrong within four days of being written."),

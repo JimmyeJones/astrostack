@@ -467,6 +467,113 @@ def test_the_other_denoise_methods_preview_what_they_export(_noisy_field, method
         assert denoise_understates_on_proxy(method, 0.9, float(step)) is False
 
 
+def _correlated_grain(clean: np.ndarray, corr_px: float, seed: int = 5,
+                      sigma: float = 0.004) -> np.ndarray:
+    """``clean`` plus grain the way a stacker leaves it: one shared field,
+    Gaussian-correlated over ``corr_px`` full-resolution pixels by reprojection,
+    rescaled to pixel σ ``sigma`` (11-22 sweep: ``source_grain_ratio`` 0.58-0.66
+    on real masters, which is this shape at roughly 0.7-1.0 px)."""
+    from scipy.ndimage import gaussian_filter
+
+    rng = np.random.default_rng(seed)
+    g = gaussian_filter(rng.normal(0.0, 1.0, size=clean.shape[:2]), corr_px)
+    g = (g / g.std() * sigma).astype(np.float32)
+    return np.ascontiguousarray(clean + g[..., None])
+
+
+@pytest.mark.parametrize("corr_px", [0.6, 0.8, 1.0])
+def test_the_wavelet_denoise_exports_what_it_previews_on_stacker_grain(
+        _noisy_field, corr_px):
+    """Auto's wavelet denoise on grain the stacker has correlated over ~1 px.
+
+    skimage's BayesShrink read one σ off the finest diagonal band — where a
+    correlated grain has little power — and thresholded every band with it, so
+    the full-size export removed almost nothing while the decimated preview (whose
+    stride decorrelates the grain) removed most of it. Measured before the fix,
+    share of the grain left at Auto's 0.6, export vs step-5 preview: **0.85 vs
+    0.44** at 0.6 px, **0.95 vs 0.44** at 0.8 px, **0.98 vs 0.44** at 1.0 px. The
+    white-grain parity test above stayed green the whole time, because white
+    grain is the one case the finest band does describe.
+
+    Judged against the noiseless truth on the same sky pixels, each side on the
+    grid it renders on (the export on the full grid is what the saved file has)."""
+    clean, _white, sky = _noisy_field
+    noisy = _correlated_grain(clean, corr_px)
+    params = {"method": "wavelet", "strength": 0.6}
+
+    def grain_left(step: int) -> float:
+        p = np.ascontiguousarray(noisy[::step, ::step])
+        t = np.ascontiguousarray(clean[::step, ::step])
+        s = np.ascontiguousarray(sky[::step, ::step])
+        out = _apply("detail.denoise", p, float(step), params)
+        return _grain_left(out, t, s) / _grain_left(p, t, s)
+
+    exported = grain_left(1)
+    # The export really smooths: Auto's 0.6 blend of a full denoise leaves ~0.44.
+    assert exported < 0.55, (
+        f"the export keeps {exported:.2f} of stacker-correlated grain at "
+        f"{corr_px} px — Auto's denoise is doing almost nothing on the saved file")
+    for step in (2, 3, 5):
+        previewed = grain_left(step)
+        assert 0.9 <= exported / previewed <= 1.1, (
+            f"at {corr_px} px correlation the export keeps {exported:.2f} of the "
+            f"grain and the step-{step} preview {previewed:.2f}")
+
+
+def test_the_wavelet_noise_model_carries_sigma_across_grids_but_not_the_gain(_noisy_field):
+    """The loupe renders the whole *preview proxy* and freezes its fits onto a
+    *full-size* window. The pixel σ means the same on both grids; the grain gain
+    does not — the stride decorrelates the grain, so the proxy reads G ≈ 1 where
+    the full grid reads ~8 at 0.8 px. Borrowing the proxy's gain would cap the
+    window's coarse bands at white-grain noise and the loupe would show the
+    export's old, unsmoothed grain."""
+    from seestack.edit.ops.detail import wavelet_noise_caps, wavelet_noise_model
+
+    clean, _white, _sky = _noisy_field
+    noisy = _correlated_grain(clean, 0.8)
+    full = wavelet_noise_model(noisy, 1.0)
+    proxy = wavelet_noise_model(np.ascontiguousarray(noisy[::4, ::4]), 4.0)
+    assert full is not None and proxy is not None
+    assert full["gain"] > 5.0 and proxy["gain"] < 1.5, (full["gain"], proxy["gain"])
+    for a, b in zip(full["sigmas"], proxy["sigmas"], strict=True):
+        assert a == pytest.approx(b, rel=0.05)
+    own = wavelet_noise_caps(full, noisy, 1.0)
+    borrowed = wavelet_noise_caps(proxy, noisy, 1.0)
+    for a, b in zip(own, borrowed, strict=True):
+        assert b == pytest.approx(a, rel=0.05)
+    # On its own grid a model is used as measured, with nothing re-read.
+    assert wavelet_noise_caps(proxy, np.zeros((8, 8, 3), np.float32), 4.0) == [
+        s * float(np.sqrt(proxy["gain"])) for s in proxy["sigmas"]]
+
+
+def test_the_wavelet_denoise_keeps_nebulosity_it_cannot_tell_from_grain():
+    """The guard on the fix above. Thresholding each wavelet band at its own MAD
+    (textbook level-dependent shrinkage) closes the correlated-grain gap but reads
+    nebulosity in the coarse bands as noise: on this nebula-filled field its error
+    against the truth was **0.85x** the raw grain against **0.56x** for plain
+    BayesShrink. Each band's noise is therefore capped by the pixel-domain noise
+    model, and on white grain the result stays where BayesShrink had it."""
+    from scipy.ndimage import gaussian_filter
+
+    clean, _noisy, _sky = _synth_noisy_field()
+    rng = np.random.default_rng(9)
+    h, w = clean.shape[:2]
+    neb = np.zeros((h, w))
+    for scale, amp in ((3, 0.3), (8, 0.6), (25, 1.0), (60, 1.0)):
+        f = gaussian_filter(rng.normal(0.0, 1.0, (h, w)), scale)
+        neb += amp * f / f.std()
+    neb = np.clip(neb, 0.0, None)
+    scene = (clean + (neb / neb.max() * 0.15)[..., None]).astype(np.float32)
+    noisy = (scene + rng.normal(0.0, 0.004, (h, w)).astype(np.float32)[..., None])
+
+    out = _apply("detail.denoise", noisy, 1.0, {"method": "wavelet", "strength": 1.0})
+    err = float(np.sqrt(np.mean((out.astype(np.float64) - scene) ** 2)))
+    raw = float(np.sqrt(np.mean((noisy.astype(np.float64) - scene) ** 2)))
+    assert err < 0.65 * raw, (
+        f"wavelet denoise now leaves {err / raw:.2f}x the raw error on a "
+        "nebula-filled white-grain field — it is smoothing the nebula as noise")
+
+
 def test_the_denoise_render_asks_for_the_same_sigma_it_always_has(_noisy_field):
     """The advisory changed nothing about the picture. ``bilateral_sigma_spatial``
     is the value the render passes to ``denoise_bilateral``, and it is still
