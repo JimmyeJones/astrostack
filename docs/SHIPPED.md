@@ -1,5 +1,55 @@
 # Shipped — the record
 
+## 2026-11-26 (Builder, branch `claude/fervent-gauss-13i7em`)
+
+### v0.511.10 — Auto's wavelet denoise does on the saved picture what its preview shows
+
+**What.** skimage's `denoise_wavelet(method="BayesShrink")` reads one noise σ off the finest diagonal band and
+thresholds every band with it. A stacker's reprojection correlates the grain over ~1 px, which empties the finest
+band and loads the coarser ones, so the full-size export removed almost nothing while the strided preview (whose
+grain the stride decorrelates) removed most of it. `_denoise`'s wavelet branch now runs
+`_bayes_shrink_correlated`: the same `db1` decomposition, level count and BayesShrink threshold rule, but each
+band's noise σ is that band's own MAD **capped** by a pixel-domain noise model, `wavelet_noise_caps` — the pixel σ
+read at a 4 px (full-res) separation where the grain is decorrelated, times `√G`, `G` the grain's summed
+correlation over a 5×5 neighbourhood. The cap is what keeps nebulosity: plain level-dependent MAD (no cap) took a
+nebula-filled field's error from 0.56× to 0.85× the raw grain. Exact-zero differences/coefficients (a mosaic
+gap's median fill) are left out of every estimate. **Measured** (share of the grain left at Auto's 0.6, export /
+step-2 / step-3 / step-5): 0.6 px 0.85/0.46/0.44/0.44 → 0.44 everywhere; 0.8 px 0.95/0.64/0.44/0.44 → 0.44
+everywhere; 1.0 px 0.98/0.79/0.51/0.44 → 0.44 everywhere; white grain 0.44 before and after; nebula field on
+white grain, error against the truth 0.00225 → 0.00222; a 3000×4500 canvas with a 35 % mosaic gap 0.45, NaN
+kept. The noise model is a whole-image measurement, so it is carried through `ctx.fit("wavelet_noise")` to the full-size loupe; its σ is grid-invariant, its gain is not, so a window borrowing the proxy's model re-reads `G` on its own grid (`wavelet_noise_caps`). Loupe on a step-4 proxy, three 512 px windows, 0.8 px grain: loupe vs export grain 0.00188/0.00189, 0.00186/0.00184, 0.00201/0.00201 (before: both ~0.0038, i.e. untouched). `_DENOISE_SPAN_GAIN`'s wavelet row re-measured (frozen worst cell 7.97e-03 → 7.74e-03; the two small cells ~7e-05 → ~1.5–2e-04 of full scale). Cost: about +1.2 s on a 13.5 MP export (noise model 0.95 s, flat in the canvas). **Tests:**
+`tests/test_edit_proxy_parity.py` — `test_the_wavelet_denoise_exports_what_it_previews_on_stacker_grain`
+(0.6/0.8/1.0 px; red before: 0.85/0.95/0.98) and `test_the_wavelet_denoise_keeps_nebulosity_it_cannot_tell_from_grain`
+(red with the cap removed), and `test_the_wavelet_noise_model_carries_sigma_across_grids_but_not_the_gain`. Total-variation has the same gap and is filed as a Bugs entry with its numbers. No
+config, schema, API or default change; it changes the pixels Auto's denoise exports, which is the fix.
+
+**The entry as filed:**
+
+- **🟠 Scout 2026-11-26 (sweep 1) — Auto's wavelet denoise shows smoothing in the preview that the export does not
+  have, on any stack whose grain is correlated, which is what the stacker produces.** *(Pillar: editor, PRIORITY 1.
+  Size **S–M**. Confidence: **reproduced** at op level; the grain correlation is **measured** on real stacker output.)*
+  `seestack/edit/ops/detail.py::_denoise` runs skimage `denoise_wavelet(..., method="BayesShrink",
+  rescale_sigma=True)`, which estimates the noise σ from the finest diagonal wavelet band. A stacker's reprojection
+  correlates the grain over about a pixel (`source_grain_ratio` 0.58 at step 5 on the app's own sample stack, 11-22
+  sweep; 0.66 at stride 2 on both dogfood masters today). That leaves little power in the finest band, so on the
+  full-size master σ is underestimated and almost nothing is removed. The strided proxy has decorrelated grain, so
+  the same op removes it properly. Repro (scratch, `_denoise` with Auto's `method="wavelet", strength=0.6`, sky 0.05
+  with σ 0.004 grain Gaussian-correlated at 0.8 px, measured on the same sky pixels):
+
+  | proxy step | grain left, white grain | grain left, stacker-like grain |
+  |---|---|---|
+  | 1 (export) | 0.44 | **0.95** |
+  | 2 (S30 single field) | 0.44 | 0.64 |
+  | 3 / 5 (mosaics) | 0.44 | 0.44 |
+
+  At 3000×4500, step 5: the preview leaves 44 % of the grain and the export leaves 92–98 % (correlation 0.7–1.0 px).
+  What he sees: Auto's preview looks smooth; the saved picture keeps nearly all its grain, so on the export Auto's
+  denoise does almost nothing. `tests/test_edit_proxy_parity.py::test_the_other_denoise_methods_preview_what_they_export`
+  pins wavelet parity on **white** grain only, which is why it stays green. Fix direction (Builder decides): pass
+  `sigma=` explicitly from a correlation-aware estimate (`estimate_noise_sigma` scaled by `grain_lag_ratio`, as
+  `analyze_proxy` already does), or skip the finest level(s) where the grain is correlated. Make preview and export
+  remove the same share; add the correlated-grain case to the parity file. Check `tv` the same way.
+
 ## 2026-11-26 (Builder, branch `claude/fervent-gauss-o8jycv`)
 
 ### v0.511.9 — a full disk no longer stops the app from starting

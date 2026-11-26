@@ -312,9 +312,12 @@ def test_one_declared_op_carries_a_fit_and_it_is_the_denoise():
 #: about the method it named. See the test below for why that is not a reason to
 #: leave the span uncarried.
 _DENOISE_SPAN_GAIN: dict[str, dict[str, tuple[float, float]]] = {
-    "wavelet": {"bright core": (1.04e-04, 7.00e-05),
-                "near the ragged edge": (1.05e-04, 7.74e-05),
-                "star-poor far side": (1.02e-02, 7.97e-03)},
+    # Re-measured v0.511.10, when the wavelet branch began carrying its noise
+    # model (``wavelet_noise``) beside the span: before, (1.04e-04, 7.00e-05),
+    # (1.05e-04, 7.74e-05), (1.02e-02, 7.97e-03).
+    "wavelet": {"bright core": (2.28e-03, 1.47e-04),
+                "near the ragged edge": (1.18e-03, 1.97e-04),
+                "star-poor far side": (9.99e-03, 7.74e-03)},
     "tv": {"bright core": (5.29e-03, 5.41e-03),
            "near the ragged edge": (6.30e-03, 5.75e-03),
            "star-poor far side": (9.96e-04, 3.73e-04)},
@@ -336,7 +339,10 @@ def test_the_carried_span_is_most_of_the_denoise_gap(method):
       star-poor window. It is the method the preview's own advisory sends the
       reader here about ("check it at full size *instead* of raising the
       strength"), so it is the one that most needed to be right.
-    * **wavelet** (the default) 1.3-1.5x on every window; the rest is BayesShrink.
+    * **wavelet** (the default) 15x on the bright core, 6x near the edge, 1.3x on
+      the star-poor side — since v0.511.10 the carry includes the noise model each
+      band's threshold is capped by, which a window on the bright core would
+      otherwise read off its stars; the rest is BayesShrink's per-band variance.
     * **tv** 2.7x on the star-poor window — where the span error dominates — and
       within 10 % either way on the other two, *including 2 % worse on the bright
       core*. tv's residual is its stopping energy, not its span, so carrying the
