@@ -110,7 +110,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 - **🟠 Full audit 2026-11-26 — `SettingsStore.__init__` re-saves `config.json` on every boot, with three
   consequences.** *(Pillar: "just works" / upgrade safety, §9. Size **S**. Reproduced by the Scout 2026-11-26 through
   `SettingsStore(data_root=…)`; audit `backend.md` §6, §10, §11.)*
-  (a) ~~No boot on a full disk~~ — **shipped v0.511.9** (boot save best-effort, identical config not rewritten).
+  (The full-disk boot half is done — see `SHIPPED.md`, "a full disk no longer stops the app from starting".)
   (b) **A truncated `config.json` boots on defaults and is overwritten at once.** Result: `auto_stack` True (his is
   off), password off, folders reset; no copy of the bad file is kept (`webapp/config.py::_load_resilient` →
   `Settings(data_root=root)` → `save()`).
