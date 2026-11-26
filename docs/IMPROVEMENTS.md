@@ -82,6 +82,111 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟠 Scout 2026-11-26 (sweep 1) — Auto's wavelet denoise shows smoothing in the preview that the export does not
+  have, on any stack whose grain is correlated, which is what the stacker produces.** *(Pillar: editor, PRIORITY 1.
+  Size **S–M**. Confidence: **reproduced** at op level; the grain correlation is **measured** on real stacker output.)*
+  `seestack/edit/ops/detail.py::_denoise` runs skimage `denoise_wavelet(..., method="BayesShrink",
+  rescale_sigma=True)`, which estimates the noise σ from the finest diagonal wavelet band. A stacker's reprojection
+  correlates the grain over about a pixel (`source_grain_ratio` 0.58 at step 5 on the app's own sample stack, 11-22
+  sweep; 0.66 at stride 2 on both dogfood masters today). That leaves little power in the finest band, so on the
+  full-size master σ is underestimated and almost nothing is removed. The strided proxy has decorrelated grain, so
+  the same op removes it properly. Repro (scratch, `_denoise` with Auto's `method="wavelet", strength=0.6`, sky 0.05
+  with σ 0.004 grain Gaussian-correlated at 0.8 px, measured on the same sky pixels):
+
+  | proxy step | grain left, white grain | grain left, stacker-like grain |
+  |---|---|---|
+  | 1 (export) | 0.44 | **0.95** |
+  | 2 (S30 single field) | 0.44 | 0.64 |
+  | 3 / 5 (mosaics) | 0.44 | 0.44 |
+
+  At 3000×4500, step 5: the preview leaves 44 % of the grain and the export leaves 92–98 % (correlation 0.7–1.0 px).
+  What he sees: Auto's preview looks smooth; the saved picture keeps nearly all its grain, so on the export Auto's
+  denoise does almost nothing. `tests/test_edit_proxy_parity.py::test_the_other_denoise_methods_preview_what_they_export`
+  pins wavelet parity on **white** grain only, which is why it stays green. Fix direction (Builder decides): pass
+  `sigma=` explicitly from a correlation-aware estimate (`estimate_noise_sigma` scaled by `grain_lag_ratio`, as
+  `analyze_proxy` already does), or skip the finest level(s) where the grain is correlated. Make preview and export
+  remove the same share; add the correlated-grain case to the parity file. Check `tv` the same way.
+
+- **🟠 Full audit 2026-11-26 — `SettingsStore.__init__` re-saves `config.json` on every boot, with three
+  consequences.** *(Pillar: "just works" / upgrade safety, §9. Size **S**. Reproduced by the Scout 2026-11-26 through
+  `SettingsStore(data_root=…)`; audit `backend.md` §6, §10, §11.)*
+  (a) **No boot on a full disk:** with `write_text_durably` raising ENOSPC the store raises
+  `[Errno 28]` out of the lifespan, so `restart: unless-stopped` loops and the Storage page is unreachable.
+  (b) **A truncated `config.json` boots on defaults and is overwritten at once.** Result: `auto_stack` True (his is
+  off), password off, folders reset; no copy of the bad file is kept (`webapp/config.py::_load_resilient` →
+  `Settings(data_root=root)` → `save()`).
+  (c) **Rollback drops unknown keys.** A key the loaded build does not know is gone after one boot, so rolling back
+  and then forward again loses every setting added in between.
+  Fix: make the boot save best-effort and skip it when the text would not change; on a parse failure keep
+  `config.json.unreadable-<stamp>`, do not re-save, and start with the watcher and auto-stack paused; carry unknown
+  top-level keys through `save()`. Add an upgrade test for each.
+
+- **🟠 Full audit 2026-11-26 — an install already in the unsafe nested layout still deletes.** *(Pillar: §10, the
+  `incoming/` guarantee. Size **S**. Low likelihood, total loss if hit. Reproduced by the audit, `backend.md` §9 (exp3:
+  `DELETE /api/targets/M_42?remove_files=true` → 200, 3 of 6 raw subs gone). Scout 2026-11-26 confirmed in code:
+  `nested_incoming_conflict` is called only in `webapp/config.py` (boot warning, save refusal). No destructive endpoint
+  checks it.)* Fix: while the conflict is non-None, refuse delete-target, merge, cache clear, prune and the scan with a
+  plain sentence, and show it on the Dashboard.
+
+- **🟠 Full audit 2026-11-26 — a failed update leaves the app stopped, and a retry destroys the way back.**
+  *(Pillar: "just works", §9. Size **S–M**. Reproduced by the audit with the real scripts (`backend.md` §2,
+  `subsystems.md` §4). Scout re-read `scripts/deploy.sh` 2026-11-26: `last-good` is written from the *checkout's*
+  `HEAD` (line ~74) before `compose stop`; checkout and `up -d --build` come after, and the `ERR` trap only prints a
+  `docker start` hint.)* One network blip during `pip`/`npm`/ASTAP download means the app is down. The update card
+  that would explain it is in the app that is down. Running the update again records the never-started version as
+  `last-good`, so `rollback.sh` "restores" it. Fix: `compose build` before `stop`; on failure after stop, start the
+  old container; write `last-good` only from the running container's version and only after a good build. Same file:
+  `zfs snapshot` per deploy is never pruned (`backend.md` §7). Keep the newest N after a healthy deploy.
+
+- **🟡 Full audit 2026-11-26 — walk-away cost: unsolvable subs re-solved on every import, and every restart
+  re-imports the whole library.** *(Pillar: autonomy, PRIORITY 2. Size **S–M**. Measured by the audit: 8 unsolvable subs →
+  3 ASTAP runs each on every later scan (`backend.md` §5); a no-op whole-library rescan 27 s locally (`perf.md` D-6).
+  Scout 2026-11-26 confirmed in code.)* (a) `seestack/solve/runner.py::build_solve_arglist` re-offers every
+  `solve_failed:` frame with no attempt count. At ~1 % unsolvable on his library that is up to hours of ASTAP per
+  pipeline job, holding the single worker. The LEAD below ("refuse an implausible solve") says retries can succeed,
+  so do not stop retrying: back off instead (an additive per-frame attempt count/time, retry when ASTAP or star-DB
+  settings change, "Rescue unsolved" still forces one). (b) `webapp/watcher.py::StabilityTracker` starts empty, so
+  after any container restart every file in `incoming/` becomes "newly stable" and `_on_batch_ready` queues scan →
+  QC → solve, which then pays (a). Fix: seed the tracker from the library's known `(source_path, size, mtime)`.
+
+- **🟡 Full audit 2026-11-26 — with a password set, every request runs a 200,000-round PBKDF2 on the event loop.**
+  *(Pillar: friendliness. Size **S**. Measured by the audit: 30 parallel GETs 0.48 s → 5.35 s (`backend.md` §4); Scout
+  measured one KDF at 58 ms here and confirmed `webapp/main.py::_auth_gate` calls `auth.check_basic_auth`
+  synchronously with no cache.)* A gallery of thumbnails queues behind it, and so does the Docker health probe. Fix:
+  cache a successful verdict keyed by an HMAC of the header for a few minutes, and run a cold check in a threadpool.
+
+- **🟡 Full audit 2026-11-26 — the out-of-memory guard underestimates mosaics 1.7–3.2×.** *(Pillar: "just works";
+  OOM history. Size **M**. Measured by the audit, `perf.md` D-1: drizzle ×1.5 + reject on a 5×2 mosaic peaked at 4.81 GB
+  against a 2.84 GB estimate; plain κ-σ 4545×3467 2.33 GB vs 0.72 GB. Scout 2026-11-26 confirmed in code:
+  `seestack/stack/stacker.py::_estimate_peak_bytes` charges canvas arrays only — no per-worker `align_one` working
+  set (~250 MB measured vs 25 MB charged by `_memory_bounded_in_flight`) and no post-stack levelling/gradient/save
+  phases.)* A run the guard passes near the budget can be OOM-killed. Fix: charge a per-worker working set and the
+  post-stack peak, pinned by a mosaic-scale peak-RSS test.
+
+- **🟡 Full audit 2026-11-26 — Moon & Sun: drizzle prints a 3-pixel colour mesh when frame brightness flickers.**
+  *(Pillar: image quality. Size **S**. Measured by the audit, `subsystems.md` §3 defect 1: ±8 % flicker → 2.1–2.8 %
+  peak-to-peak lattice per channel, 4.2–5.5 % after Medium sharpen; 0.02 % with steady brightness. Scout 2026-11-26
+  confirmed in code: `seestack/video/lucky.py` hands each kept frame to `driz.add` un-normalised.)* Fix: scale each
+  frame to the reference disk's per-channel mean before depositing (both accumulators), with a brightness-ramp test.
+  Same report, defect 2 (**M**, measured on synthetic only): a gibbous Moon with maria aligns ~25 px off with no
+  warning (`_find_disk` thresholds only the bright highlands).
+
+- **🟡 Full audit 2026-11-26 — Seestar `{ip}` is never validated, and blank-subnet discovery cannot work from a
+  bridged container.** *(Pillar: "just works". Size **S**. `{ip}`: reproduced by the audit (`subsystems.md` §1 defect 3:
+  `connect("not a host; rm -rf")` leaves a client in `_clients` that the poll loop retries for ever). Scout
+  2026-11-26: no `ip_address` check anywhere in `webapp/routers/seestar.py` or `webapp/seestar/`.)* Fix: accept only a
+  private IPv4 literal that is pinned or discovered. Discovery (confidence **read**, not reproduced):
+  with `seestar_scan_subnet` blank the scan is UDP 4720 only, and a broadcast does not leave a Docker bridge. The
+  Settings hint "Blank = auto-detect" promises otherwise. At minimum, the empty state should ask for the scope's
+  address or network range.
+
+- **⚪ Full audit 2026-11-26 — the small items, one batch** (each **S**, each read or reproduced by the audit; take any
+  one alone): the update button ignores a running job, and `compose stop` kills a 19 h stack (`backend.md` §12); no
+  worker watchdog, so a `BaseException` in a job body kills the worker with `/api/health` green (§13); ffmpeg is
+  given dropped files with no `-protocol_whitelist` (§14); no container `mem_limit` (§16); `restore-data.sh`
+  leaves `masters.json` out (§17); frame JSON and the bundle are served without gzip — 20.6 MB → ~1.9 MB on the
+  35 k target (`perf.md` I-6/D-5).
+
 - **🟡 ⏸ Scout 2026-11-19 (sweep 2) — remaining half: the streak guard's stationary-object rescue on a mosaic whose
   subs carry the *mosaic's centre* as their header pointing.** *(Pillar: autonomy + image quality, PRIORITY 2/4.
   Size **M**.)* v0.511.1 asks the streak majority **per panel** (`qc/runner._reconcile_per_panel`, panels from
@@ -3144,6 +3249,14 @@ outright bug in existing behaviour, never to add capability.
   **offline** by the bundled catalogues: `seestack/objectinfo.py::identify_object` feeds the Target page's
   object card and its blurb, and `seestack/bg_advice.py` supplies the flatten nudge. If anything is still
   missing there, it is a copy or wiring task on bundled data, not a network one.
+
+- **📋 Full audit 2026-11-26 — the picture-quality and process recommendations are the owner's call (Scout
+  2026-11-26).** `docs/audit/2026-11-26/README.md` ranks them. (1) Auto aims at a finished picture (sky ≈ 0.10,
+  "Hold back highlights" on), which changes the default look. (2) A plane fit per frame instead of the 128 px sky flatten
+  (opt-in first). (3) A linked, sky-anchored stretch for nebula colour. (4) Seams from Auto's panel levelling. (5) A
+  hot-pixel map learned from his subs. (6) Bayer drizzle. The process changes (owner-chosen themes, idle runs write
+  nothing, weekly releases) change these rules. None starts until he picks; the defects that change no default are
+  under Bugs.
 
 - **🔒 Three security hardenings left over from the 2026-11-26 full audit (PR #1568 named them, never filed; filed
   by Builder 2026-11-26).** v0.511.6 closed the worst route: `seestack.solve.astap.find_astap` executing any file
