@@ -8,7 +8,7 @@ import { settingsLink } from "../../settingsSections";
 import { NoticeBoard, NOTICE_PRIORITY } from "../NoticeBoard";
 import { ClosingSeasonNote } from "../ClosingSeasonNote";
 import { astapReadiness, astapReadinessSignature } from "./astapReadiness";
-import { folderReadiness, folderReadinessSignature } from "./folderReadiness";
+import { folderNoticeText, folderReadiness, folderReadinessSignature } from "./folderReadiness";
 import { MissingFilesNote } from "./MissingFilesNote";
 import { IncomingLagNote } from "./IncomingLagNote";
 import { StuckImportNote } from "./StuckImportNote";
@@ -56,36 +56,19 @@ export function DashboardNotices() {
         data-testid="dashboard-notes"
         items={[
           { key: "folders", priority: NOTICE_PRIORITY.blocking,
-            node: !folders.ready && folderSig !== folderDismissedSig ? (
-              <Alert color="yellow" variant="light"
-                withCloseButton
+            node: !folders.ready && (folders.kind === "layout" || folderSig !== folderDismissedSig) ? (
+              // The nested layout is not dismissable: while it is set the server
+              // refuses deletes and scans, and this is the only place that says why.
+              <Alert color={folders.kind === "layout" ? "red" : "yellow"} variant="light"
+                data-testid="folder-notice"
+                withCloseButton={folders.kind !== "layout"}
                 onClose={() => {
                   if (folderSig) { setFolderDismissedSig(folderSig); saveDismissedSig(FOLDER_DISMISS_KEY, folderSig); }
                 }}
-                title={folders.kind === "incoming"
-                  ? (folders.problem === "missing"
-                    ? "Your incoming folder doesn't exist yet"
-                    : "Your incoming folder isn't writable")
-                  : (folders.problem === "missing"
-                    ? "Your library folder doesn't exist yet"
-                    : "Your library folder isn't writable")}>
-                <Text size="sm">
-                  {folders.kind === "incoming"
-                    ? (folders.problem === "missing"
-                      ? "The folder you drop frames into can't be found — \"Scan incoming\" will "
-                        + "find nothing until it exists. Check the folder is mounted and the path "
-                        + "is right."
-                      : "The folder you drop frames into is read-only, so scanning it may fail. "
-                        + "Check the folder's permissions or the path.")
-                    : (folders.problem === "missing"
-                      ? "The folder your stacks and library are written to can't be found — "
-                        + "processing will fail until it exists. Check the folder is mounted and "
-                        + "the path is right."
-                      : "The folder your stacks and library are written to is read-only, so "
-                        + "processing can't save its results. Check the folder's permissions or "
-                        + "the path.")}
-                </Text>
-                <Button component={Link} to={settingsLink("folders")} size="xs" variant="light" color="yellow" mt="xs">
+                title={folderNoticeText(folders).title}>
+                <Text size="sm">{folderNoticeText(folders).body}</Text>
+                <Button component={Link} to={settingsLink("folders")} size="xs" variant="light"
+                  color={folders.kind === "layout" ? "red" : "yellow"} mt="xs">
                   Fix in Settings
                 </Button>
               </Alert>

@@ -63,6 +63,7 @@ def _confined_scan_root(settings: Settings, root: str) -> str:
 @router.post("/api/scan")
 def trigger_scan(request: Request, body: ScanRequest | None = None) -> dict[str, str]:
     settings = deps.get_settings(request)
+    deps.refuse_on_unsafe_layout(settings)
     jm = deps.get_job_manager(request)
     root = body.root if body else None
     # An empty/absent root means "the whole incoming folder" and always has.

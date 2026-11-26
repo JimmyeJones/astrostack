@@ -2943,6 +2943,10 @@ export interface SystemInfo {
   folders?: {
     incoming: { path: string; exists: boolean; writable: boolean };
     library: { path: string; exists: boolean; writable: boolean };
+    /** The unsafe nested-folder layout's plain sentence, or null. While set the
+     *  server refuses every delete, merge, cache clear and scan (§10). Optional:
+     *  an older backend omits it. */
+    layout_conflict?: string | null;
   };
   watcher_enabled: boolean;
 }

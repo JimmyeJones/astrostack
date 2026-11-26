@@ -263,6 +263,9 @@ def reprocess_all(request: Request, body: ReprocessAllBody | None = None) -> dic
     that job instead of enqueuing a duplicate.
     """
     settings = deps.get_settings(request)
+    # A restack writes into, and archives runs inside, each target folder —
+    # on the unsafe nested layout those are the raw folders (§10).
+    deps.refuse_on_unsafe_layout(settings)
     jm = deps.get_job_manager(request)
     existing = jm.active_of_kind("reprocess_all")
     if existing is not None:
@@ -420,6 +423,9 @@ def system(request: Request) -> dict:
         "folders": {
             "incoming": _folder_status(settings.resolved_incoming_dir),
             "library": _folder_status(settings.resolved_library_root),
+            # Additive: the unsafe nested layout's plain sentence, or null.
+            # While set, deletes, merges, clears and the scan are refused.
+            "layout_conflict": settings.layout_conflict(),
         },
         "watcher_enabled": settings.watcher_enabled,
     }

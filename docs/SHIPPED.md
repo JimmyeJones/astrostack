@@ -1,5 +1,33 @@
 # Shipped — the record
 
+## 2026-11-26 (Builder, branch `claude/fervent-gauss-lvezh9`)
+
+### v0.511.11 — an install already in the unsafe nested folder layout no longer deletes
+
+**What.** `nested_incoming_conflict` refused a settings save that *enters* the layout, but an install already in it
+booted (§9, correctly) and then every destructive endpoint went ahead — the audit's exp3 (`incoming/` =
+`library/targets`) removed 3 of 6 raw subs through "Delete target, remove files". Now `Settings.layout_conflict()`
+wraps the check, and `deps.refuse_on_unsafe_layout` answers **409** with "Stopped to protect your raw frames. <the
+sentence> …" on: `DELETE /api/targets/{safe}?remove_files=true` (forgetting a target without files still works — it
+touches nothing), `POST /api/targets/merge`, `POST …/cache/clear`, `POST …/stack-runs/prune`,
+`DELETE …/stack-runs/{id}`, `POST /api/reprocess-all` and `POST /api/scan`. The watcher queues the pipeline without
+the endpoint, so `pipeline._pipeline_body` refuses too (the job fails with the same sentence). `GET /api/system`'s
+`folders` gains an additive `layout_conflict` (string or null); the Dashboard's existing folder notice (no new
+`<Alert>` site, clutter ceilings unchanged) shows it in red, ahead of a missing folder, and without a close button.
+Booting is unchanged. **Tests:** `tests/webapp/test_unsafe_layout_refuses_deletes.py` builds the exp3 layout and
+drives the real endpoints (9 of 11 red before: each endpoint returned 200/202 and the delete removed the raws);
+`folderReadiness.test.ts` covers the new kind and the notice text. No config, schema or default change; the API change
+is one additive field.
+
+**The entry as filed:**
+
+- **🟠 Full audit 2026-11-26 — an install already in the unsafe nested layout still deletes.** *(Pillar: §10, the
+  `incoming/` guarantee. Size **S**. Low likelihood, total loss if hit. Reproduced by the audit, `backend.md` §9 (exp3:
+  `DELETE /api/targets/M_42?remove_files=true` → 200, 3 of 6 raw subs gone). Scout 2026-11-26 confirmed in code:
+  `nested_incoming_conflict` is called only in `webapp/config.py` (boot warning, save refusal). No destructive endpoint
+  checks it.)* Fix: while the conflict is non-None, refuse delete-target, merge, cache clear, prune and the scan with a
+  plain sentence, and show it on the Dashboard.
+
 ## 2026-11-26 (Builder, branch `claude/fervent-gauss-13i7em`)
 
 ### v0.511.10 — Auto's wavelet denoise does on the saved picture what its preview shows

@@ -327,6 +327,12 @@ def submit_pipeline(settings: Settings, jm: JobManager, *, root: str | None = No
 def _pipeline_body(
     settings: Settings, jm: JobManager, job: Job, *, root: str | None
 ) -> dict[str, Any]:
+    # The watcher queues this without passing the endpoint's layout guard; on
+    # an install in the unsafe nested layout a scan adopts raw folders as
+    # targets, which is what lets a later delete reach them (§10).
+    conflict = settings.layout_conflict()
+    if conflict is not None:
+        raise RuntimeError("Scan skipped to protect your raw frames. " + conflict)
     lib = Library.open_or_create(settings.resolved_library_root)
     scan_root = Path(root) if root else settings.resolved_incoming_dir
     # A ``root`` naming a folder *inside* incoming is the scoped "bring this one

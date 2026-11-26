@@ -480,6 +480,16 @@ class Settings(BaseModel):
     def state_dir(self) -> Path:
         return Path(self.data_root) / "state"
 
+    def layout_conflict(self) -> str | None:
+        """:func:`nested_incoming_conflict` for these settings' own folders.
+
+        Non-``None`` only on an install that reached the unsafe layout before the
+        save-time guard existed (it still boots, §9). Every destructive endpoint
+        and the scan refuse while it is set — see :func:`webapp.deps.refuse_on_unsafe_layout`.
+        """
+        return nested_incoming_conflict(
+            self.resolved_incoming_dir, self.resolved_library_root, Path(self.data_root))
+
     @property
     def config_path(self) -> Path:
         return self.state_dir / CONFIG_FILENAME
@@ -557,13 +567,11 @@ class SettingsStore:
         # An install that reached the unsafe layout before the save-time guard
         # existed still boots — refusing to start would be far worse than the
         # risk — but it says so loudly once per boot so it can be corrected.
-        conflict = nested_incoming_conflict(
-            self._settings.resolved_incoming_dir,
-            self._settings.resolved_library_root,
-            Path(self._settings.data_root),
-        )
+        conflict = self._settings.layout_conflict()
         if conflict is not None:
-            log.warning("unsafe folder layout in config.json: %s", conflict)
+            log.warning("unsafe folder layout in config.json — deleting, merging, "
+                        "clearing and scanning are refused until it is fixed: %s",
+                        conflict)
         # Best-effort on boot. A full pool, a dataset quota or a read-only mount
         # used to make this save raise out of the lifespan, so the container
         # restart-looped and the Storage page — the friendly way to free space —

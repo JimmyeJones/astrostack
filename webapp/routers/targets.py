@@ -131,6 +131,8 @@ def merge_targets(body: MergeRequest, request: Request) -> dict:
     change to the target, so the confirmation says it rather than leaving the owner
     to find a cover he did not pin.
     """
+    # A merge deletes the source folders it combines away (§10 layout guard).
+    deps.refuse_on_unsafe_layout(deps.get_settings(request))
     jm = deps.get_job_manager(request)
     lib = deps.open_library(request)
     try:
@@ -1730,6 +1732,10 @@ def patch_target(safe: str, body: TargetPatch, request: Request) -> TargetOut:
 
 @router.delete("/{safe}")
 def delete_target(safe: str, request: Request, remove_files: bool = False) -> dict:
+    if remove_files:
+        # Forgetting a target touches no file; removing its folder can reach
+        # into ``incoming/`` on an install in the unsafe nested layout.
+        deps.refuse_on_unsafe_layout(deps.get_settings(request))
     lib = deps.open_library(request)
     try:
         found = lib.delete_target(safe, remove_files=remove_files)
