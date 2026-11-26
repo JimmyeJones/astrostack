@@ -1,5 +1,22 @@
 # Shipped — the record
 
+## 2026-11-26 (Builder, branch `agent/seestar-poll-oserror`)
+
+### v0.511.7 — the Seestar page keeps updating after the scope has been switched off
+
+**What.** The full audit (2026-11-26, `subsystems.md` §1 defect 1, reproduced there against the reference
+simulator) found that the first time a connected scope went offline the telemetry thread died for good:
+`SeestarClient.connect` let `socket.create_connection`'s `OSError` (refused, timeout, no route) escape,
+`_poll_reconnect` caught only `SeestarError`, and `_poll_loop` had no outer guard. The card then showed
+last night's battery, target and picture as "connected" until the container restarted; the same raw
+error made `POST /api/seestar/{ip}/connect` answer 500 instead of its readable 502. Now `connect` raises
+`SeestarError` for any socket failure, and each scope's poll cycle (new `SeestarManager._poll_one`) is
+guarded so one scope's unexpected error marks that scope "poll failed" and the loop moves on.
+**Tests:** `tests/webapp/test_seestar.py` — a real refused connection raises `SeestarError`, it arms the
+reconnect backoff, and a poll loop whose first scope raises an unexpected error stays alive and polls
+the next scope. All three red before the fix. The audit's other Seestar findings (discovery from a
+Docker bridge, `{ip}` validation) are not in this change.
+
 ## 2026-11-26 (full audit, branch `claude/astap-path-guard`)
 
 ### v0.511.6 — the ASTAP path setting can only name an ASTAP program

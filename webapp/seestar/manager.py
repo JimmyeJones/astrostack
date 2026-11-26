@@ -461,29 +461,40 @@ class SeestarManager:
                 items = list(self._clients.items())
             base = float(max(2, int(settings.seestar_poll_interval_s)))
             for ip, client in items:
-                if not self._poll_reconnect(ip, client, base):
-                    continue
-                self._ensure_auth(ip, client)
-                tel, errors = collect_telemetry(client, self._poll_albums(ip, client))
-                if tel is not None:
-                    self._store_telemetry(ip, tel, error="; ".join(errors) or None)
-                    if not self._last_ok.get(ip):
-                        log.info("seestar %s: telemetry OK (model=%s battery=%s%% target=%s)",
-                                 ip, tel.get("model"), tel.get("battery_pct"),
-                                 tel.get("target_name"))
-                    self._last_ok[ip] = True
-                else:
-                    # Connected but the device serves nothing. Expected when the
-                    # scope's local API is unavailable; an environmental state,
-                    # not an app error — so log it once, concisely, at INFO.
-                    detail = _NO_TELEMETRY.get(
-                        self._auth_status(ip),
-                        "device not serving telemetry (port 4700 returned no data)")
-                    if self._last_ok.get(ip) is not False:
-                        log.info("seestar %s: connected but %s", ip, detail)
-                    self._last_ok[ip] = False
-                    self._mark_error(ip, detail)
+                try:
+                    self._poll_one(ip, client, base)
+                except Exception as exc:  # noqa: BLE001 — one scope's failure must not kill the loop
+                    # An uncaught error here used to end the thread silently,
+                    # leaving every scope's card frozen on its last telemetry
+                    # as "connected" until the container restarted.
+                    log.warning("seestar %s: poll failed: %s", ip, exc)
+                    self._mark_error(ip, f"poll failed: {exc}")
             self._stop.wait(max(2, int(settings.seestar_poll_interval_s)))
+
+    def _poll_one(self, ip: str, client: SeestarClient, base: float) -> None:
+        """One poll cycle for one scope: reconnect (with backoff), auth, telemetry."""
+        if not self._poll_reconnect(ip, client, base):
+            return
+        self._ensure_auth(ip, client)
+        tel, errors = collect_telemetry(client, self._poll_albums(ip, client))
+        if tel is not None:
+            self._store_telemetry(ip, tel, error="; ".join(errors) or None)
+            if not self._last_ok.get(ip):
+                log.info("seestar %s: telemetry OK (model=%s battery=%s%% target=%s)",
+                         ip, tel.get("model"), tel.get("battery_pct"),
+                         tel.get("target_name"))
+            self._last_ok[ip] = True
+        else:
+            # Connected but the device serves nothing. Expected when the
+            # scope's local API is unavailable; an environmental state,
+            # not an app error — so log it once, concisely, at INFO.
+            detail = _NO_TELEMETRY.get(
+                self._auth_status(ip),
+                "device not serving telemetry (port 4700 returned no data)")
+            if self._last_ok.get(ip) is not False:
+                log.info("seestar %s: connected but %s", ip, detail)
+            self._last_ok[ip] = False
+            self._mark_error(ip, detail)
 
     def _teardown_all(self) -> None:
         with self._lock:
