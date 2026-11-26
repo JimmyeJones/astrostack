@@ -3162,6 +3162,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.7 **The Seestar telemetry thread no longer dies the first time the scope goes offline — `SeestarClient.connect` raises `SeestarError` for a refused/timed-out socket and `SeestarManager._poll_one` is guarded per scope** (full audit 2026-11-26, subsystems §1) — full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.511.6 **🔒 Security: the ASTAP path setting only ever runs a file named like ASTAP (`astap`, `astap_cli`, `.exe` variants) — before, any existing file it named was executed by the next plate solve** (`seestack.solve.astap.find_astap`, `is_astap_program_name`; full audit 2026-11-26)
 - ✅ v0.511.5 **A target whose display name is another target's folder name no longer takes over that target's URL: `Library.find_target` prefers the `safe_name` match; display-name callers (scanner hold-back, skipped-folders card, sample demo) use the new `find_target_by_name`** (Scout 2026-11-25 sweep 4) — full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.511.4 **`InsightTabs` measures its groups in a layout effect, so a silent group's tab (the Dashboard's "Newest | Best" over nothing to rank) is never painted for a frame — the race that reddened `main`'s frontend CI on #1553** (`Dashboard.test` "gives no tab…"); +1 `flushSync` test, red before.

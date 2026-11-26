@@ -134,7 +134,15 @@ class SeestarClient:
             # file descriptor and a stale pending reply on every reconnect.
             self._teardown_locked()
             _send_udp_intro(self.host)
-            sock = socket.create_connection((self.host, self.port), _CONNECT_TIMEOUT)
+            try:
+                sock = socket.create_connection((self.host, self.port), _CONNECT_TIMEOUT)
+            except OSError as exc:
+                # A switched-off scope answers with "refused", a timeout or "no
+                # route" — all ``OSError``. Every caller (the poll loop's
+                # backoff, the scan loop, the routers' readable 502) handles
+                # ``SeestarError``; an ``OSError`` escaping here killed the
+                # telemetry thread for good (full audit 2026-11-26).
+                raise SeestarError(f"cannot connect to {self.host}:{self.port}: {exc}") from exc
             sock.settimeout(None)
             self._sock = sock
             self._connected = True

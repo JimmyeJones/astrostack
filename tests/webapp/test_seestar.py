@@ -588,3 +588,86 @@ def test_goto_accepts_boundary_coordinates(client):
     r = client.post("/api/seestar/1.2.3.4/goto",
                      json={"ra_hours": 23.999, "dec_deg": -90})
     assert r.status_code == 409
+
+
+# --------------------------------------------------------------------------- #
+# A switched-off scope must not kill the telemetry thread (full audit 2026-11-26)
+# --------------------------------------------------------------------------- #
+
+def _closed_port() -> int:
+    """A localhost port with nothing listening — a real "connection refused",
+    the shape a scope that has just been switched off answers with."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def test_connect_to_a_switched_off_scope_raises_seestar_error(monkeypatch):
+    """``socket.create_connection`` raises ``OSError`` (refused / timeout / no
+    route); every caller handles ``SeestarError``. Before the fix the raw
+    ``ConnectionRefusedError`` escaped the poll loop's backoff and ended the
+    thread, and the connect route answered 500 instead of a readable 502."""
+    from webapp.seestar import client as client_mod
+    monkeypatch.setattr(client_mod, "_send_udp_intro", lambda host: None)
+    c = SeestarClient("127.0.0.1", _closed_port())
+    with pytest.raises(SeestarError, match="cannot connect"):
+        c.connect()
+    assert not c.is_connected
+
+
+def test_poll_reconnect_backs_off_on_a_real_refused_connection(monkeypatch):
+    from webapp.seestar import client as client_mod
+    monkeypatch.setattr(client_mod, "_send_udp_intro", lambda host: None)
+    clock = {"t": 0.0}
+    mgr = _manager_with_clock(clock)
+    client = SeestarClient("127.0.0.1", _closed_port())
+    assert mgr._poll_reconnect("127.0.0.1", client, base_s=2.0) is False
+    dev = next(d for d in mgr.snapshot() if d["ip"] == "127.0.0.1")
+    assert dev["reconnecting"] is True and dev["connected"] is False
+
+
+class _CountingClient:
+    """A dropped client whose reconnect raises ``exc`` and counts the tries."""
+
+    is_connected = False
+
+    def __init__(self, exc: Exception):
+        self.exc = exc
+        self.calls = 0
+
+    def connect(self):
+        self.calls += 1
+        raise self.exc
+
+    def disconnect(self):
+        pass
+
+
+def test_poll_loop_survives_an_unexpected_error_from_one_scope():
+    """One scope's unexpected failure must neither end the poll thread nor stop
+    the other scopes being polled — the thread used to die silently, leaving
+    every card frozen on last night's telemetry as "connected"."""
+    mgr = SeestarManager(lambda: _loop_settings(seestar_enabled=True,
+                                                seestar_poll_interval_s=2))
+    bad = _CountingClient(ValueError("something unexpected"))
+    good = _CountingClient(SeestarError("connection refused"))
+    # Dict order: the exploding scope is polled first.
+    mgr._clients = {"10.0.0.1": bad, "10.0.0.2": good}  # type: ignore[assignment]
+    thread = threading.Thread(target=mgr._poll_loop, name="seestar-poll", daemon=True)
+    mgr._poll_thread = thread
+    thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not (bad.calls >= 1 and good.calls >= 1):
+            time.sleep(0.02)
+        assert bad.calls >= 1
+        assert good.calls >= 1               # the next scope was still polled
+        assert thread.is_alive()             # and the loop lives on
+        dev = next(d for d in mgr.snapshot() if d["ip"] == "10.0.0.1")
+        assert dev["connected"] is False
+        assert "poll failed" in (dev["error"] or "")
+    finally:
+        mgr.stop()
+    assert not thread.is_alive()
