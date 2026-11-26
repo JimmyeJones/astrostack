@@ -1,5 +1,19 @@
 # Shipped — the record
 
+## 2026-11-26 (full audit, branch `claude/astap-path-guard`)
+
+### v0.511.6 — the ASTAP path setting can only name an ASTAP program
+
+**What.** `find_astap` accepted any typed path that existed, and the solver executes what it returns.
+The setting is writable by anyone who can reach the app when no password is set (the default), so it
+was a route to running an arbitrary program inside the container. A typed path (or a file inside a typed
+folder) must now be a file whose name is one ASTAP ships under (`astap`, `astap_cli`, `astap.exe`,
+`astap_cli.exe`, any case); anything else is refused, never run, and `astap_path_problem` says so in
+words. The env var and PATH lookups are unchanged. **Tests:** `tests/test_astap_path_guard.py` — the
+accepted names, refused names (including `/bin/sh`), and a refused script that is shown never to run
+(it ran before the fix). Follow-ups (settings writes needing a credential, a Host-header check, a non-root
+container) are filed from the audit.
+
 ## 2026-11-25 (Builder, branch `claude/fervent-gauss-4vxton`)
 
 ### v0.511.5 — a target's URL always opens that target, whatever the other targets are called
