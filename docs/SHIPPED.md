@@ -1,5 +1,36 @@
 # Shipped — the record
 
+## 2026-11-26 (Builder, branch `claude/fervent-gauss-pkrplp`)
+
+### v0.511.13 — a failed update leaves the old version running, and a retry keeps the real rollback point
+
+**What.** `scripts/deploy.sh` now checks out the target and runs `docker compose build` **while the old version keeps
+running**; a failed build (the network blip during `pip`/`npm`/ASTAP download) puts the checkout back and exits with
+the app untouched. Only after a good build does it record `last-good`, `compose stop`, snapshot/back up, and
+`compose up -d --no-build`. An `EXIT` trap covers everything between the checkout and the new container starting:
+any exit there (the `ERR` trap, the empty-backup `die`, Ctrl-C) restores the checkout and runs `docker start
+astrostack` on the old container, then says which version is running. `last-good` is now the **running** version,
+resolved by its release tag (`v$RUNNING`), falling back to the checkout only when it is not the target; when neither
+names a different version (a retry after a deploy that started but was unhealthy) the recorded point is **kept**, with
+a note. README and the two updater docstrings describe the new order. **Tests:** `tests/test_deploy_script.py` (+5;
+all 5 red against the old script): build before stop, failed build never stops, failure after stop restarts the old
+container, the audit's retry sequence keeps v0.1.0 as `last-good`, running version beats a leftover checkout. The
+stub's `docker exec` now reports what the container runs. No app, schema, layout or default change. **Not done:**
+pruning old `astrostack-pre-*` snapshots — they cover `incoming/` too and a destroy is irreversible, so it is filed
+under Needs owner sign-off.
+
+**The entry as filed:**
+
+- **🟠 Full audit 2026-11-26 — a failed update leaves the app stopped, and a retry destroys the way back.**
+  *(Pillar: "just works", §9. Size **S–M**. Reproduced by the audit with the real scripts (`backend.md` §2,
+  `subsystems.md` §4). Scout re-read `scripts/deploy.sh` 2026-11-26: `last-good` is written from the *checkout's*
+  `HEAD` (line ~74) before `compose stop`; checkout and `up -d --build` come after, and the `ERR` trap only prints a
+  `docker start` hint.)* One network blip during `pip`/`npm`/ASTAP download means the app is down. The update card
+  that would explain it is in the app that is down. Running the update again records the never-started version as
+  `last-good`, so `rollback.sh` "restores" it. Fix: `compose build` before `stop`; on failure after stop, start the
+  old container; write `last-good` only from the running container's version and only after a good build. Same file:
+  `zfs snapshot` per deploy is never pruned (`backend.md` §7). Keep the newest N after a healthy deploy.
+
 ## 2026-11-26 (Builder, branch `claude/fervent-gauss-lgvhh2`)
 
 ### v0.511.12 — a damaged `config.json` is kept, and a rollback keeps newer settings

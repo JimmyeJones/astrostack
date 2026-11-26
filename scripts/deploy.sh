@@ -11,9 +11,15 @@
 # Why not `git pull && docker compose up --build`: `main` moves several times an
 # hour, so a pull deploys whatever it happens to be at that second (it moved
 # twice during one deploy on 2026-09-17); and a backup taken while the app is up
-# copies SQLite files mid-write. This script pins one commit, STOPS the app,
-# snapshots your data, then builds and health-checks. If anything fails, it
-# prints the exact rollback command.
+# copies SQLite files mid-write. This script pins one commit and BUILDS it while
+# the old version keeps running; only then does it STOP the app, snapshot your
+# data, start the new version and health-check it. A failed build (one network
+# blip during pip/npm/ASTAP download) leaves the old version running and the
+# checkout where it was; a failure after the stop starts the old version again
+# by itself. If the new version starts but is unhealthy, it prints the rollback
+# command -- and `last-good`, what rollback returns to, is the version that was
+# actually running before, never the one that just failed (2026-11-26 audit:
+# a retry used to record the never-started version, so rollback "restored" it).
 #
 # Runs from the repository folder on the NAS, as root (Docker and ZFS need it).
 # Git itself runs as the user who owns the clone, via sudo -u.
@@ -27,17 +33,35 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 # Nothing may end this script silently -- least of all after it has stopped the
 # app (2026-10-04: a failed `zfs list` pipe did exactly that, with stderr hidden).
-APP_STOPPED=0
+# And nothing may end it with the app stopped: until the new version has been
+# started, any exit puts the checkout back and starts the old container again.
+APP_STOPPED=0; NEW_STARTED=0; CHECKED_OUT=0; FINISHED=0; CUR_SHA=""
 on_err() {
   local rc=$? line=$1
   echo >&2
   echo "ERROR: the deploy stopped unexpectedly (line $line of scripts/deploy.sh, exit $rc)." >&2
+}
+on_exit() {
+  [ "$FINISHED" = 1 ] && return 0
+  [ "$NEW_STARTED" = 1 ] && return 0          # the new version is up; rollback.sh is the way back
+  if [ "$CHECKED_OUT" = 1 ] && [ -n "$CUR_SHA" ]; then
+    g -c advice.detachedHead=false checkout --quiet --detach "$CUR_SHA" 2>/dev/null \
+      && echo "The checkout is back on the version you had." >&2
+  fi
   if [ "$APP_STOPPED" = 1 ]; then
-    echo "The app is stopped. Start it again, as it was, with:" >&2
-    echo "  sudo docker start astrostack" >&2
+    echo "Starting the previous version again…" >&2
+    if docker start astrostack >/dev/null 2>&1; then
+      echo "Started again: $(docker exec astrostack python -c 'import webapp;print(webapp.__version__)' 2>/dev/null || echo 'version not readable yet'). Your data was not changed." >&2
+    else
+      echo "Could not start it. Start it again, as it was, with:" >&2
+      echo "  sudo docker start astrostack" >&2
+    fi
+  elif [ "$CHECKED_OUT" = 1 ]; then
+    echo "The app was not stopped: the previous version is still running. Nothing was changed." >&2
   fi
 }
 trap 'on_err $LINENO' ERR
+trap on_exit EXIT
 
 [ "$(id -u)" = 0 ] || die "run with sudo: sudo bash scripts/deploy.sh ${REF}"
 [ -f .env ] || die "no .env here — run this from your astrostack clone."
@@ -71,7 +95,35 @@ echo
 if [ "$YES" != 1 ]; then read -r -p "Stop the app, back up, and deploy v$NEW_VER? [y/N] " ok; [ "$ok" = y ] || [ "$ok" = Y ] || die "cancelled."; fi
 
 STAMP="$(date -u +%Y%m%dT%H%MZ)"
-echo "$CUR_SHA v$CUR_VER $STAMP" > "$STATE_DIR/last-good"   # what rollback.sh returns to by default
+
+# What rollback.sh returns to: the version RUNNING now, found by its release tag
+# (every version on main is tagged). Only when that cannot be read does the
+# checkout stand in -- and never when it is the version being deployed, which
+# is what a retry after a failed deploy would otherwise record.
+PREV_SHA=""
+if [ "$RUNNING" != "not running" ]; then
+  if [ "$RUNNING" != "$NEW_VER" ]; then
+    PREV_SHA="$(g rev-parse -q --verify "v$RUNNING^{commit}" 2>/dev/null || true)"
+    [ -n "$PREV_SHA" ] || { [ "$RUNNING" = "$CUR_VER" ] && PREV_SHA="$CUR_SHA"; } || true
+  fi
+elif [ "$CUR_SHA" != "$TARGET" ]; then
+  PREV_SHA="$CUR_SHA"
+fi
+[ "$PREV_SHA" = "$TARGET" ] && PREV_SHA=""
+
+echo "Checking out v$NEW_VER…"; CHECKED_OUT=1; g -c advice.detachedHead=false checkout --quiet --detach "$TARGET"
+echo "Building v$NEW_VER while the app keeps running (a few minutes)…"
+if ! "${COMPOSE[@]}" build; then
+  echo >&2
+  echo "ERROR: building v$NEW_VER failed (often a network hiccup while downloading — try again later)." >&2
+  exit 1
+fi
+
+if [ -n "$PREV_SHA" ]; then
+  echo "$PREV_SHA v$(ver_at "$PREV_SHA") $STAMP" > "$STATE_DIR/last-good"
+else
+  echo "note: keeping the recorded rollback point ($(cut -d' ' -f2 "$STATE_DIR/last-good" 2>/dev/null || echo none)) — v$NEW_VER is not the version to go back to."
+fi
 
 echo "Stopping the app…"; "${COMPOSE[@]}" stop
 APP_STOPPED=1
@@ -93,14 +145,14 @@ if [ -z "$SNAP" ]; then
   BK="$STATE_DIR/backup-pre-v$NEW_VER-$STAMP.tar.gz"
   ( cd "$ASTRO_DATA" && find library state \( -name '*.sqlite*' -o -name 'config.json' \) -print0 \
       | tar --null -czf "$BK" --files-from=- )
-  N="$(tar tzf "$BK" | wc -l)"; [ "$N" -gt 0 ] || die "backup came out empty — NOT deploying. The app is stopped; start it with: ${COMPOSE[*]} start"
+  N="$(tar tzf "$BK" | wc -l)"; [ "$N" -gt 0 ] || die "backup came out empty — NOT deploying."
   echo "Backup: $BK ($N files)"; SNAP="$BK"
 fi
 echo "$SNAP" > "$STATE_DIR/last-backup"
 
-echo "Checking out v$NEW_VER…"; g -c advice.detachedHead=false checkout --quiet --detach "$TARGET"
-echo "Building and starting (a few minutes)…"
-"${COMPOSE[@]}" up -d --build
+echo "Starting v$NEW_VER…"
+"${COMPOSE[@]}" up -d --no-build
+NEW_STARTED=1
 
 echo -n "Waiting for the app to report healthy"
 for _ in $(seq 60); do
@@ -112,5 +164,6 @@ if [ "$s" != healthy ]; then
   echo "Roll back with:  sudo bash scripts/rollback.sh"
   exit 1
 fi
+FINISHED=1
 echo "Done: running $(docker exec astrostack python -c 'import webapp;print(webapp.__version__)'). Backup: $SNAP"
 echo "If anything looks wrong:  sudo bash scripts/rollback.sh"
