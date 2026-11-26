@@ -8,6 +8,11 @@ datasets `zfs list` was still writing when awk quit, died of SIGPIPE, and
 after `docker compose stop`. The same lines also deployed with **no backup** if
 `zfs snapshot` failed. These tests run the real script over a fake NAS whose
 `zfs list` prints 20,000 datasets.
+
+2026-11-26 audit (backend.md §2): a failed build left the app stopped, and running
+the update again recorded the never-started version as `last-good`, so
+`rollback.sh` "restored" the broken one. The stub's `docker exec` reports the
+version the container is running (``running`` file), which `up` advances.
 """
 from __future__ import annotations
 
@@ -30,8 +35,15 @@ STUBS = {
 echo "docker $*" >> "$STUB_LOG"
 case "$1" in
   inspect) echo healthy ;;
-  exec) echo 0.2.0 ;;
-  compose) for a in "$@"; do [ "$a" = up ] && exit "$(cat "$STUB_DIR/up_rc" 2>/dev/null || echo 0)"; done ;;
+  exec) cat "$STUB_DIR/running" 2>/dev/null || echo 0.1.0 ;;
+  compose) for a in "$@"; do
+      [ "$a" = build ] && exit "$(cat "$STUB_DIR/build_rc" 2>/dev/null || echo 0)"
+      if [ "$a" = up ]; then
+        rc="$(cat "$STUB_DIR/up_rc" 2>/dev/null || echo 0)"
+        [ "$rc" = 0 ] && echo 0.2.0 > "$STUB_DIR/running"
+        exit "$rc"
+      fi
+    done ;;
 esac
 exit 0
 """,
@@ -80,6 +92,7 @@ def nas(tmp_path: Path):
     (clone / "seestack" / "io" / "library.py").write_text("LIBRARY_SCHEMA_VERSION = 5\n")
     _commit(clone, "0.1.0")
     old = _git(clone, "rev-parse", "HEAD")
+    _git(clone, "tag", "v0.1.0")
     _commit(clone, "0.2.0")
     _git(clone, "tag", "v0.2.0")
     _git(clone, "push", "-q", "origin", "HEAD:main", "--tags")
@@ -106,6 +119,7 @@ def nas(tmp_path: Path):
     n.state = tmp_path / "deploy-state"
     n.log = tmp_path / "stub.log"
     n.v020 = _git(clone, "rev-parse", "v0.2.0")
+    n.v010 = old
 
     def run(*, zfs: bool = True) -> subprocess.CompletedProcess:
         if not zfs:
@@ -129,7 +143,8 @@ def test_a_nas_with_thousands_of_datasets_deploys_with_a_snapshot(nas) -> None:
     assert f"Snapshot: {snap}" in r.stdout
     assert f"zfs snapshot {snap}" in nas.calls()
     assert _git(nas.clone, "rev-parse", "HEAD") == nas.v020
-    assert any("compose" in c and " up -d --build" in c for c in nas.calls())
+    assert any("compose" in c and " up -d" in c for c in nas.calls())
+    assert (nas.state / "last-good").read_text().split()[:2] == [nas.v010, "v0.1.0"]
 
 
 def test_a_failed_snapshot_falls_back_to_a_copy_instead_of_no_backup(nas) -> None:
@@ -151,13 +166,67 @@ def test_without_zfs_the_backup_is_a_copy(nas) -> None:
     assert (nas.state / "last-backup").read_text().strip().endswith(".tar.gz")
 
 
-def test_a_failure_after_stopping_the_app_says_so_and_how_to_start_it(nas) -> None:
+def _index(calls: list[str], needle: str) -> int:
+    return next(i for i, c in enumerate(calls) if needle in c)
+
+
+def test_the_new_version_is_built_before_the_app_is_stopped(nas) -> None:
+    r = nas.run()
+    assert r.returncode == 0, r.stdout + r.stderr
+    calls = nas.calls()
+    assert _index(calls, " build") < _index(calls, " stop") < _index(calls, " up -d")
+    assert not any(c.startswith("docker start") for c in calls)
+
+
+def test_a_failed_build_leaves_the_old_version_running_and_the_checkout_alone(nas) -> None:
+    (nas.stubs / "build_rc").write_text("1")
+    r = nas.run()
+    assert r.returncode != 0
+    assert "building v0.2.0 failed" in r.stderr
+    assert "still running" in r.stderr
+    calls = nas.calls()
+    assert not any(" stop" in c or " up " in c for c in calls)     # never stopped
+    assert _git(nas.clone, "rev-parse", "HEAD") == nas.v010
+    assert not (nas.state / "last-good").exists()
+    assert not (nas.state / "last-backup").exists()
+
+
+def test_a_failure_after_stopping_the_app_starts_the_old_one_again(nas) -> None:
     (nas.stubs / "up_rc").write_text("3")
     r = nas.run()
     assert r.returncode != 0
     assert "stopped unexpectedly" in r.stderr
-    assert "sudo docker start astrostack" in r.stderr
+    calls = nas.calls()
+    assert _index(calls, " up -d") < _index(calls, "docker start astrostack")
+    assert "Started again: 0.1.0" in r.stderr
+    assert _git(nas.clone, "rev-parse", "HEAD") == nas.v010   # checkout matches what runs
     assert (nas.state / "last-backup").exists()          # the backup was taken first
+
+
+def test_a_retry_after_a_failed_deploy_keeps_the_real_rollback_point(nas) -> None:
+    """The audit's sequence: the first deploy got v0.2.0 started but unhealthy (or the
+    old script left the checkout on it); the owner runs the update again. `last-good`
+    must still name v0.1.0, or rollback.sh "restores" the broken version."""
+    (nas.stubs / "up_rc").write_text("3")
+    assert nas.run().returncode != 0
+    assert (nas.state / "last-good").read_text().split()[:2] == [nas.v010, "v0.1.0"]
+    # As the old script left it: checkout on the new version, new version reported running.
+    _git(nas.clone, "checkout", "-q", "--detach", nas.v020)
+    (nas.stubs / "running").write_text("0.2.0\n")
+    (nas.stubs / "up_rc").write_text("0")
+    r = nas.run()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "keeping the recorded rollback point (v0.1.0)" in r.stdout
+    assert (nas.state / "last-good").read_text().split()[:2] == [nas.v010, "v0.1.0"]
+
+
+def test_the_rollback_point_is_the_running_version_not_the_checkout(nas) -> None:
+    """The old script's other leftover: checkout already on the target while the
+    owner restarted the old container by hand. The running version wins."""
+    _git(nas.clone, "checkout", "-q", "--detach", nas.v020)
+    r = nas.run()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (nas.state / "last-good").read_text().split()[:2] == [nas.v010, "v0.1.0"]
 
 
 def test_incoming_is_never_touched(nas) -> None:

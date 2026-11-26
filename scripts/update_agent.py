@@ -9,7 +9,7 @@ container an update has to rebuild. So the page only *asks* — it writes
 ``$ASTRO_DATA/state/updater/request.json`` — and this script, run on the host by
 cron, reads the ask, checks it against the three things it may mean, and runs the
 same ``scripts/deploy.sh`` / ``scripts/rollback.sh`` the owner would run by hand
-(stop the app, back up, build, wait for healthy). It reports back in
+(build, stop the app, back up, start, wait for healthy). It reports back in
 ``state/updater/status.json``, which the page reads. Stdlib only: TrueNAS ships
 ``python3`` and nothing here may need an install.
 

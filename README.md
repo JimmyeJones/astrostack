@@ -258,9 +258,12 @@ sudo bash scripts/deploy.sh
 That deploys the **`stable`** version — a build that has been on `main` for at
 least three days with its tests passing, so you don't catch a change halfway
 through being fixed. It shows you what's running and what it's about to
-install, **stops the app, backs up your data** (a ZFS snapshot when your data
-folder is its own dataset, otherwise a copy of the databases and settings),
-builds, and waits until the app reports healthy.
+install, **builds the new version while the old one keeps running**, then
+**stops the app, backs up your data** (a ZFS snapshot when your data folder is
+its own dataset, otherwise a copy of the databases and settings), starts the
+new version and waits until it reports healthy. If the build fails (a network
+hiccup while downloading, say) the old version simply keeps running; if anything
+fails after the stop, the script starts the old version again by itself.
 
 - **A specific version:** `sudo bash scripts/deploy.sh v0.479.2` (every release is a
   git tag).

@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- 🟠 `deploy.sh` failed-update / `last-good` entry — Builder, branch `claude/fervent-gauss-pkrplp` (2026-11-26).
+*No live claims.*
 
 ---
 
@@ -99,16 +99,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   nebula error went 0.45 → 1.10× raw. Polyphase TV (each k×k phase denoised like a step-k proxy) matches the
   preview's grain but prints a k-px mesh. Note the preview already over-smooths nebula the *other* way (step 3:
   0.97 vs export 0.45): TV's weight is not scale-free. Needs a correlation estimate nebulosity cannot fool.
-
-- **🟠 Full audit 2026-11-26 — a failed update leaves the app stopped, and a retry destroys the way back.**
-  *(Pillar: "just works", §9. Size **S–M**. Reproduced by the audit with the real scripts (`backend.md` §2,
-  `subsystems.md` §4). Scout re-read `scripts/deploy.sh` 2026-11-26: `last-good` is written from the *checkout's*
-  `HEAD` (line ~74) before `compose stop`; checkout and `up -d --build` come after, and the `ERR` trap only prints a
-  `docker start` hint.)* One network blip during `pip`/`npm`/ASTAP download means the app is down. The update card
-  that would explain it is in the app that is down. Running the update again records the never-started version as
-  `last-good`, so `rollback.sh` "restores" it. Fix: `compose build` before `stop`; on failure after stop, start the
-  old container; write `last-good` only from the running container's version and only after a good build. Same file:
-  `zfs snapshot` per deploy is never pruned (`backend.md` §7). Keep the newest N after a healthy deploy.
 
 - **🟡 Full audit 2026-11-26 — walk-away cost: unsolvable subs re-solved on every import, and every restart
   re-imports the whole library.** *(Pillar: autonomy, PRIORITY 2. Size **S–M**. Measured by the audit: 8 unsolvable subs →
@@ -3232,6 +3222,14 @@ outright bug in existing behaviour, never to add capability.
   could lock out a hostname or IP he already uses; (c) **a non-root container user**, which changes file ownership
   on his NAS and must be checked against `incoming/` read access (§10) before it ships. Size M each.
 
+- **🧹 Prune old deploy snapshots (left over from the 🟠 `deploy.sh` entry shipped in v0.511.13; filed by Builder
+  2026-11-26).** Every `scripts/deploy.sh` run takes a `<dataset>@astrostack-pre-v…` snapshot and nothing ever
+  destroys one, so pruned stack runs, cleared cache and replaced masters stay pinned on disk (audit `backend.md` §7).
+  The fix is small (keep the newest N after a healthy deploy), but those snapshots cover the whole dataset,
+  `incoming/` included — the only point-in-time copies of raws that have no other backup — and destroying one cannot
+  be undone. So ask first: may deploy keep only the newest N (3?), or should it stay as it is and the Storage page
+  just show what the snapshots hold? Size S.
+
 _(Normal, tested changes merge to the default branch automatically — see
 AGENTS.md §8. Only the items above need a human's OK first.)_
 
@@ -3241,6 +3239,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.13 **A failed update no longer leaves the app stopped, and a retry no longer destroys the way back: `scripts/deploy.sh` builds the new version before `compose stop` (a failed build leaves the old one running and the checkout where it was), an `EXIT` trap starts the old container again after any failure before the new one starts, and `last-good` is the *running* version (by its release tag), never the target.** Branch `claude/fervent-gauss-pkrplp`.
 - ✅ v0.511.12 **A truncated or garbled `config.json` is kept (`config.json.unreadable-<stamp>`) and not overwritten, and the app starts with the watcher and auto-stack paused; top-level keys this build does not know are carried through `SettingsStore.save`, so a rollback no longer drops newer settings** (full audit 2026-11-26, backend.md §10/§11) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.11 **An install already in the unsafe nested folder layout no longer deletes: while `Settings.layout_conflict()` is set, delete-target-with-files, merge, cache clear, prune, stack-run delete, reprocess-all and the scan (endpoint and watcher-queued `_pipeline_body`) refuse with a plain sentence (`deps.refuse_on_unsafe_layout`, 409), and the Dashboard's folder notice shows it, undismissable** (full audit 2026-11-26, backend.md finding 9) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.10 **Auto's wavelet denoise removes on the export the grain its preview showed removed: `_denoise` thresholds each wavelet band at its own MAD capped by a pixel-domain noise model (`wavelet_noise_caps`, `_bayes_shrink_correlated`), so a stacker's ~1 px-correlated grain is no longer left at 92–98 % on the saved picture** (Scout 2026-11-26 sweep 1) — full entry in [`SHIPPED.md`](SHIPPED.md)

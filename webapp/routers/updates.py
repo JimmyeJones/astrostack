@@ -3,7 +3,7 @@
 The app cannot update itself — it runs inside the container an update rebuilds —
 so these endpoints only **ask**. ``POST`` writes ``state/updater/request.json``;
 ``scripts/update_agent.py``, run on the NAS by a cron job the owner sets up once,
-picks it up, runs ``scripts/deploy.sh`` (stop, back up, build, health-check) or
+picks it up, runs ``scripts/deploy.sh`` (build, stop, back up, start, health-check) or
 ``scripts/rollback.sh``, and reports in ``state/updater/status.json``, which
 ``GET`` reads. That split is the security design, not a convenience: giving the
 container the Docker socket instead would make "anyone who can open this page"
