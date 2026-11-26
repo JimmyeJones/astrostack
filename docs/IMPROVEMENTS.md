@@ -92,19 +92,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   0.67/0.25/0.18/0.18**; 1.0 px 0.56/0.32/0.21/0.17. Fix direction: scale `weight` by the measured grain gain
   (`wavelet_noise_caps`' `G`) or denoise TV on the same noise model; add the correlated case to
   `test_the_wavelet_denoise_exports_what_it_previews_on_stacker_grain`'s neighbour for `tv`.
-
-- **🟠 Full audit 2026-11-26 — `SettingsStore.__init__` re-saves `config.json` on every boot, with three
-  consequences.** *(Pillar: "just works" / upgrade safety, §9. Size **S**. Reproduced by the Scout 2026-11-26 through
-  `SettingsStore(data_root=…)`; audit `backend.md` §6, §10, §11.)*
-  (The full-disk boot half is done — see `SHIPPED.md`, "a full disk no longer stops the app from starting".)
-  (b) **A truncated `config.json` boots on defaults and is overwritten at once.** Result: `auto_stack` True (his is
-  off), password off, folders reset; no copy of the bad file is kept (`webapp/config.py::_load_resilient` →
-  `Settings(data_root=root)` → `save()`).
-  (c) **Rollback drops unknown keys.** A key the loaded build does not know is gone after one boot, so rolling back
-  and then forward again loses every setting added in between.
-  Fix for (b)/(c): on a parse failure keep
-  `config.json.unreadable-<stamp>`, do not re-save, and start with the watcher and auto-stack paused; carry unknown
-  top-level keys through `save()`. Add an upgrade test for each.
+  **Builder 2026-11-26 (`claude/fervent-gauss-lgvhh2`) tried both, neither ships:** `weight·G` closes the sky
+  (0.66 → 0.16 at 0.8 px) but flattens stars (error 0.91 → 2.86× raw), and a star guard (base-weight TV inside
+  `gaussian(lum,1) > 1`, dilated 2 px) fixes that (0.80–0.87) — **but `wavelet_grain_gain` reads nebulosity as
+  correlation** (G 7.6 on the white-grain nebula field of `test_the_wavelet_denoise_keeps_nebulosity…`), so the
+  nebula error went 0.45 → 1.10× raw. Polyphase TV (each k×k phase denoised like a step-k proxy) matches the
+  preview's grain but prints a k-px mesh. Note the preview already over-smooths nebula the *other* way (step 3:
+  0.97 vs export 0.45): TV's weight is not scale-free. Needs a correlation estimate nebulosity cannot fool.
 
 - **🟠 Full audit 2026-11-26 — a failed update leaves the app stopped, and a retry destroys the way back.**
   *(Pillar: "just works", §9. Size **S–M**. Reproduced by the audit with the real scripts (`backend.md` §2,
@@ -3247,6 +3241,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.12 **A truncated or garbled `config.json` is kept (`config.json.unreadable-<stamp>`) and not overwritten, and the app starts with the watcher and auto-stack paused; top-level keys this build does not know are carried through `SettingsStore.save`, so a rollback no longer drops newer settings** (full audit 2026-11-26, backend.md §10/§11) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.11 **An install already in the unsafe nested folder layout no longer deletes: while `Settings.layout_conflict()` is set, delete-target-with-files, merge, cache clear, prune, stack-run delete, reprocess-all and the scan (endpoint and watcher-queued `_pipeline_body`) refuse with a plain sentence (`deps.refuse_on_unsafe_layout`, 409), and the Dashboard's folder notice shows it, undismissable** (full audit 2026-11-26, backend.md finding 9) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.10 **Auto's wavelet denoise removes on the export the grain its preview showed removed: `_denoise` thresholds each wavelet band at its own MAD capped by a pixel-domain noise model (`wavelet_noise_caps`, `_bayes_shrink_correlated`), so a stacker's ~1 px-correlated grain is no longer left at 92–98 % on the saved picture** (Scout 2026-11-26 sweep 1) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.9 **The app boots on a full or read-only data disk: `SettingsStore.__init__` skips rewriting an identical `config.json` and makes the boot-time save best-effort (logs and continues) instead of restart-looping with Storage unreachable** (full audit 2026-11-26, backend.md finding 6) — full entry in [`SHIPPED.md`](SHIPPED.md)

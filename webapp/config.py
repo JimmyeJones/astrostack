@@ -543,6 +543,44 @@ def _load_resilient(text: str, root: str) -> "Settings":
     return Settings(data_root=root)
 
 
+def _parse_config(text: str | None) -> dict | None:
+    """``config.json``'s top-level object, or ``None`` when the file can't be
+    read or isn't a JSON object at all (truncated, garbled, empty)."""
+    if text is None:
+        return None
+    try:
+        raw = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _keep_unreadable_copy(path: Path) -> Path | None:
+    """Copy an unreadable ``config.json`` to ``config.json.unreadable-<UTC stamp>``
+    beside it, so whatever survives in it can still be recovered by hand.
+    Best-effort: a full or read-only disk returns ``None`` and boot carries on."""
+    import shutil
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dest = path.with_name(f"{path.name}.unreadable-{stamp}")
+    try:
+        data = path.read_bytes()
+        # A container restart-looping on the same damaged file keeps one copy,
+        # not one per boot.
+        for prior in sorted(path.parent.glob(f"{path.name}.unreadable-*")):
+            try:
+                if prior.read_bytes() == data:
+                    return prior
+            except OSError:
+                continue
+        shutil.copy2(path, dest)
+        return dest
+    except OSError as exc:
+        log.warning("could not keep a copy of the unreadable config.json (%s)", exc)
+        return None
+
+
 def _read_text_or_none(path: Path) -> str | None:
     try:
         return path.read_text(encoding="utf-8")
@@ -558,8 +596,42 @@ class SettingsStore:
         root = data_root or default_data_root()
         # Bootstrap: load existing config if present, else defaults.
         cfg_path = Path(root) / "state" / CONFIG_FILENAME
+        # Top-level keys this build does not know (a setting added by a newer
+        # version, seen here after a rollback). They are written back by
+        # :meth:`save` untouched, so rolling back and forward again keeps every
+        # setting the newer version had (full audit 2026-11-26, backend.md §11).
+        self._unknown: dict[str, Any] = {}
+        #: Where an unreadable ``config.json`` was kept on this boot, or ``None``.
+        self.unreadable_copy: Path | None = None
+        unreadable = False
         if cfg_path.exists():
-            self._settings = _load_resilient(cfg_path.read_text(), root)
+            text = _read_text_or_none(cfg_path)
+            raw = _parse_config(text)
+            if raw is None:
+                # A truncated or garbled file (a crash mid-copy, a bad hand
+                # edit). It used to boot on defaults — auto-stack on, the
+                # password off, the folders reset — and overwrite the file at
+                # once, so nothing of the owner's settings survived (backend.md
+                # §10). Keep the bytes beside it, leave the file alone, and start
+                # with the unattended chain paused so nothing runs on settings
+                # he never chose. The first settings change he saves writes a
+                # fresh file.
+                unreadable = True
+                self.unreadable_copy = _keep_unreadable_copy(cfg_path)
+                log.error(
+                    "config.json could not be read — starting on default settings "
+                    "with the folder watcher and auto-stack paused; the damaged "
+                    "file is left in place%s. Open Settings to set things up again "
+                    "(saving there writes a fresh config.json).",
+                    f" and copied to {self.unreadable_copy.name}"
+                    if self.unreadable_copy is not None else "")
+                self._settings = Settings(
+                    data_root=root, watcher_enabled=False, auto_stack=False,
+                    auto_edit_on_autostack=False)
+            else:
+                self._unknown = {k: v for k, v in raw.items()
+                                 if k not in Settings.model_fields}
+                self._settings = _load_resilient(text or "", root)
         else:
             self._settings = Settings(data_root=root)
         # Honor an explicit data_root override from env on every boot.
@@ -581,7 +653,7 @@ class SettingsStore:
         # byte-for-byte is not rewritten at all.
         try:
             self._settings.ensure_dirs()
-            if self._serialised() != _read_text_or_none(cfg_path):
+            if not unreadable and self._serialised() != _read_text_or_none(cfg_path):
                 self.save()
         except OSError as exc:
             log.warning(
@@ -618,8 +690,12 @@ class SettingsStore:
             return self._settings.model_copy(deep=True)
 
     def _serialised(self) -> str:
-        """The exact text :meth:`save` writes."""
-        return json.dumps(json.loads(self._settings.model_dump_json()), indent=2)
+        """The exact text :meth:`save` writes: this build's settings, then any
+        top-level key it does not know, carried through unchanged."""
+        data = json.loads(self._settings.model_dump_json())
+        for key, value in self._unknown.items():
+            data.setdefault(key, value)
+        return json.dumps(data, indent=2)
 
     def save(self) -> None:
         with self._lock:
