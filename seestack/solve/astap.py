@@ -100,6 +100,17 @@ _DEFAULT_WINDOWS_PATHS = (
 # What a folder named as the ASTAP path is searched for, in order: the GUI
 # program the Docker image bundles, the command-line build, the Windows name.
 _ASTAP_PROGRAM_NAMES = ("astap", "astap_cli", "astap.exe")
+# The only file names a *typed* ASTAP path may end in. The path comes from a
+# setting anyone who can reach the app can change (auth is off by default), and
+# the solver executes it — so "any file that exists" let a request name a shell
+# and have the next solve run it as the container's user (audit 2026-11-26).
+# ASTAP ships under these names on every platform; nothing else is run.
+_ASTAP_ALLOWED_NAMES = frozenset({"astap", "astap_cli", "astap.exe", "astap_cli.exe"})
+
+
+def is_astap_program_name(path: str | os.PathLike[str]) -> bool:
+    """Whether ``path``'s file name is one ASTAP is distributed under."""
+    return Path(path).name.lower() in _ASTAP_ALLOWED_NAMES
 
 
 def _clean_user_path(user_path: str | os.PathLike[str] | None) -> str | None:
@@ -131,7 +142,8 @@ def find_astap(user_path: str | os.PathLike[str] | None = None) -> Path | None:
 
     A set path that doesn't lead to a program returns ``None`` — it does **not**
     fall back to the others, because the user named it; :func:`astap_path_problem`
-    says why in words.
+    says why in words. A typed path must be a file named like ASTAP
+    (:data:`_ASTAP_ALLOWED_NAMES`): it is never "whatever executable exists".
     """
     cleaned = _clean_user_path(user_path)
     if cleaned:
@@ -139,7 +151,7 @@ def find_astap(user_path: str | os.PathLike[str] | None = None) -> Path | None:
         if p.is_dir():
             return next((p / n for n in _ASTAP_PROGRAM_NAMES
                          if (p / n).is_file()), None)
-        return p if p.exists() else None
+        return p if p.is_file() and is_astap_program_name(p) else None
     env_path = os.environ.get("SEESTACK_ASTAP_PATH")
     if env_path:
         p = Path(env_path)
@@ -180,6 +192,9 @@ def astap_path_problem(user_path: str | os.PathLike[str] | None) -> str | None:
     if is_dir:
         what = (f"The ASTAP path in Settings, \u201c{cleaned}\u201d, is a folder with no "
                 "ASTAP program in it")
+    elif p.exists() and not is_astap_program_name(p):
+        what = (f"The ASTAP path in Settings, \u201c{cleaned}\u201d, isn't an ASTAP program "
+                "(AstroStack only runs a file named astap or astap_cli)")
     else:
         what = (f"The ASTAP path in Settings, \u201c{cleaned}\u201d, doesn't exist "
                 "inside the app (a NAS path has to be the one the container sees)")
