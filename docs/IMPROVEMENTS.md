@@ -110,14 +110,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 - **🟠 Full audit 2026-11-26 — `SettingsStore.__init__` re-saves `config.json` on every boot, with three
   consequences.** *(Pillar: "just works" / upgrade safety, §9. Size **S**. Reproduced by the Scout 2026-11-26 through
   `SettingsStore(data_root=…)`; audit `backend.md` §6, §10, §11.)*
-  (a) **No boot on a full disk:** with `write_text_durably` raising ENOSPC the store raises
-  `[Errno 28]` out of the lifespan, so `restart: unless-stopped` loops and the Storage page is unreachable.
+  (The full-disk boot half is done — see `SHIPPED.md`, "a full disk no longer stops the app from starting".)
   (b) **A truncated `config.json` boots on defaults and is overwritten at once.** Result: `auto_stack` True (his is
   off), password off, folders reset; no copy of the bad file is kept (`webapp/config.py::_load_resilient` →
   `Settings(data_root=root)` → `save()`).
   (c) **Rollback drops unknown keys.** A key the loaded build does not know is gone after one boot, so rolling back
   and then forward again loses every setting added in between.
-  Fix: make the boot save best-effort and skip it when the text would not change; on a parse failure keep
+  Fix for (b)/(c): on a parse failure keep
   `config.json.unreadable-<stamp>`, do not re-save, and start with the watcher and auto-stack paused; carry unknown
   top-level keys through `save()`. Add an upgrade test for each.
 
@@ -148,12 +147,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   settings change, "Rescue unsolved" still forces one). (b) `webapp/watcher.py::StabilityTracker` starts empty, so
   after any container restart every file in `incoming/` becomes "newly stable" and `_on_batch_ready` queues scan →
   QC → solve, which then pays (a). Fix: seed the tracker from the library's known `(source_path, size, mtime)`.
-
-- **🟡 Full audit 2026-11-26 — with a password set, every request runs a 200,000-round PBKDF2 on the event loop.**
-  *(Pillar: friendliness. Size **S**. Measured by the audit: 30 parallel GETs 0.48 s → 5.35 s (`backend.md` §4); Scout
-  measured one KDF at 58 ms here and confirmed `webapp/main.py::_auth_gate` calls `auth.check_basic_auth`
-  synchronously with no cache.)* A gallery of thumbnails queues behind it, and so does the Docker health probe. Fix:
-  cache a successful verdict keyed by an HMAC of the header for a few minutes, and run a cold check in a threadpool.
 
 - **🟡 Full audit 2026-11-26 — the out-of-memory guard underestimates mosaics 1.7–3.2×.** *(Pillar: "just works";
   OOM history. Size **M**. Measured by the audit, `perf.md` D-1: drizzle ×1.5 + reject on a 5×2 mosaic peaked at 4.81 GB
@@ -3275,6 +3268,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.9 **The app boots on a full or read-only data disk: `SettingsStore.__init__` skips rewriting an identical `config.json` and makes the boot-time save best-effort (logs and continues) instead of restart-looping with Storage unreachable** (full audit 2026-11-26, backend.md finding 6) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.8 **With a password set, the auth gate no longer pays ~190 ms of PBKDF2 on the event loop per request — `auth._verify` remembers accepted credentials (successes only, keyed on the stored hash+salt) and `main._credential_verdict` runs in a threadpool** (full audit 2026-11-26, backend.md finding 4) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.7 **The Seestar telemetry thread no longer dies the first time the scope goes offline — `SeestarClient.connect` raises `SeestarError` for a refused/timed-out socket and `SeestarManager._poll_one` is guarded per scope** (full audit 2026-11-26, subsystems §1) — full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.511.6 **🔒 Security: the ASTAP path setting only ever runs a file named like ASTAP (`astap`, `astap_cli`, `.exe` variants) — before, any existing file it named was executed by the next plate solve** (`seestack.solve.astap.find_astap`, `is_astap_program_name`; full audit 2026-11-26)

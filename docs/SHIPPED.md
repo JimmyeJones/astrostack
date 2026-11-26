@@ -2,6 +2,20 @@
 
 ## 2026-11-26 (Builder, branch `claude/fervent-gauss-o8jycv`)
 
+### v0.511.9 — a full disk no longer stops the app from starting
+
+**What.** The full audit (2026-11-26, `backend.md` finding 6, reproduced with a simulated ENOSPC) found
+`SettingsStore.__init__` re-saved `config.json` unconditionally on every boot and let the `OSError` escape
+the lifespan: a pool or dataset quota that filled during a big stack left the container restart-looping,
+with the Storage page — the friendly way to free space — unreachable. Now boot skips the save when the
+file on disk is already byte-for-byte what it would write, and a boot-time `ensure_dirs`/save that fails
+with `OSError` is logged and the app starts with the settings in memory. A real settings change still
+raises if it cannot save, as before. **Tests:** `tests/webapp/test_config_boot_full_disk.py` — a boot
+whose save hits ENOSPC keeps the owner's own value and leaves his file untouched, an identical config is
+not rewritten, a fresh or repaired config is still written, and the whole app answers `/api/health` and
+`/api/settings` with every config write failing. Three red before. No config, schema, API or default
+change.
+
 ### v0.511.8 — turning the password on no longer makes the app slow
 
 **What.** The full audit (2026-11-26, `backend.md` finding 4, measured: 30 parallel GETs 0.48 s without a
@@ -18,6 +32,14 @@ requests pay one KDF (20 before), a wrong password pays it every time, a changed
 token are refused even though the old one was cached, the cache is bounded, and `/api/health` answers
 while a 1.5 s password check is in flight (waited 1.56 s before). No config, schema, API or default
 change.
+
+**Closed Bugs entry (cut whole, filed by the Scout 2026-11-26 while this was in flight):**
+
+- **🟡 Full audit 2026-11-26 — with a password set, every request runs a 200,000-round PBKDF2 on the event loop.**
+  *(Pillar: friendliness. Size **S**. Measured by the audit: 30 parallel GETs 0.48 s → 5.35 s (`backend.md` §4); Scout
+  measured one KDF at 58 ms here and confirmed `webapp/main.py::_auth_gate` calls `auth.check_basic_auth`
+  synchronously with no cache.)* A gallery of thumbnails queues behind it, and so does the Docker health probe. Fix:
+  cache a successful verdict keyed by an HMAC of the header for a few minutes, and run a cold check in a threadpool.
 
 ## 2026-11-26 (Builder, branch `agent/seestar-poll-oserror`)
 
