@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
@@ -1656,6 +1657,7 @@ def run_qc_and_solve(
     retry_unsolved_with_sibling_hint: bool = True,
     auto_reject_streaks: bool = True,
     bootstrap_solve: bool = False,
+    solve_backoff: bool = False,
     progress: ProgressFn | None = None,
     should_stop: ShouldStopFn | None = None,
 ) -> dict:
@@ -1683,6 +1685,12 @@ def run_qc_and_solve(
     :func:`~seestack.solve.runner.build_sibling_retry_arglist`). It can only add
     solves — ASTAP still verifies the star pattern — and is skipped entirely for
     setup failures, timeouts, and frames that already searched exactly there.
+
+    ``solve_backoff`` is for the walk-away pipeline only: a sub that has already
+    failed to solve on earlier imports waits out
+    :func:`~seestack.solve.runner.apply_solve_backoff` instead of costing ASTAP
+    time on every import (``solve_backoff_waiting`` counts the ones held back).
+    Every user-started solve leaves it off, so a button always retries them all.
     """
     from seestack.qc.runner import (
         apply_qc_result_to_db,
@@ -1696,11 +1704,13 @@ def run_qc_and_solve(
         classify_solve_setup_error,
     )
     from seestack.solve.runner import (
+        apply_solve_backoff,
         apply_solve_result_to_db,
         build_sibling_retry_arglist,
         build_solve_arglist,
         reconcile_bad_solve_frames,
         solve_one,
+        solver_signature,
     )
 
     summary = {"qc_done": 0, "qc_total": 0, "solve_done": 0, "solve_total": 0}
@@ -1775,6 +1785,20 @@ def run_qc_and_solve(
                 )
                 for (fid, path, ap, fov, to, *rest) in solve_args
             ]
+        if solve_backoff and solve_args:
+            _fid, _path, ap, fov, to, *_rest = solve_args[0]
+            solve_args, waiting = apply_solve_backoff(
+                project, solve_args,
+                signature=solver_signature(ap, fov, to, use_solve_hints),
+                now=time.time(),
+            )
+            if waiting:
+                summary["solve_backoff_waiting"] = waiting
+                log.info(
+                    "plate solve: %d sub(s) that failed on earlier imports are "
+                    "waiting before their next try (a manual solve retries them now)",
+                    waiting,
+                )
         summary["solve_total"] = len(solve_args)
         # ``solve_done`` counts frames *attempted* (it's the progress counter), so
         # it can't answer "how many did we actually locate?" — a field where every
@@ -1787,6 +1811,7 @@ def run_qc_and_solve(
         # only thing the sibling-hint second pass below needs, and far smaller than
         # holding a thousand subs' ``SolveResult`` (each carrying a WCS blob).
         failures: list[tuple[int, str | None]] = []
+        solved_ids: list[int] = []
         for done, result in _map_jobs(
             solve_one, solve_args,
             serial=serial, max_workers=max_workers,
@@ -1795,6 +1820,7 @@ def run_qc_and_solve(
             if result is not None:
                 if result.solved and wcs_text_is_usable(result.wcs_text):
                     solve_ok += 1
+                    solved_ids.append(result.frame_id)
                 else:
                     failures.append((result.frame_id, result.error))
                 try:
@@ -1846,6 +1872,7 @@ def run_qc_and_solve(
                     if result is not None:
                         if result.solved and wcs_text_is_usable(result.wcs_text):
                             retry_ok += 1
+                            solved_ids.append(result.frame_id)
                         try:
                             apply_solve_result_to_db(project, result)
                         except Exception as exc:  # noqa: BLE001
@@ -1862,6 +1889,25 @@ def run_qc_and_solve(
                         "sibling-hint retry located %d more sub(s) for %s",
                         retry_ok, project.get_meta("name"),
                     )
+
+        # Keep the walk-away back-off's count: a solve that worked forgets the
+        # sub's earlier failures (so a later wcs reset — ``reconcile_bad_solve_frames``
+        # — gets its retry at once), and on the walk-away pass each genuine
+        # failure counts one more. A setup failure (no ASTAP, no star database,
+        # a full temp dir) says nothing about the sub, so it never counts.
+        try:
+            if solved_ids:
+                project.clear_solve_attempts(solved_ids)
+            if solve_backoff:
+                rescued = set(solved_ids)
+                project.note_solve_failures(
+                    (fid for fid, err in failures
+                     if fid not in rescued
+                     and classify_solve_setup_error(err) is None),
+                    time.time(),
+                )
+        except Exception as exc:  # noqa: BLE001 — a count must never fail the pass
+            log.warning("solve back-off bookkeeping failed: %s", exc)
 
     # Stack-then-solve bootstrap: if the per-sub pass left most subs unsolved
     # (a faint / sparse-star field), integrate the accepted-but-unsolved subs

@@ -503,6 +503,9 @@ def _pipeline_body(
                             run_qc=settings.auto_qc,
                             run_solve=settings.auto_solve,
                             only_new_qc=True,  # don't re-QC frames already done on re-scans
+                            # a sub that keeps failing to solve waits between
+                            # tries instead of costing ASTAP time on every import
+                            solve_backoff=True,
                             use_solve_hints=settings.astap_use_solve_hints,
                             auto_reject_streaks=not settings.keep_streaked_frames,
                             bootstrap_solve=settings.astap_bootstrap_solve,

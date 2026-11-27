@@ -20,6 +20,7 @@ filesystems.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -59,12 +60,46 @@ class StabilityTracker:
         # never disappearing — can be told apart from one that is simply still
         # sitting there. See :meth:`update`.
         self._stable_stat: dict[str, tuple[int, float]] = {}
+        # What the library already finished with, as ``path -> (size, mtime)``,
+        # consumed by the first :meth:`update` (see :meth:`seed`).
+        self._seed: dict[str, tuple[int, float]] | None = None
+
+    def seed(self, known: dict[str, tuple[int, float]]) -> None:
+        """Treat ``known`` files as already stable — once, on the next update.
+
+        The tracker lives in memory, so after a container restart it starts
+        empty and every file already in ``incoming/`` used to come back as
+        *newly* stable, which queued a whole-library scan → QC → solve after
+        every restart or update (full audit 2026-11-26, ``perf.md`` D-6). Seeded
+        with the subs the library has already imported and finished, the first
+        poll marks exactly those stable without firing; anything else — a file
+        that arrived while the app was down, one rewritten in place since (its
+        size or mtime no longer match), one the library never finished — goes
+        through the quiet timer as before. A path is matched as spelled, then
+        by its resolved path, the way ingest's dedup does.
+        """
+        self._seed = dict(known)
 
     def update(self, snapshot: dict[str, tuple[int, float]]) -> set[str]:
         """``snapshot`` maps path -> (size, mtime). Returns newly stable paths."""
         now = self._time()
         newly_stable: set[str] = set()
         seen = set(snapshot.keys())
+
+        seed, self._seed = self._seed, None
+        if seed:
+            for path, st in snapshot.items():
+                if path in self._stable or path in self._pending:
+                    continue
+                known = seed.get(path)
+                if known is None:
+                    try:
+                        known = seed.get(os.path.realpath(path))
+                    except (OSError, ValueError):
+                        known = None
+                if known is not None and tuple(known) == tuple(st):
+                    self._stable.add(path)
+                    self._stable_stat[path] = (st[0], st[1])
 
         for path, (size, mtime) in snapshot.items():
             if path in self._stable:
@@ -126,6 +161,7 @@ class Watcher:
         get_settings: Callable[[], object],
         on_batch_ready: Callable[[], bool | None],
         on_check_stranded: Callable[[], bool] | None = None,
+        known_sources: Callable[[], dict[str, tuple[int, float]]] | None = None,
         time_fn: TimeFn | None = None,
         stat_fn: StatFn | None = None,
     ) -> None:
@@ -139,6 +175,12 @@ class Watcher:
         # re-arm the pending flag so the batch is handed off afresh (the pipeline
         # re-scans the whole incoming dir, so a new run re-imports them).
         self._on_check_stranded = on_check_stranded
+        # Optional: ``path -> (size, mtime)`` of the subs the library already
+        # finished with, asked once on the first poll that can read
+        # ``incoming/`` so a restart does not re-import everything (see
+        # ``StabilityTracker.seed``). Asked on the watcher thread, never at
+        # start-up, so a large library cannot slow the app's boot.
+        self._known_sources = known_sources
         # A batch we couldn't hand off yet because a pipeline was already
         # running when it stabilised. Re-offered on later polls until accepted,
         # so a file that stabilises mid-pipeline is never permanently dropped.
@@ -286,6 +328,16 @@ class Watcher:
             if st is not None:
                 snapshot[str(p)] = st
         self._record_incoming_units(incoming, snapshot)
+        if self._known_sources is not None:
+            known_sources, self._known_sources = self._known_sources, None
+            try:
+                known = known_sources()
+            except Exception:  # noqa: BLE001 — without a seed we only lose the shortcut
+                log.warning("could not read the library's imported subs; every "
+                            "file in incoming will be checked once", exc_info=True)
+            else:
+                if known:
+                    self._tracker.seed(known)
         newly_stable = self._tracker.update(snapshot)
         if newly_stable:
             log.info("%d new file(s) stable in %s", len(newly_stable), incoming)

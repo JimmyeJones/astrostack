@@ -27,6 +27,8 @@ from seestack.solve.astap import (
     ASTAPError,
     ASTAPSolver,
     classify_solve_setup_error,
+    find_astap,
+    find_star_db_dir,
     is_solve_timeout_error,
 )
 
@@ -386,6 +388,88 @@ def build_solve_arglist(
             radius = sibling_radius
         out.append((f.id, path, astap_path, fov_deg, timeout_s, ra_hint, dec_hint, radius))
     return out
+
+
+#: Walk-away solve back-off (full audit 2026-11-26, ``backend.md`` §5). A sub
+#: ASTAP cannot place was re-offered on **every** later import — up to three
+#: ASTAP runs each, on the single worker — so ~1 % unsolvable on a library of
+#: tens of thousands of subs was hours of solver time per new night. Retries can
+#: succeed (ASTAP's ladder is not deterministic on a borderline sub, #965), so the
+#: auto-pipeline does not stop retrying: the first :data:`SOLVE_FREE_ATTEMPTS`
+#: failures retry on the next import as before, then each further one waits
+#: twice as long as the last (one day, two, four …) up to
+#: :data:`SOLVE_BACKOFF_MAX_S`. Changing the solver (ASTAP, its star database,
+#: field of view, timeout, hints) starts every sub's count again, and every
+#: user-started solve ("Locate my subs", "Process", "Rescue unsolved",
+#: re-process) ignores the back-off altogether.
+SOLVE_FREE_ATTEMPTS = 2
+SOLVE_BACKOFF_BASE_S = 24 * 3600.0
+SOLVE_BACKOFF_MAX_S = 16 * 24 * 3600.0
+#: ``project_meta`` key holding :func:`solver_signature` as of the last count.
+SOLVE_SIGNATURE_META = "solve_backoff_signature"
+
+
+def solve_backoff_s(attempts: int) -> float:
+    """How long a sub that has failed ``attempts`` walk-away solves waits before
+    the next one (``0`` while it is still within its free retries)."""
+    if attempts < SOLVE_FREE_ATTEMPTS:
+        return 0.0
+    doublings = min(attempts - SOLVE_FREE_ATTEMPTS, 16)
+    return min(SOLVE_BACKOFF_BASE_S * (2 ** doublings), SOLVE_BACKOFF_MAX_S)
+
+
+def solver_signature(
+    astap_path, fov_deg: float | None, timeout_s: float | None, use_hint: bool,
+) -> str:
+    """A string that changes whenever a retry could come out differently for a
+    reason other than luck: another ASTAP binary, another (or a newly installed)
+    star database, or another field of view, timeout or hint setting."""
+    exe = find_astap(astap_path)
+    db = find_star_db_dir(exe)
+    db_files: list[str] = []
+    if db is not None:
+        try:
+            db_files = sorted(p.name for p in db.iterdir()
+                              if p.suffix in (".290", ".1476"))
+        except OSError:
+            db_files = []
+    return json.dumps([
+        str(exe) if exe is not None else None,
+        str(db) if db is not None else None,
+        len(db_files), db_files[:1], db_files[-1:],
+        None if fov_deg is None else round(float(fov_deg), 4),
+        None if timeout_s is None else round(float(timeout_s), 2),
+        bool(use_hint),
+    ])
+
+
+def apply_solve_backoff(
+    project, solve_args: list[tuple], *, signature: str, now: float,
+) -> tuple[list[tuple], int]:
+    """Drop from ``solve_args`` the subs still waiting out their back-off.
+
+    Returns ``(kept, n_waiting)``. A changed ``signature`` forgets every count
+    first (the solver changed, so the old failures say nothing about the next
+    try) and records the new one. Only the walk-away pipeline calls this.
+    """
+    if project.get_meta(SOLVE_SIGNATURE_META) != signature:
+        project.clear_solve_attempts()
+        project.set_meta(SOLVE_SIGNATURE_META, signature)
+        return list(solve_args), 0
+    counts = project.solve_attempts()
+    if not counts:
+        return list(solve_args), 0
+    kept: list[tuple] = []
+    waiting = 0
+    for args in solve_args:
+        rec = counts.get(int(args[0]))
+        if rec is not None:
+            attempts, last = rec
+            if now - last < solve_backoff_s(attempts):
+                waiting += 1
+                continue
+        kept.append(args)
+    return kept, waiting
 
 
 def _same_hint(a: float | None, b: float | None) -> bool:

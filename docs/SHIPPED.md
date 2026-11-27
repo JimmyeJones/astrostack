@@ -1,5 +1,41 @@
 # Shipped — the record
 
+## 2026-11-27 (Builder, branch `claude/fervent-gauss-lg71no`)
+
+### v0.511.14 — walk-away cost: unsolvable subs back off, and a restart does not re-import the library
+
+**What.** (a) The walk-away pipeline (`_pipeline_body` → `run_qc_and_solve(solve_backoff=True)`) now counts each
+sub's failed plate solves in a new aux table `solve_attempts` (`_AUX_TABLES_SQL`, created on every open — no
+`SCHEMA_VERSION` bump, rollable). `seestack.solve.runner.apply_solve_backoff` lets the first two failures retry on
+the next import as before, then holds the sub back 1, 2, 4, 8, then 16 days between tries. A **setup** failure (no
+ASTAP, no star database, a full temp dir) never counts; a solve that works clears the count; a change of ASTAP
+binary, star-database files, field of view, timeout or hint setting (`solver_signature`, kept in project meta)
+starts every count again. Every user-started solve (Locate, Process, Rescue unsolved, re-process) passes no
+back-off and does not count. The job summary gains `solve_backoff_waiting` (additive) and the log says how many
+subs are waiting. (b) `StabilityTracker.seed` takes `path → (size, mtime)` of the subs the library has finished
+(`Project.finished_source_stats`: fingerprinted, QC'd or terminally unreadable, and located, set aside or already
+tried by the solver), read once on the watcher's first poll (`webapp.main._library_finished_sources`, read-only,
+never creates a library). Those files are marked stable without firing; a file that arrived while the app was
+down, was rewritten since, or was imported but never finished still goes through the quiet timer, so a restart
+still finishes an interrupted pipeline. A failing seed falls back to the old behaviour. **Tests:**
+`tests/test_solve_backoff.py` (+8) and `tests/webapp/test_watcher_restart_seed.py` (+7); 8 behaviour tests red with
+the back-off and the seed neutralised. No config, default, on-disk layout or response-shape change; `incoming/` is
+only stat'd. **Not done:** files ingest deliberately skips (Seestar's own stacked outputs, calibration frames) are
+not library frames, so they still read as new after a restart and trigger one scan — which now costs no ASTAP time.
+
+**The entry as filed:**
+
+- **🟡 Full audit 2026-11-26 — walk-away cost: unsolvable subs re-solved on every import, and every restart
+  re-imports the whole library.** *(Pillar: autonomy, PRIORITY 2. Size **S–M**. Measured by the audit: 8 unsolvable subs →
+  3 ASTAP runs each on every later scan (`backend.md` §5); a no-op whole-library rescan 27 s locally (`perf.md` D-6).
+  Scout 2026-11-26 confirmed in code.)* (a) `seestack/solve/runner.py::build_solve_arglist` re-offers every
+  `solve_failed:` frame with no attempt count. At ~1 % unsolvable on his library that is up to hours of ASTAP per
+  pipeline job, holding the single worker. The LEAD below ("refuse an implausible solve") says retries can succeed,
+  so do not stop retrying: back off instead (an additive per-frame attempt count/time, retry when ASTAP or star-DB
+  settings change, "Rescue unsolved" still forces one). (b) `webapp/watcher.py::StabilityTracker` starts empty, so
+  after any container restart every file in `incoming/` becomes "newly stable" and `_on_batch_ready` queues scan →
+  QC → solve, which then pays (a). Fix: seed the tracker from the library's known `(source_path, size, mtime)`.
+
 ## 2026-11-26 (Builder, branch `claude/fervent-gauss-pkrplp`)
 
 ### v0.511.13 — a failed update leaves the old version running, and a retry keeps the real rollback point

@@ -100,17 +100,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   preview's grain but prints a k-px mesh. Note the preview already over-smooths nebula the *other* way (step 3:
   0.97 vs export 0.45): TV's weight is not scale-free. Needs a correlation estimate nebulosity cannot fool.
 
-- **🟡 Full audit 2026-11-26 — walk-away cost: unsolvable subs re-solved on every import, and every restart
-  re-imports the whole library.** *(Pillar: autonomy, PRIORITY 2. Size **S–M**. Measured by the audit: 8 unsolvable subs →
-  3 ASTAP runs each on every later scan (`backend.md` §5); a no-op whole-library rescan 27 s locally (`perf.md` D-6).
-  Scout 2026-11-26 confirmed in code.)* (a) `seestack/solve/runner.py::build_solve_arglist` re-offers every
-  `solve_failed:` frame with no attempt count. At ~1 % unsolvable on his library that is up to hours of ASTAP per
-  pipeline job, holding the single worker. The LEAD below ("refuse an implausible solve") says retries can succeed,
-  so do not stop retrying: back off instead (an additive per-frame attempt count/time, retry when ASTAP or star-DB
-  settings change, "Rescue unsolved" still forces one). (b) `webapp/watcher.py::StabilityTracker` starts empty, so
-  after any container restart every file in `incoming/` becomes "newly stable" and `_on_batch_ready` queues scan →
-  QC → solve, which then pays (a). Fix: seed the tracker from the library's known `(source_path, size, mtime)`.
-
 - **🟡 Full audit 2026-11-26 — the out-of-memory guard underestimates mosaics 1.7–3.2×.** *(Pillar: "just works";
   OOM history. Size **M**. Measured by the audit, `perf.md` D-1: drizzle ×1.5 + reject on a 5×2 mosaic peaked at 4.81 GB
   against a 2.84 GB estimate; plain κ-σ 4545×3467 2.33 GB vs 0.72 GB. Scout 2026-11-26 confirmed in code:
@@ -3239,6 +3228,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.511.14 **Walk-away cost: a sub ASTAP cannot place is no longer re-solved on every import (`apply_solve_backoff`: two free retries, then 1, 2, 4 … 16 days; a solver change resets; every user-started solve ignores it), and a restart no longer re-imports the whole library (`StabilityTracker.seed` from `Project.finished_source_stats`).** Branch `claude/fervent-gauss-lg71no`.
 - ✅ v0.511.13 **A failed update no longer leaves the app stopped, and a retry no longer destroys the way back: `scripts/deploy.sh` builds the new version before `compose stop` (a failed build leaves the old one running and the checkout where it was), an `EXIT` trap starts the old container again after any failure before the new one starts, and `last-good` is the *running* version (by its release tag), never the target.** Branch `claude/fervent-gauss-pkrplp`.
 - ✅ v0.511.12 **A truncated or garbled `config.json` is kept (`config.json.unreadable-<stamp>`) and not overwritten, and the app starts with the watcher and auto-stack paused; top-level keys this build does not know are carried through `SettingsStore.save`, so a rollback no longer drops newer settings** (full audit 2026-11-26, backend.md §10/§11) — full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.511.11 **An install already in the unsafe nested folder layout no longer deletes: while `Settings.layout_conflict()` is set, delete-target-with-files, merge, cache clear, prune, stack-run delete, reprocess-all and the scan (endpoint and watcher-queued `_pipeline_body`) refuse with a plain sentence (`deps.refuse_on_unsafe_layout`, 409), and the Dashboard's folder notice shows it, undismissable** (full audit 2026-11-26, backend.md finding 9) — full entry in [`SHIPPED.md`](SHIPPED.md)
