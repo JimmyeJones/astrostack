@@ -10,9 +10,11 @@ scope can never disturb an in-progress session; a disabled control returns 409.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import ipaddress
 import json
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -20,7 +22,27 @@ from webapp import deps
 from webapp.seestar import keyfile
 from webapp.seestar.client import SeestarError
 
-router = APIRouter(prefix="/api/seestar", tags=["seestar"])
+
+def _scope_request(request: Request) -> None:
+    """Every Seestar route: a ``{ip}`` must be a private IPv4 address — a scope
+    on the owner's home network — never a name, a public address or a port; and
+    the Host the request came in on is remembered as discovery's LAN hint."""
+    ip = request.path_params.get("ip")
+    if ip is not None:
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            raise HTTPException(status_code=422,
+                                detail="That isn't a Seestar address (expected e.g. 192.168.1.50).") from None
+        if not isinstance(addr, ipaddress.IPv4Address) or not (addr.is_private or addr.is_loopback):
+            raise HTTPException(status_code=422,
+                                detail="A Seestar address must be on your home network.")
+    with contextlib.suppress(Exception):  # a test app without a manager
+        deps.get_seestar_manager(request).note_lan_host(request.headers.get("host"))
+
+
+router = APIRouter(prefix="/api/seestar", tags=["seestar"],
+                   dependencies=[Depends(_scope_request)])
 
 
 def _require_enabled(request: Request) -> None:

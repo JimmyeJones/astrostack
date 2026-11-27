@@ -62,10 +62,20 @@ R1–R7 and R9 ship in **M1**. R8 is re-run at the end of M2 and M3 with the new
 ## Milestones
 
 ### M1 — Foundations (no visible picture change)
-1. **"Create a report for Claude" button**, running R1–R7 and R9 as one background job. It
-   gets a results view and a download, so the diagnostics no longer depend on the NAS
-   observer.
-2. **Safety and reliability** (from `backend.md`, `subsystems.md`):
+1. ✅ (0.512.0) **"Create a report for Claude" button**, running R1–R7 and R9 as one
+   background job. It gets a results view and a download, so the diagnostics no longer
+   depend on the NAS observer.
+2. **Safety and reliability** (from `backend.md`, `subsystems.md`). Shipped:
+   - ✅ the ASTAP path (0.511.6);
+   - ✅ password checks off the event loop (0.511.8);
+   - ✅ boots on a full disk (0.511.9);
+   - ✅ a failed update keeps the old version and the real rollback point (0.511.13);
+   - ✅ a damaged config is kept (0.511.12);
+   - ✅ no re-solving of failed subs on every import or restart (0.511.14);
+   - ✅ Host-header check (0.512.0).
+
+   Still open: deploy-snapshot pruning (needs the owner's OK — it deletes old backups).
+   The original list:
    - Host-header check, so a web page can't drive a password-less install;
    - password checks no longer run on the main thread for every request;
    - `deploy.sh` builds before it stops the app, and never overwrites `last-good` with an
@@ -74,14 +84,14 @@ R1–R7 and R9 ship in **M1**. R8 is re-run at the end of M2 and M3 with the new
    - a damaged `config.json` no longer silently drops the password or turns auto-stack on;
    - deploy snapshots are pruned;
    - stop re-solving the same failed subs on every import, and on every restart.
-3. **Seestar:**
+3. **Seestar** (✅ all three: 0.511.7, 0.512.0):
    - the connection thread survives the scope going offline;
    - discovery falls back to a TCP sweep of the subnet, so it can find his scope from inside
      Docker;
    - validate the `{ip}` parameter.
 4. **Housekeeping:**
-   - archive the agent process docs;
-   - `stable` moves only when a milestone is declared ready;
+   - ✅ archive the agent process docs (0.512.0);
+   - ✅ `stable` moves only when a milestone is declared ready (0.512.0);
    - close the four stale observer issues with a note;
    - remove dead code (`aligned_cache_path`).
 

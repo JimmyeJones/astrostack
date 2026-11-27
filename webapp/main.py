@@ -335,6 +335,58 @@ def _request_hosts(request, default_port: int) -> set[tuple[str, int]]:  # noqa:
     return out
 
 
+#: Name endings a home network uses (mDNS, routers, Tailscale). A public domain
+#: is what a DNS-rebinding page has to use, so only these are trusted by name.
+_LAN_SUFFIXES = (".local", ".lan", ".home", ".home.arpa", ".internal", ".localdomain",
+                 ".ts.net")
+
+_UNTRUSTED_HOST_DETAIL = (
+    "AstroStack only answers on your home network's own names and addresses. If you "
+    "reach it through your own domain name, add that name to ASTROSTACK_ALLOWED_HOSTS "
+    "in the app's .env file and restart it.")
+
+
+def untrusted_host_reason(request) -> str | None:  # noqa: ANN001
+    """Why an API request's ``Host`` is not one the app should answer, or ``None``.
+
+    The app has no password by default, so a web page the owner visits could
+    point its own domain name at his NAS (DNS rebinding) and then drive the API
+    as a same-origin page — the cross-site check below cannot tell (audit
+    2026-11-26). Such a page always uses a public, dotted name. So the API
+    answers an IP address, ``localhost``, a single-label name (``truenas-scale``)
+    or a home-network name (``*.local``, ``*.lan``, ``*.home.arpa``, a Tailscale
+    ``*.ts.net`` …), plus any name in ``ASTROSTACK_ALLOWED_HOSTS``
+    (comma-separated; ``*.example.com`` allows a whole domain). A request with
+    no ``Host`` (an HTTP/1.0 client) is allowed.
+    """
+    import ipaddress
+    import os
+
+    raw = (request.headers.get("host") or "").strip().lower()
+    if not raw:
+        return None
+    if raw.startswith("["):  # [IPv6]:port
+        return None
+    name = raw.rsplit(":", 1)[0] if raw.count(":") == 1 else raw
+    name = name.rstrip(".")
+    try:
+        ipaddress.ip_address(name)
+        return None
+    except ValueError:
+        pass
+    if name == "localhost" or "." not in name or name.endswith(_LAN_SUFFIXES):
+        return None
+    for entry in os.environ.get("ASTROSTACK_ALLOWED_HOSTS", "").split(","):
+        entry = entry.strip().lower().rstrip(".")
+        if not entry:
+            continue
+        if entry.startswith("*.") and (name.endswith(entry[1:]) or name == entry[2:]):
+            return None
+        if name == entry:
+            return None
+    return f"Host {name!r} is not a home-network name"
+
+
 def cross_site_reason(request) -> str | None:  # noqa: ANN001
     """Why a state-changing request is a cross-site one, or ``None`` to allow it.
 
@@ -408,6 +460,11 @@ def _install_auth_gate(app: FastAPI) -> None:
         # The site check goes first: it does not depend on whether a password is
         # set, and a cross-site request must never get as far as the password
         # check, whose answer the browser would supply for the victim.
+        if request.url.path.startswith("/api/") and request.url.path not in _AUTH_OPEN_PATHS:
+            bad_host = untrusted_host_reason(request)
+            if bad_host is not None:
+                log.warning("refused %s %s (%s)", request.method, request.url.path, bad_host)
+                return JSONResponse({"detail": _UNTRUSTED_HOST_DETAIL}, status_code=421)
         why = cross_site_reason(request)
         if why is not None:
             log.warning("refused a cross-site %s %s (%s)", request.method,

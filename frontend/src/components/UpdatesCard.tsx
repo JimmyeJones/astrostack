@@ -3,6 +3,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, type UpdatesStatus } from "../api/client";
+import { ReportForClaude } from "./settings/ReportForClaude";
 
 const INSTALL_CMD = "sudo python3 scripts/update_agent.py --install";
 
@@ -68,7 +69,7 @@ export function updatesView(
     return {
       kind: "ready",
       headline: `${on} Version ${st.available.version} is ready to install.`,
-      detail: "It has been on the main line for at least three days with every test passing. "
+      detail: "It is a finished, released milestone with every test passing. "
         + "Updating stops the app for a few minutes, backs up your databases and settings "
         + "first, and never touches your subs in incoming/.",
     };
@@ -140,6 +141,7 @@ export function UpdatesCard() {
           <Text fw={600}>App updates</Text>
           <Text size="sm" c="dimmed">{q.isError ? (restarting ? "The app is restarting…" : "Couldn't read the update status.") : "Loading…"}</Text>
         </Stack>
+        <ReportForClaude />
       </Paper>
     );
   }
@@ -249,6 +251,7 @@ export function UpdatesCard() {
           </Group>
         </Stack>
       </Modal>
+      <ReportForClaude />
     </Paper>
   );
 }

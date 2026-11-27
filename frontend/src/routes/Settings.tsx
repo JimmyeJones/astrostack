@@ -77,7 +77,7 @@ export const HINTS: Record<string, string> = {
   astap_bootstrap_solve: "On a faint or star-poor target, a single 10s sub often can't be located in the sky, so most subs are left out and your picture stays noisy. With this on, the app quietly combines the un-located subs into one deeper image, locates that, and copies the position back to each sub — so the whole night can stack. Off by default; turn it on if faint targets keep coming out noisy with 'not located yet' subs.",
   seestar_enabled: "Discover and monitor Seestar telescopes on the LAN via their unofficial local API (port 4700). The container must be able to reach the scope (Station mode).",
   seestar_control_enabled: "Allow sending commands (goto / start / stop / park) to the scope. Off = monitoring only, so watching can never disturb a session.",
-  seestar_scan_subnet: "CIDR to scan for scopes, e.g. 192.168.1.0/24. Blank = auto-detect from the container's network.",
+  seestar_scan_subnet: "CIDR to scan for scopes, e.g. 192.168.1.0/24. Blank = auto: AstroStack listens for the scope and, if it can't hear it from inside Docker, checks the home network your browser reached AstroStack on.",
   seestar_known_ips: "Pin specific Seestar IPs that auto-discovery can't reach.",
   seestar_scan_interval_s: "How often to re-scan the network for devices.",
   seestar_poll_interval_s: "How often to poll each connected scope for telemetry.",

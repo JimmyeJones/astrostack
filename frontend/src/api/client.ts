@@ -4413,6 +4413,10 @@ export const api = {
   clearJobs: () => req<{ removed: number }>("/api/jobs/clear", { method: "POST" }),
   jobQueueHealth: () => req<JobQueueHealth>("/api/jobs/queue-health"),
   getJob: (id: string) => req<Job>(`/api/jobs/${id}`),
+  /** "Create a report for Claude": re-run every library diagnostic as one job
+   *  (`webapp.diagnostics.submit_report`). */
+  startDiagnosticsReport: () =>
+    req<{ job_id: string; state: string }>("/api/diagnostics/report", { method: "POST" }),
   cancelJob: (id: string) => req(`/api/jobs/${id}/cancel`, { method: "POST" }),
 
   // settings / system
@@ -5099,3 +5103,6 @@ export const api = {
       method: "POST", body: JSON.stringify({ amount }),
     }),
 };
+
+/** Where the finished report downloads from (one JSON file, numbers only). */
+export const DIAGNOSTICS_REPORT_URL = "/api/diagnostics/report";

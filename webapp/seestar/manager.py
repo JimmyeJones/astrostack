@@ -146,6 +146,10 @@ class SeestarManager:
     ) -> None:
         self._get_settings = get_settings
         self._now = now_fn or time.monotonic
+        # The Host the owner's browser last reached the app on (see
+        # ``discovery.lan_hint_network``): the one clue inside a bridged
+        # container to which home network the scope is on.
+        self._lan_host: str | None = None
         self._lock = threading.Lock()
         self._devices: dict[str, dict[str, Any]] = {}
         self._clients: dict[str, SeestarClient] = {}
@@ -214,6 +218,11 @@ class SeestarManager:
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(d) for d in self._devices.values()]
+
+    def note_lan_host(self, host: str | None) -> None:
+        """Remember the Host a request arrived on, for discovery's LAN hint."""
+        if host:
+            self._lan_host = host
 
     def request_scan(self) -> None:
         self._scan_now.set()
@@ -435,6 +444,7 @@ class SeestarManager:
                 ips = discovery.scan(
                     settings.seestar_scan_subnet,
                     extra_ips=list(settings.seestar_known_ips),
+                    lan_hint=discovery.lan_hint_network(self._lan_host),
                 )
                 self._merge_discovered(ips)
                 for ip in ips:

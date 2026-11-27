@@ -254,7 +254,7 @@ _NEW = [("stop-stack", None), ("resume", None), ("autofocus", None),
 
 @pytest.mark.parametrize("path,body", _NEW)
 def test_new_controls_are_blocked_when_disabled(client, path, body):
-    assert client.post(f"/api/seestar/1.2.3.4/{path}", json=body).status_code == 409
+    assert client.post(f"/api/seestar/192.168.1.234/{path}", json=body).status_code == 409
 
 
 @pytest.mark.parametrize("path,body", _NEW)
@@ -262,7 +262,7 @@ def test_new_controls_stay_gated_while_only_monitoring(client, path, body):
     client.put("/api/settings", json={
         "seestar_enabled": True, "seestar_scan_subnet": "203.0.113.0/31"})
     try:
-        r = client.post(f"/api/seestar/1.2.3.4/{path}", json=body)
+        r = client.post(f"/api/seestar/192.168.1.234/{path}", json=body)
         assert r.status_code == 409
         assert "control is disabled" in r.json()["detail"].lower()
     finally:
@@ -271,7 +271,7 @@ def test_new_controls_stay_gated_while_only_monitoring(client, path, body):
 
 @pytest.mark.parametrize("body", [{"steps": 201}, {"steps": -201}, {"steps": "x"}, {}])
 def test_focus_rejects_an_oversized_or_missing_nudge(client, body):
-    assert client.post("/api/seestar/1.2.3.4/focus", json=body).status_code == 422
+    assert client.post("/api/seestar/192.168.1.234/focus", json=body).status_code == 422
 
 
 def test_focus_rejects_a_zero_nudge(client):
@@ -279,7 +279,7 @@ def test_focus_rejects_a_zero_nudge(client):
         "seestar_enabled": True, "seestar_control_enabled": True,
         "seestar_scan_subnet": "203.0.113.0/31"})
     try:
-        assert client.post("/api/seestar/1.2.3.4/focus", json={"steps": 0}).status_code == 422
+        assert client.post("/api/seestar/192.168.1.234/focus", json={"steps": 0}).status_code == 422
     finally:
         client.put("/api/settings", json={
             "seestar_enabled": False, "seestar_control_enabled": False})
