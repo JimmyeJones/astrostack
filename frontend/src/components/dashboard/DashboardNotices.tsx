@@ -53,6 +53,7 @@ export function DashboardNotices() {
     // the wrapper only names it as one of the Dashboard's top-level groups.
     <div data-dashboard-group="notices" style={{ display: "contents" }}>
       <NoticeBoard
+        headlinesFrom={NOTICE_PRIORITY.advisory}
         data-testid="dashboard-notes"
         items={[
           { key: "folders", priority: NOTICE_PRIORITY.blocking,

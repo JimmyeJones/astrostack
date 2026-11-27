@@ -999,12 +999,183 @@ export function TargetView() {
     <Stack>
       {/* First-run coaching, on the sample demo only (see SampleTourNote). */}
       <SampleTourNote step="target" safe={safe} />
-      {/* Every note this page can raise, in one prioritised area: the top two
+      <Group justify="space-between" gap="xs">
+        <Group gap="xs" style={{ minWidth: 0 }}>
+          <Title order={2} style={{ wordBreak: "break-word" }}>{target.data?.name}</Title>
+          <Badge variant="light" color="violet">
+            {target.data?.n_frames_accepted}/{target.data?.n_frames} accepted
+          </Badge>
+          {/* Total integration time (sum of the *accepted* subs' exposures) — the
+              number every astrophotographer thinks in and the honest "do I have
+              enough light yet?" signal for the multi-night Seestar workflow. The
+              Library card and Dashboard already show it; surface it here on the
+              page where a user decides whether to keep shooting this target. */}
+          {target.data?.total_exposure_s ? (
+            <HintAnchor label="Total light collected across all accepted subs"
+              withArrow>
+              <Badge variant="light" color="teal" style={{ cursor: "help" }}>
+                {formatIntegration(target.data.total_exposure_s)} integration
+              </Badge>
+            </HintAnchor>
+          ) : null}
+          {rejectedCount > 0 || unsolvedCount > 0 ? (
+            <HoverCard width={300} shadow="md" withArrow openDelay={100}>
+              <HoverCard.Target>
+                <Badge
+                  variant="light"
+                  // Amber whenever silently-dropped unsolved subs are present —
+                  // they're the honesty concern behind a thin stack, even when a
+                  // few frames were also rejected. Both left-out sets are disjoint
+                  // and both miss the stack, so surface each rather than letting a
+                  // single reject hide a far larger unsolved count.
+                  color={unsolvedCount > 0 ? "orange" : "gray"}
+                  style={{ cursor: "help" }}
+                >
+                  {rejectedCount > 0 && unsolvedCount > 0
+                    ? `${rejectedCount} rejected · ${unsolvedCount} not located yet`
+                    : unsolvedCount > 0
+                      ? `${unsolvedCount} not located yet`
+                      : `${rejectedCount} rejected`}
+                </Badge>
+              </HoverCard.Target>
+              <HoverCard.Dropdown>
+                {rejectSummary.data?.summary?.buckets.length ? (
+                  // Plain-language grouped breakdown + verdict (v0.159.2+).
+                  <RejectionBreakdown
+                    summary={rejectSummary.data.summary}
+                    onRunPlateSolve={() => qcSolve.mutate()}
+                    onTryHarder={() => tryHarder.mutate()}
+                    deepRescueOffered={rejectSummary.data.deep_rescue_offered} />
+                ) : rejectSummary.data && Object.keys(rejectSummary.data.counts).length ? (
+                  // Fallback for an older backend without the friendly summary.
+                  <>
+                    <Text size="sm" fw={600} mb={4}>Why frames were rejected</Text>
+                    <Stack gap={2}>
+                      {Object.entries(rejectSummary.data.counts)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([reason, n]) => (
+                          <Group key={reason} justify="space-between" gap="xs">
+                            <Text size="xs">{rejectReasonLabel(reason)}</Text>
+                            <Text size="xs" fw={600}>{n}</Text>
+                          </Group>
+                        ))}
+                    </Stack>
+                  </>
+                ) : (
+                  <Text size="xs" c="dimmed">
+                    {rejectSummary.isLoading ? "Loading…" : "No breakdown available"}
+                  </Text>
+                )}
+              </HoverCard.Dropdown>
+            </HoverCard>
+          ) : null}
+          {/* Visible plain-language explainer beside the "not located yet" count —
+              "located"/"plate-solve" is jargon a first-light owner can misread as
+              an error, and the breakdown that explains it is otherwise only found
+              by hovering the badge. Shown only when there are unsolved subs, and
+              handed the same setup verdict the blocking banner above is built
+              from: without it the explainer calls these subs "usually harmless"
+              on the one screen where they are the thing blocking the target. */}
+          {unsolvedCount > 0 ? <UnsolvedHelp setup={solveSetup} /> : null}
+        </Group>
+        <Group gap="xs">
+          <Button
+            // One main button (1.0 roadmap M5): once there is a picture, the
+            // thing to do next is Edit it; before that, Process makes one.
+            variant={pictureRun ? "default" : "filled"}
+            color={pictureRun ? undefined : "violet"}
+            leftSection={<IconSparkles size={16} />}
+            onClick={() => process.mutate()}
+            loading={process.isPending}
+            disabled={!!stackJob}
+            aria-label="Process this target"
+            title={stackJob ? STACK_BUSY_TITLE
+              : "Quality-check, plate-solve and stack this target in one step"}
+          >
+            <Box visibleFrom="sm">{stackJob ? STACK_BUSY_LABEL : "Process target"}</Box>
+            <Box hiddenFrom="sm">{stackJob ? STACK_BUSY_LABEL : "Process"}</Box>
+          </Button>
+          {/* Both of the picture controls below follow `pictureRun` — the pinned
+              cover when there is one, the newest picture otherwise — so neither
+              accessible name may say "the latest": on a target whose owner
+              pinned an older favourite, a screen-reader user was told these open
+              a stack they do not open. "Your picture" is the name the card
+              below them already uses for the same run. */}
+          {pictureRun ? (
+            <Button component={Link} to={`/targets/${safe}/edit/${pictureRun.id}`} variant="filled"
+              color="violet" leftSection={<IconWand size={16} />} aria-label="Edit your picture">
+              Edit
+            </Button>
+          ) : null}
+          {/* Everything you can *do with the finished picture* lives behind one
+              menu. This row used to lay nine controls out side by side — with
+              two dropdowns ("Picture" and "Wallpaper") that were both "save this
+              picture" — on the page the owner named as the busiest in the app.
+              Nothing was removed: every item below is the control that used to
+              be a button, with its own wording and behaviour. */}
+          {pictureRun?.has_preview ? (
+            <SavePictureMenu
+              safe={safe}
+              run={pictureRun}
+              shareName={target.data?.name}
+              // The same date `LatestPictureCard`'s share text uses for the same
+              // picture — and it has to be the night the subs were *shot*, not
+              // the day the stack ran. This site was missed when the rest of the
+              // share sheet was fixed, so the app's most prominent picture went
+              // on announcing "captured <the day you pressed Process>": the same
+              // day only if you stack the night you shoot, and years out on a
+              // re-stack of a back catalogue. A run with no recorded window
+              // shares with no date at all.
+              captureLabel={captureLabel}
+              identity={identity.data}
+              // The hero picture has no North-up / nameplate toggles of its own —
+              // those are per-card view state on the History page — so it hands
+              // out the picture as stored, exactly as it did before.
+              canNorthUp={wallpaperCanNorthUp}
+              onToPhone={() => setToPhone(true)}
+              variant="default"
+              ariaLabel="Save or share your picture"
+              responsiveLabel
+              position="bottom-end"
+              withinPortal
+            />
+          ) : null}
+          <Button component={Link} to={`/targets/${safe}/stack`} variant="default"
+            leftSection={<IconStack2 size={16} />} aria-label="Stack">
+            Stack
+          </Button>
+          {/* The two occasional actions, folded (1.0 roadmap M5) rather than
+              removed: each keeps its wording, icon and behaviour. */}
+          <Menu position="bottom-end" withinPortal>
+            <Menu.Target>
+              <Button variant="default" leftSection={<IconDots size={16} />}
+                aria-label="More actions">
+                More
+              </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item leftSection={<IconTelescope size={16} />}
+                onClick={() => qcSolve.mutate()} disabled={qcSolve.isPending}
+                aria-label="Re-run QC and Solve">
+                Re-run QC + Solve
+              </Menu.Item>
+              <Menu.Item component={Link} to={`/targets/${safe}/history`}
+                leftSection={<IconHistory size={16} />} aria-label="History">
+                History
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+        </Group>
+      </Group>
+
+      {/* Every note this page can raise, in one prioritised area — under the title
+          and its buttons since 1.0 roadmap M5, so the page opens on the target: the top two
           speak inline and the rest fold behind a "N more notes" line. Nothing is
           dropped — see NoticeBoard, which measures which of these self-hiding
           notes actually has something to say. */}
       <NoticeBoard
         inlineCount={2}
+        headlinesFrom={NOTICE_PRIORITY.advisory}
         data-testid="target-notes"
         items={[
           // "Your last stack didn't run, and here's the setting that would fix
@@ -1344,174 +1515,6 @@ export function TargetView() {
           ) : null },
         ]}
       />
-      <Group justify="space-between" gap="xs">
-        <Group gap="xs" style={{ minWidth: 0 }}>
-          <Title order={2} style={{ wordBreak: "break-word" }}>{target.data?.name}</Title>
-          <Badge variant="light" color="violet">
-            {target.data?.n_frames_accepted}/{target.data?.n_frames} accepted
-          </Badge>
-          {/* Total integration time (sum of the *accepted* subs' exposures) — the
-              number every astrophotographer thinks in and the honest "do I have
-              enough light yet?" signal for the multi-night Seestar workflow. The
-              Library card and Dashboard already show it; surface it here on the
-              page where a user decides whether to keep shooting this target. */}
-          {target.data?.total_exposure_s ? (
-            <HintAnchor label="Total light collected across all accepted subs"
-              withArrow>
-              <Badge variant="light" color="teal" style={{ cursor: "help" }}>
-                {formatIntegration(target.data.total_exposure_s)} integration
-              </Badge>
-            </HintAnchor>
-          ) : null}
-          {rejectedCount > 0 || unsolvedCount > 0 ? (
-            <HoverCard width={300} shadow="md" withArrow openDelay={100}>
-              <HoverCard.Target>
-                <Badge
-                  variant="light"
-                  // Amber whenever silently-dropped unsolved subs are present —
-                  // they're the honesty concern behind a thin stack, even when a
-                  // few frames were also rejected. Both left-out sets are disjoint
-                  // and both miss the stack, so surface each rather than letting a
-                  // single reject hide a far larger unsolved count.
-                  color={unsolvedCount > 0 ? "orange" : "gray"}
-                  style={{ cursor: "help" }}
-                >
-                  {rejectedCount > 0 && unsolvedCount > 0
-                    ? `${rejectedCount} rejected · ${unsolvedCount} not located yet`
-                    : unsolvedCount > 0
-                      ? `${unsolvedCount} not located yet`
-                      : `${rejectedCount} rejected`}
-                </Badge>
-              </HoverCard.Target>
-              <HoverCard.Dropdown>
-                {rejectSummary.data?.summary?.buckets.length ? (
-                  // Plain-language grouped breakdown + verdict (v0.159.2+).
-                  <RejectionBreakdown
-                    summary={rejectSummary.data.summary}
-                    onRunPlateSolve={() => qcSolve.mutate()}
-                    onTryHarder={() => tryHarder.mutate()}
-                    deepRescueOffered={rejectSummary.data.deep_rescue_offered} />
-                ) : rejectSummary.data && Object.keys(rejectSummary.data.counts).length ? (
-                  // Fallback for an older backend without the friendly summary.
-                  <>
-                    <Text size="sm" fw={600} mb={4}>Why frames were rejected</Text>
-                    <Stack gap={2}>
-                      {Object.entries(rejectSummary.data.counts)
-                        .sort((a, b) => b[1] - a[1])
-                        .map(([reason, n]) => (
-                          <Group key={reason} justify="space-between" gap="xs">
-                            <Text size="xs">{rejectReasonLabel(reason)}</Text>
-                            <Text size="xs" fw={600}>{n}</Text>
-                          </Group>
-                        ))}
-                    </Stack>
-                  </>
-                ) : (
-                  <Text size="xs" c="dimmed">
-                    {rejectSummary.isLoading ? "Loading…" : "No breakdown available"}
-                  </Text>
-                )}
-              </HoverCard.Dropdown>
-            </HoverCard>
-          ) : null}
-          {/* Visible plain-language explainer beside the "not located yet" count —
-              "located"/"plate-solve" is jargon a first-light owner can misread as
-              an error, and the breakdown that explains it is otherwise only found
-              by hovering the badge. Shown only when there are unsolved subs, and
-              handed the same setup verdict the blocking banner above is built
-              from: without it the explainer calls these subs "usually harmless"
-              on the one screen where they are the thing blocking the target. */}
-          {unsolvedCount > 0 ? <UnsolvedHelp setup={solveSetup} /> : null}
-        </Group>
-        <Group gap="xs">
-          <Button
-            // One main button (1.0 roadmap M5): once there is a picture, the
-            // thing to do next is Edit it; before that, Process makes one.
-            variant={pictureRun ? "default" : "filled"}
-            color={pictureRun ? undefined : "violet"}
-            leftSection={<IconSparkles size={16} />}
-            onClick={() => process.mutate()}
-            loading={process.isPending}
-            disabled={!!stackJob}
-            aria-label="Process this target"
-            title={stackJob ? STACK_BUSY_TITLE
-              : "Quality-check, plate-solve and stack this target in one step"}
-          >
-            <Box visibleFrom="sm">{stackJob ? STACK_BUSY_LABEL : "Process target"}</Box>
-            <Box hiddenFrom="sm">{stackJob ? STACK_BUSY_LABEL : "Process"}</Box>
-          </Button>
-          {/* Both of the picture controls below follow `pictureRun` — the pinned
-              cover when there is one, the newest picture otherwise — so neither
-              accessible name may say "the latest": on a target whose owner
-              pinned an older favourite, a screen-reader user was told these open
-              a stack they do not open. "Your picture" is the name the card
-              below them already uses for the same run. */}
-          {pictureRun ? (
-            <Button component={Link} to={`/targets/${safe}/edit/${pictureRun.id}`} variant="filled"
-              color="violet" leftSection={<IconWand size={16} />} aria-label="Edit your picture">
-              Edit
-            </Button>
-          ) : null}
-          {/* Everything you can *do with the finished picture* lives behind one
-              menu. This row used to lay nine controls out side by side — with
-              two dropdowns ("Picture" and "Wallpaper") that were both "save this
-              picture" — on the page the owner named as the busiest in the app.
-              Nothing was removed: every item below is the control that used to
-              be a button, with its own wording and behaviour. */}
-          {pictureRun?.has_preview ? (
-            <SavePictureMenu
-              safe={safe}
-              run={pictureRun}
-              shareName={target.data?.name}
-              // The same date `LatestPictureCard`'s share text uses for the same
-              // picture — and it has to be the night the subs were *shot*, not
-              // the day the stack ran. This site was missed when the rest of the
-              // share sheet was fixed, so the app's most prominent picture went
-              // on announcing "captured <the day you pressed Process>": the same
-              // day only if you stack the night you shoot, and years out on a
-              // re-stack of a back catalogue. A run with no recorded window
-              // shares with no date at all.
-              captureLabel={captureLabel}
-              identity={identity.data}
-              // The hero picture has no North-up / nameplate toggles of its own —
-              // those are per-card view state on the History page — so it hands
-              // out the picture as stored, exactly as it did before.
-              canNorthUp={wallpaperCanNorthUp}
-              onToPhone={() => setToPhone(true)}
-              variant="default"
-              ariaLabel="Save or share your picture"
-              responsiveLabel
-              position="bottom-end"
-              withinPortal
-            />
-          ) : null}
-          <Button component={Link} to={`/targets/${safe}/stack`} variant="default"
-            leftSection={<IconStack2 size={16} />} aria-label="Stack">
-            Stack
-          </Button>
-          {/* The two occasional actions, folded (1.0 roadmap M5) rather than
-              removed: each keeps its wording, icon and behaviour. */}
-          <Menu position="bottom-end" withinPortal>
-            <Menu.Target>
-              <Button variant="default" leftSection={<IconDots size={16} />}
-                aria-label="More actions">
-                More
-              </Button>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Item leftSection={<IconTelescope size={16} />}
-                onClick={() => qcSolve.mutate()} disabled={qcSolve.isPending}
-                aria-label="Re-run QC and Solve">
-                Re-run QC + Solve
-              </Menu.Item>
-              <Menu.Item component={Link} to={`/targets/${safe}/history`}
-                leftSection={<IconHistory size={16} />} aria-label="History">
-                History
-              </Menu.Item>
-            </Menu.Dropdown>
-          </Menu>
-        </Group>
-      </Group>
 
       {/* What the user actually came for, above the fold (IA slice (c) of the
           owner's "the pages are extremely busy" item): the finished picture and

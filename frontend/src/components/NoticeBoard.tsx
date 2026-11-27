@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Anchor, Group, Stack } from "@mantine/core";
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
 
@@ -53,14 +53,25 @@ export const NOTICE_PRIORITY = {
  * when the board expands, and a note that arrives late is picked up by the
  * observer below.
  */
+/** Height an inline note is clamped to in headline mode: an Alert's padding
+ *  and its title line — the one-line headline. */
+export const HEADLINE_HEIGHT_PX = 54;
+
 export function NoticeBoard({
   items,
   inlineCount = 2,
+  headlinesFrom,
   "data-testid": testId,
 }: {
   items: Notice[];
   /** How many of the highest-priority speaking notes stay inline. */
   inlineCount?: number;
+  /** Headline mode (1.0 roadmap M5, "one notice board per page"): an inline
+   *  note whose priority is this or lower in urgency (e.g.
+   *  ``NOTICE_PRIORITY.advisory``) shows only its headline and first line, with
+   *  "Show more" to open it. Blocking problems and warnings always show in full,
+   *  so a fix button is never one click further away. Omitted = no clamping. */
+  headlinesFrom?: number;
   "data-testid"?: string;
 }) {
   const ordered = [...items].sort((a, b) => a.priority - b.priority);
@@ -68,6 +79,10 @@ export function NoticeBoard({
   const container = useRef<HTMLDivElement | null>(null);
   const [speaking, setSpeaking] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
+  // Headline mode: which clamped notes the reader opened, and which ones are
+  // actually cut off (only those get a "Show more" — a one-line note doesn't).
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [clipped, setClipped] = useState<string[]>([]);
 
   // The current display order, kept in a ref so `measure` can stay identity-
   // stable (it is a MutationObserver callback) while still seeing fresh keys.
@@ -80,6 +95,13 @@ export function NoticeBoard({
     );
     setSpeaking((prev) =>
       prev.length === next.length && prev.every((k, i) => k === next[i]) ? prev : next,
+    );
+    const cut = orderRef.current.filter((k) => {
+      const el = hosts.current.get(k);
+      return !!el && el.dataset.clamped === "1" && el.scrollHeight > el.clientHeight + 4;
+    });
+    setClipped((prev) =>
+      prev.length === cut.length && prev.every((k, i) => k === cut[i]) ? prev : cut,
     );
   }, []);
 
@@ -106,17 +128,42 @@ export function NoticeBoard({
         // invisible on first paint (and a JS-free/observer-free environment
         // degrades to the old always-on wall rather than to a blank area).
         const hide = speaking.length > 0 && !inlineKeys.has(item.key) && !open;
+        const clamp = headlinesFrom !== undefined && item.priority >= headlinesFrom
+          && !expanded.has(item.key);
+        const isClipped = clipped.includes(item.key);
         return (
-          <div
-            key={item.key}
-            ref={(el) => {
-              if (el) hosts.current.set(item.key, el);
-              else hosts.current.delete(item.key);
-            }}
-            style={hide ? { display: "none" } : undefined}
-          >
-            {item.node}
-          </div>
+          <Fragment key={item.key}>
+            <div
+              ref={(el) => {
+                if (el) hosts.current.set(item.key, el);
+                else hosts.current.delete(item.key);
+              }}
+              data-clamped={clamp ? "1" : "0"}
+              style={hide ? { display: "none" } : clamp ? {
+                maxHeight: HEADLINE_HEIGHT_PX, overflow: "hidden",
+                ...(isClipped ? {
+                  WebkitMaskImage: "linear-gradient(to bottom, #000 80%, transparent)",
+                  maskImage: "linear-gradient(to bottom, #000 80%, transparent)",
+                } : {}),
+              } : undefined}
+            >
+              {item.node}
+            </div>
+            {!hide && (isClipped || (expanded.has(item.key) && headlinesFrom !== undefined)) ? (
+              <Anchor
+                component="button" type="button" size="xs" c="dimmed" mt={-6}
+                style={{ alignSelf: "flex-start" }}
+                data-testid={`notice-more-${item.key}`}
+                onClick={() => setExpanded((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(item.key)) next.delete(item.key); else next.add(item.key);
+                  return next;
+                })}
+              >
+                {expanded.has(item.key) ? "Show less" : "Show more"}
+              </Anchor>
+            ) : null}
+          </Fragment>
         );
       })}
       {hiddenCount > 0 ? (
