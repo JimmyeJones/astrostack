@@ -133,7 +133,8 @@ confirm it finds the scope.
 1. **"Add tonight's subs" incremental stacking:** keep the running sums next to each stack,
    and process only new subs. 500 new subs: ~10 min instead of ~8–22 h.
 2. **A cheaper first rejection pass** on big targets (about −45 % of a big stack).
-3. **Drizzle off its single thread**, and bounded to each sub's footprint.
+3. ✅ (0.512.2: pixmap on the workers, bookkeeping bounded to the sub's footprint;
+   `tdriz` holds the GIL, so the kernel itself stays serial) **Drizzle off its single thread**, and bounded to each sub's footprint.
 4. **An honest memory guard for mosaics** (today it underestimates by 1.7–3.2×).
 5. **Smaller page loads:** gzip on API responses (20 MB → 2 MB on his biggest target), and the
    Target page loads planning data only when that tab opens (9–18 s → ~1 s).
