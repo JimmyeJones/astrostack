@@ -16,6 +16,9 @@ The plan is in [`docs/ROADMAP-1.0.md`](docs/ROADMAP-1.0.md).
   *Re-run QC + Solve* and *History* are under **More**.
 - **Drizzle** does about a third less work per sub on its single thread, for exactly
   the same picture. Big drizzled targets finish sooner.
+- **Full-size downloads** you have already made stay ready after an update that
+  doesn't change how pictures are drawn. Before, every update threw them away and the
+  next download of a big mosaic took minutes again.
 
 ## 0.512.1 — Moon & Sun, and faster pages
 

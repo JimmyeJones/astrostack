@@ -10,6 +10,7 @@ job record so the SSE stream and the jobs DB stay current.
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import logging
 import os
@@ -3414,6 +3415,35 @@ def full_res_png_cache_path(run) -> Path | None:  # noqa: ANN001
     return master.with_name(f"{stem}{RUN_ARTEFACT_SUFFIXES['fullres_cache']}")
 
 
+@functools.lru_cache(maxsize=1)
+def renderer_fingerprint() -> str:
+    """A hash of everything that can change how a stored run renders: the
+    source of every engine and app Python module, plus the versions of the
+    imaging libraries. It replaced the app version in
+    :func:`full_res_png_signature` (audit 2026-11-26, perf D-3): an update that
+    touches only the web page or the docs no longer discards every cached
+    full-size picture, while any change to the Python that renders it still
+    does. Falls back to the app version if the source cannot be read."""
+    import hashlib
+    import importlib.metadata as md
+
+    h = hashlib.sha1()
+    try:
+        root = Path(__file__).resolve().parent.parent
+        for pkg in ("seestack", "webapp"):
+            for f in sorted((root / pkg).rglob("*.py")):
+                h.update(str(f.relative_to(root)).encode())
+                h.update(f.read_bytes())
+    except OSError:
+        return f"app-{APP_VERSION}"
+    for dist in ("numpy", "scipy", "pillow", "astropy", "tifffile"):
+        try:
+            h.update(f"{dist}={md.version(dist)}".encode())
+        except md.PackageNotFoundError:
+            h.update(f"{dist}=-".encode())
+    return h.hexdigest()
+
+
 def full_res_png_signature(run, recipe_json: str | None, *,  # noqa: ANN001
                            north_up: bool, max_long_edge: int,
                            trim_border: bool) -> str:
@@ -3421,8 +3451,9 @@ def full_res_png_signature(run, recipe_json: str | None, *,  # noqa: ANN001
     :func:`render_run_full_res_png` reads. The master and the stored preview (a
     History "Adjust" or North-up save rewrites it), both coverage maps (the
     border trim is measured on them), the saved recipe, the run row's own stretch
-    and turn, the arguments, and the app version — so a renderer change rebuilds
-    rather than serving last release's pixels. Stats and a hash; no read."""
+    and turn, the arguments, and :func:`renderer_fingerprint` — so a renderer
+    change rebuilds rather than serving last release's pixels. Stats and a
+    hash; no read."""
     import hashlib
 
     from seestack.edit.proxy import coverage_path_for, frame_coverage_path_for
@@ -3430,7 +3461,7 @@ def full_res_png_signature(run, recipe_json: str | None, *,  # noqa: ANN001
 
     fits_path = run.fits_path
     parts = [
-        "v1",
+        "v2",
         _file_stamp(fits_path),
         _file_stamp(run.preview_path),
         _file_stamp(str(frame_coverage_path_for(fits_path)) if fits_path else None),
@@ -3439,7 +3470,7 @@ def full_res_png_signature(run, recipe_json: str | None, *,  # noqa: ANN001
         repr((run.preview_stretch, run.preview_black,
               getattr(run, "preview_north_up_deg", None), run.is_mosaic)),
         repr((bool(north_up), int(max_long_edge), bool(trim_border))),
-        APP_VERSION,
+        renderer_fingerprint(),
     ]
     return hashlib.sha1("|".join(parts).encode()).hexdigest()
 
