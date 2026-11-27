@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from webapp import deps
 from webapp import diagnostics as diag
+from webapp.routers._disposition import attachment
 
 router = APIRouter(tags=["diagnostics"])
 
@@ -46,4 +47,4 @@ def download_report(request: Request) -> JSONResponse:
                                manager)
     stamp = report["generated_utc"][:10]
     return JSONResponse(report, headers={
-        "Content-Disposition": f'attachment; filename="astrostack-report-{stamp}.json"'})
+        "Content-Disposition": attachment(f"astrostack-report-{stamp}.json")})
