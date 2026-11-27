@@ -3,6 +3,23 @@
 Plain-language notes for each released milestone on the way to AstroStack 1.0.
 The plan is in [`docs/ROADMAP-1.0.md`](docs/ROADMAP-1.0.md).
 
+## 0.512.2 — Simpler pages, faster drizzle
+
+- **Editor:** your picture comes first and stays on screen while you scroll the
+  controls. The explanation cards (what the object is, framing, "How's my stack?",
+  the progress reel) are folded into one **About this picture** section under the
+  editor.
+- **Stack page:** **Start stacking**, the time and memory estimate, and the progress
+  bar are at the top. When a stack finishes, **Open in editor** takes you straight to
+  it.
+- **Target page:** **Edit** is the one main button once a target has a picture.
+  *Re-run QC + Solve* and *History* are under **More**.
+- **Drizzle** does about a third less work per sub on its single thread, for exactly
+  the same picture. Big drizzled targets finish sooner.
+- **Full-size downloads** you have already made stay ready after an update that
+  doesn't change how pictures are drawn. Before, every update threw them away and the
+  next download of a big mosaic took minutes again.
+
 ## 0.512.1 — Moon & Sun, and faster pages
 
 - **Moon & Sun:**

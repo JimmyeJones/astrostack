@@ -158,8 +158,8 @@ def test_the_signature_follows_every_input_the_render_reads(tmp_path, monkeypatc
     Image.new("RGB", (8, 6)).save(preview)
     assert pipeline.full_res_png_signature(
         _run_row(master, preview_path=str(preview)), None, **kw) != with_cov
-    # A new release's renderer never serves last release's pixels.
-    monkeypatch.setattr(pipeline, "APP_VERSION", "0.0.0-test")
+    # A changed renderer never serves last release's pixels…
+    monkeypatch.setattr(pipeline, "renderer_fingerprint", lambda: "other-renderer")
     assert pipeline.full_res_png_signature(run, None, **kw) != with_cov
 
 
@@ -240,3 +240,37 @@ def test_the_cache_is_one_of_the_runs_files(tmp_path):
 
     master = tmp_path / "m.fits"
     assert tmp_path / "m_fullres.cache" in run_artifact_paths(str(master))
+
+
+def test_an_update_that_leaves_the_renderer_alone_keeps_the_cache(tmp_path, monkeypatch):
+    """Audit 2026-11-26 perf D-3: the signature carried the app version, so every
+    update — a web-page-only one included — threw away every cached full-size
+    picture (a 199 s render on a big mosaic). It now carries a fingerprint of
+    the Python code and imaging libraries, which a version bump alone does not
+    change."""
+    master = tmp_path / "m.fits"
+    _write_master(master)
+    run = _run_row(master)
+    kw = {"north_up": False, "max_long_edge": 8000, "trim_border": False}
+    before = pipeline.full_res_png_signature(run, None, **kw)
+    monkeypatch.setattr(pipeline, "APP_VERSION", "9.9.9-test")
+    assert pipeline.full_res_png_signature(run, None, **kw) == before
+
+
+def test_the_renderer_fingerprint_follows_the_python_source(tmp_path, monkeypatch):
+    """Any change to an engine or app module changes the fingerprint; the
+    same source gives the same one."""
+    fp = pipeline.renderer_fingerprint.__wrapped__
+    root = tmp_path / "app"
+    for pkg in ("seestack", "webapp"):
+        (root / pkg).mkdir(parents=True)
+        (root / pkg / "__init__.py").write_text("")
+    (root / "seestack" / "stretch.py").write_text("GAMMA = 1.0\n")
+    (root / "webapp" / "pipeline.py").write_text("")
+    monkeypatch.setattr(pipeline, "__file__", str(root / "webapp" / "pipeline.py"))
+    a = fp()
+    assert fp() == a
+    (root / "seestack" / "stretch.py").write_text("GAMMA = 1.1\n")
+    assert fp() != a
+    real = pipeline.renderer_fingerprint()
+    assert real and real != a

@@ -1,11 +1,11 @@
 import {
   ActionIcon, Badge, Box, Button, Center, Grid, Group, HoverCard, Image,
-  Loader, Modal, NumberFormatter, NumberInput, Paper, Progress, Select, Stack,
+  Loader, Menu, Modal, NumberFormatter, NumberInput, Paper, Progress, Select, Stack,
   Table, TagsInput, Text, Textarea, Title, Tooltip,
 } from "@mantine/core";
 import {
   IconAlertTriangle, IconArrowBackUp, IconCheck, IconClock,
-  IconDeviceFloppy, IconHistory,
+  IconDeviceFloppy, IconDots, IconHistory,
   IconNotes, IconPhoto, IconSparkles, IconStack2, IconTelescope,
   IconTargetArrow, IconWand, IconX,
 } from "@tabler/icons-react";
@@ -1425,8 +1425,10 @@ export function TargetView() {
         </Group>
         <Group gap="xs">
           <Button
-            variant="filled"
-            color="violet"
+            // One main button (1.0 roadmap M5): once there is a picture, the
+            // thing to do next is Edit it; before that, Process makes one.
+            variant={pictureRun ? "default" : "filled"}
+            color={pictureRun ? undefined : "violet"}
             leftSection={<IconSparkles size={16} />}
             onClick={() => process.mutate()}
             loading={process.isPending}
@@ -1438,20 +1440,6 @@ export function TargetView() {
             <Box visibleFrom="sm">{stackJob ? STACK_BUSY_LABEL : "Process target"}</Box>
             <Box hiddenFrom="sm">{stackJob ? STACK_BUSY_LABEL : "Process"}</Box>
           </Button>
-          <Button
-            variant="default"
-            leftSection={<IconTelescope size={16} />}
-            onClick={() => qcSolve.mutate()}
-            loading={qcSolve.isPending}
-            aria-label="Re-run QC and Solve"
-          >
-            <Box visibleFrom="sm">Re-run QC + Solve</Box>
-            <Box hiddenFrom="sm">Re-check</Box>
-          </Button>
-          <Button component={Link} to={`/targets/${safe}/history`} variant="default"
-            leftSection={<IconHistory size={16} />} aria-label="History">
-            History
-          </Button>
           {/* Both of the picture controls below follow `pictureRun` — the pinned
               cover when there is one, the newest picture otherwise — so neither
               accessible name may say "the latest": on a target whose owner
@@ -1459,8 +1447,8 @@ export function TargetView() {
               a stack they do not open. "Your picture" is the name the card
               below them already uses for the same run. */}
           {pictureRun ? (
-            <Button component={Link} to={`/targets/${safe}/edit/${pictureRun.id}`} variant="default"
-              leftSection={<IconWand size={16} />} aria-label="Edit your picture">
+            <Button component={Link} to={`/targets/${safe}/edit/${pictureRun.id}`} variant="filled"
+              color="violet" leftSection={<IconWand size={16} />} aria-label="Edit your picture">
               Edit
             </Button>
           ) : null}
@@ -1497,10 +1485,31 @@ export function TargetView() {
               withinPortal
             />
           ) : null}
-          <Button component={Link} to={`/targets/${safe}/stack`}
+          <Button component={Link} to={`/targets/${safe}/stack`} variant="default"
             leftSection={<IconStack2 size={16} />} aria-label="Stack">
             Stack
           </Button>
+          {/* The two occasional actions, folded (1.0 roadmap M5) rather than
+              removed: each keeps its wording, icon and behaviour. */}
+          <Menu position="bottom-end" withinPortal>
+            <Menu.Target>
+              <Button variant="default" leftSection={<IconDots size={16} />}
+                aria-label="More actions">
+                More
+              </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item leftSection={<IconTelescope size={16} />}
+                onClick={() => qcSolve.mutate()} disabled={qcSolve.isPending}
+                aria-label="Re-run QC and Solve">
+                Re-run QC + Solve
+              </Menu.Item>
+              <Menu.Item component={Link} to={`/targets/${safe}/history`}
+                leftSection={<IconHistory size={16} />} aria-label="History">
+                History
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
         </Group>
       </Group>
 

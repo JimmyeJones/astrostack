@@ -1101,12 +1101,175 @@ export function StackView() {
 
   return (
     <Stack maw={720}>
+      {/* "Start" sits at the top (1.0 roadmap M5): the form below is already
+          filled with this target's recommended settings, so the common case is
+          one click without scrolling past a dozen controls. "Save as defaults"
+          stays at the bottom, next to what it saves. */}
       <Group justify="space-between">
         <Title order={2}>Stack — {target.data?.name ?? safe}</Title>
-        <Button component={Link} to={`/targets/${safe}`} variant="subtle">
-          Back to frames
-        </Button>
+        <Group gap="xs">
+          <Button component={Link} to={`/targets/${safe}`} variant="subtle">
+            Back to frames
+          </Button>
+          <Tooltip
+            label="Plate-solve at least one accepted frame first"
+            disabled={!noSolved}
+          >
+            <Button
+              data-testid="stack-start"
+              leftSection={<IconPlayerPlay size={16} />}
+              onClick={() => trigger.mutate()}
+              loading={trigger.isPending || Boolean(running)}
+              disabled={noSolved}
+            >
+              Start stacking
+            </Button>
+          </Tooltip>
+        </Group>
       </Group>
+
+      {/* What pressing Start will cost, and the run it started — beside the
+          Start button above rather than under the whole form. */}
+      <Stack gap="xs" data-testid="stack-run">
+        {estimateOverBudget ? (
+          <Alert color="red" variant="light" py={6} px="sm">
+            <Text size="xs">{estimateOverBudget}</Text>
+            {memoryFix ? (
+              <Button
+                mt={6}
+                size="xs"
+                variant="light"
+                color="red"
+                onClick={() => set(memoryFix.optionKey, memoryFix.optionValue)}
+              >
+                {memoryFix.label}
+              </Button>
+            ) : est?.suggested_drizzle_scale ? (
+              <Button
+                mt={6}
+                size="xs"
+                variant="light"
+                color="red"
+                onClick={() => set("drizzle_scale", est.suggested_drizzle_scale)}
+              >
+                Use drizzle ×{est.suggested_drizzle_scale} instead (fits the budget)
+              </Button>
+            ) : est?.suggested_reference_canvas ? (
+              <Button
+                mt={6}
+                size="xs"
+                variant="light"
+                color="red"
+                onClick={() => set("mosaic_canvas", "reference")}
+              >
+                Use the reference canvas instead (fits the budget)
+              </Button>
+            ) : null}
+          </Alert>
+        ) : estimateLine && !noSolved ? (
+          <Stack gap={2}>
+            <Text size="xs" c="dimmed">{estimateLine}</Text>
+            {timeLine ? (
+              <Text size="xs" c="dimmed">{timeLine}</Text>
+            ) : null}
+            {printPlan ? (
+              <Text size="xs" c="dimmed">
+                {printPlan.text}{printBigger ? ` ${printBigger}` : ""}
+              </Text>
+            ) : null}
+            {printBiggerFix ? (
+              <Button
+                mt={4}
+                size="xs"
+                variant="subtle"
+                w="fit-content"
+                // One update, not two `set()` calls: the estimate query is
+                // keyed on `drizzle` *and* `drizzle_scale`, so setting them
+                // separately would re-query twice and flicker the verdict
+                // through an intermediate state (drizzle on at the old scale).
+                onClick={() => setValues((p) => ({ ...p, ...printBiggerFix.values }))}
+              >
+                {printBiggerFix.label}
+              </Button>
+            ) : null}
+          </Stack>
+        ) : null}
+
+        {/* An automatic drizzle running on this target right now: how long it
+            will take, what a plain stack would have taken, and the two things
+            to do about it. Shown above this page's own job card because it is
+            about a *different* run — one nobody set up — and it self-hides on
+            every target that is not being auto-drizzled. */}
+        {autoDrizzleJob ? (
+          <AutoDrizzleNote
+            cost={autoDrizzleJob.auto_drizzle}
+            target={safe}
+            onCancel={() => cancelJob.mutate(autoDrizzleJob.id)} />
+        ) : null}
+
+        {job ? (
+          <Stack gap={4}>
+            <Group justify="space-between">
+              <Text size="sm" c="dimmed">
+                {job.state === "done"
+                  ? "Done"
+                  : jobFailed
+                    // The status line stays a status line; the failure itself
+                    // gets the Alert below, in the app's own words. It used to
+                    // print `Error: {job.error}` — the raw engine exception,
+                    // `MemoryError:` prefix and all — on the one screen where
+                    // a beginner most needs a sentence they can act on.
+                    ? "Stack didn't finish"
+                    : job.state === "cancelled"
+                      ? "Stopped — you cancelled it"
+                      : `${job.phase || "working"} ${job.done}/${job.total}`}
+              </Text>
+              <Text size="sm" c="dimmed">{pct}%</Text>
+            </Group>
+            <Progress
+              value={job.state === "done" ? 100 : pct}
+              color={jobFailed ? "red" : job.state === "done" ? "teal"
+                : job.state === "cancelled" ? "gray" : "violet"}
+              animated={Boolean(running)}
+            />
+            {jobFailed ? (
+              <Alert color="red" variant="light" mt="xs" p="xs"
+                icon={<IconAlertTriangle size={18} />}
+                data-testid="stack-job-error">
+                {/* An "interrupted" job with no note is one an older build's
+                    restart caught while it was still queued (it wrote none). */}
+                <JobError raw={job.error ?? ""}
+                  kind={job.error_kind
+                    ?? (job.state === "interrupted" && !job.error ? "not_started" : null)}
+                  showRaw />
+              </Alert>
+            ) : null}
+            {job.state === "done" && excludedFrames.length > 0 ? (
+              <Alert color="orange" mt="xs" p="xs">
+                <Text size="xs">
+                  Dropped {excludedFrames.length} frame(s) with a bad plate-solve — they landed
+                  away from the group, or came back at a scale the rest of the frames disagree
+                  with — and flagged them rejected: {excludedFrames.join(", ")}. Each frame's row
+                  in the Frames table says which.
+                </Text>
+              </Alert>
+            ) : null}
+            {job.state === "done" ? (
+              <Group gap="xs" mt="xs">
+                {typeof job.result?.run_id === "number" ? (
+                  <Button component={Link} data-testid="stack-open-editor"
+                    to={`/targets/${safe}/edit/${job.result.run_id}`}>
+                    Open in editor
+                  </Button>
+                ) : null}
+                <Button component={Link} to={`/targets/${safe}/history`} variant="light">
+                  View result in History
+                </Button>
+              </Group>
+            ) : null}
+          </Stack>
+        ) : null}
+      </Stack>
 
       <SampleTourNote step="stack" safe={safe} />
 
@@ -1544,137 +1707,6 @@ export function StackView() {
             ]}
           />
 
-          {estimateOverBudget ? (
-            <Alert color="red" variant="light" py={6} px="sm">
-              <Text size="xs">{estimateOverBudget}</Text>
-              {memoryFix ? (
-                <Button
-                  mt={6}
-                  size="xs"
-                  variant="light"
-                  color="red"
-                  onClick={() => set(memoryFix.optionKey, memoryFix.optionValue)}
-                >
-                  {memoryFix.label}
-                </Button>
-              ) : est?.suggested_drizzle_scale ? (
-                <Button
-                  mt={6}
-                  size="xs"
-                  variant="light"
-                  color="red"
-                  onClick={() => set("drizzle_scale", est.suggested_drizzle_scale)}
-                >
-                  Use drizzle ×{est.suggested_drizzle_scale} instead (fits the budget)
-                </Button>
-              ) : est?.suggested_reference_canvas ? (
-                <Button
-                  mt={6}
-                  size="xs"
-                  variant="light"
-                  color="red"
-                  onClick={() => set("mosaic_canvas", "reference")}
-                >
-                  Use the reference canvas instead (fits the budget)
-                </Button>
-              ) : null}
-            </Alert>
-          ) : estimateLine && !noSolved ? (
-            <Stack gap={2}>
-              <Text size="xs" c="dimmed">{estimateLine}</Text>
-              {timeLine ? (
-                <Text size="xs" c="dimmed">{timeLine}</Text>
-              ) : null}
-              {printPlan ? (
-                <Text size="xs" c="dimmed">
-                  {printPlan.text}{printBigger ? ` ${printBigger}` : ""}
-                </Text>
-              ) : null}
-              {printBiggerFix ? (
-                <Button
-                  mt={4}
-                  size="xs"
-                  variant="subtle"
-                  w="fit-content"
-                  // One update, not two `set()` calls: the estimate query is
-                  // keyed on `drizzle` *and* `drizzle_scale`, so setting them
-                  // separately would re-query twice and flicker the verdict
-                  // through an intermediate state (drizzle on at the old scale).
-                  onClick={() => setValues((p) => ({ ...p, ...printBiggerFix.values }))}
-                >
-                  {printBiggerFix.label}
-                </Button>
-              ) : null}
-            </Stack>
-          ) : null}
-
-          {/* An automatic drizzle running on this target right now: how long it
-              will take, what a plain stack would have taken, and the two things
-              to do about it. Shown above this page's own job card because it is
-              about a *different* run — one nobody set up — and it self-hides on
-              every target that is not being auto-drizzled. */}
-          {autoDrizzleJob ? (
-            <AutoDrizzleNote
-              cost={autoDrizzleJob.auto_drizzle}
-              target={safe}
-              onCancel={() => cancelJob.mutate(autoDrizzleJob.id)} />
-          ) : null}
-
-          {job ? (
-            <Stack gap={4}>
-              <Group justify="space-between">
-                <Text size="sm" c="dimmed">
-                  {job.state === "done"
-                    ? "Done"
-                    : jobFailed
-                      // The status line stays a status line; the failure itself
-                      // gets the Alert below, in the app's own words. It used to
-                      // print `Error: {job.error}` — the raw engine exception,
-                      // `MemoryError:` prefix and all — on the one screen where
-                      // a beginner most needs a sentence they can act on.
-                      ? "Stack didn't finish"
-                      : job.state === "cancelled"
-                        ? "Stopped — you cancelled it"
-                        : `${job.phase || "working"} ${job.done}/${job.total}`}
-                </Text>
-                <Text size="sm" c="dimmed">{pct}%</Text>
-              </Group>
-              <Progress
-                value={job.state === "done" ? 100 : pct}
-                color={jobFailed ? "red" : job.state === "done" ? "teal"
-                  : job.state === "cancelled" ? "gray" : "violet"}
-                animated={Boolean(running)}
-              />
-              {jobFailed ? (
-                <Alert color="red" variant="light" mt="xs" p="xs"
-                  icon={<IconAlertTriangle size={18} />}
-                  data-testid="stack-job-error">
-                  {/* An "interrupted" job with no note is one an older build's
-                      restart caught while it was still queued (it wrote none). */}
-                  <JobError raw={job.error ?? ""}
-                    kind={job.error_kind
-                      ?? (job.state === "interrupted" && !job.error ? "not_started" : null)}
-                    showRaw />
-                </Alert>
-              ) : null}
-              {job.state === "done" && excludedFrames.length > 0 ? (
-                <Alert color="orange" mt="xs" p="xs">
-                  <Text size="xs">
-                    Dropped {excludedFrames.length} frame(s) with a bad plate-solve — they landed
-                    away from the group, or came back at a scale the rest of the frames disagree
-                    with — and flagged them rejected: {excludedFrames.join(", ")}. Each frame's row
-                    in the Frames table says which.
-                  </Text>
-                </Alert>
-              ) : null}
-              {job.state === "done" ? (
-                <Button component={Link} to={`/targets/${safe}/history`} variant="light" mt="xs">
-                  View result in History
-                </Button>
-              ) : null}
-            </Stack>
-          ) : null}
-
           {pinnedNote ? (
             <Alert color="gray" variant="light" p="xs" data-testid="pinned-defaults">
               <Text size="xs" fw={600}>{pinnedNote.summary}</Text>
@@ -1724,19 +1756,6 @@ export function StackView() {
               </Button>
               <HintIcon hint="Remember what you changed (and your calibration picks) for this target — it pre-fills this form and is used when auto-stacking is on. Anything left at your global setting keeps following it." />
             </Group>
-            <Tooltip
-              label="Plate-solve at least one accepted frame first"
-              disabled={!noSolved}
-            >
-              <Button
-                leftSection={<IconPlayerPlay size={16} />}
-                onClick={() => trigger.mutate()}
-                loading={trigger.isPending || Boolean(running)}
-                disabled={noSolved}
-              >
-                Start stacking
-              </Button>
-            </Tooltip>
           </Group>
         </Stack>
       </Paper>

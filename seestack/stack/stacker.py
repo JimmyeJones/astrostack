@@ -318,6 +318,10 @@ def _memory_bounded_in_flight(
     Seestar target (small frames / few cores keep the cap above ``max_workers·2``)."""
     h, w = per_frame_shape
     per_frame_bytes = int(h) * int(w) * 3 * 4  # native RGB float32 worker buffer
+    if drizzle:
+        # …plus the frame's float64 (x, y) drizzle pixmap, which the workers
+        # now build alongside it (audit 2026-11-26, perf I-3).
+        per_frame_bytes += int(h) * int(w) * 2 * 8
     if per_frame_bytes <= 0:
         return max_in_flight
     budget = _stack_memory_budget_bytes(memory_budget_gb)
@@ -4988,7 +4992,12 @@ def _drizzle_pass(
         in_wcs = wcs_from_text(frame.wcs_json)
         if in_wcs is None:
             return None
-        return rgb, in_wcs
+        # The frame's drizzle pixmap is pure per-frame work: building it here,
+        # on a worker, takes ~0.65 s a sub off the serial consumer below (audit
+        # 2026-11-26, perf I-3). Same function, same inputs — the same pixmap.
+        pixmap_for = getattr(drizzler, "pixmap_for", None)
+        pixmap = pixmap_for(in_wcs, rgb.shape[:2]) if pixmap_for is not None else None
+        return rgb, in_wcs, pixmap
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         # Bounded in-flight work: prepared full-res RGB frames must not pile up
@@ -5010,12 +5019,13 @@ def _drizzle_pass(
             if payload is None:
                 progress(phase_label, done, total)
                 continue
-            rgb, in_wcs = payload
+            rgb, in_wcs, pixmap = payload
             try:
+                extra = {"pixmap": pixmap} if pixmap is not None else {}
                 aligned = drizzler.add_frame(
                     rgb, in_wcs,
                     weight=weights.get(f.id if f.id is not None else -1, 1.0),
-                    clip=clip)
+                    clip=clip, **extra)
                 # Only count a frame that actually intersected the canvas.
                 # A stray sub from a different pointing reprojects entirely
                 # off-canvas and deposits nothing — counting it would inflate

@@ -2784,6 +2784,33 @@ describe("StackView — a stack that fails says so in plain language", () => {
     expect(hits.length).toBe(1);
   });
 
+  // 1.0 roadmap M5: the form arrives filled with this target's recommended
+  // settings, so "Start" is at the top, its progress right under it, and a
+  // finished stack offers the editor first.
+  it("puts Start and its progress at the top, and a finished stack opens in the editor", async () => {
+    mockStartableForm();
+    renderStack();
+    const start = await screen.findByRole("button", { name: "Start stacking" });
+    const save = screen.getByRole("button", { name: "Save as defaults" });
+    // Start comes before the form (whose last row is Save as defaults).
+    expect(start.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(start);
+    await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
+    act(() => {
+      MockEventSource.instances[0].emit("progress", {
+        id: "j1", kind: "stack", state: "done", phase: "done", done: 1, total: 1,
+        detail: "", created_utc: null, started_utc: null, finished_utc: null,
+        error: null, error_kind: null, result: { run_id: 42 },
+      });
+    });
+    const open = await screen.findByTestId("stack-open-editor");
+    expect(open.getAttribute("href")).toMatch(/\/edit\/42$/);
+    expect(screen.getByRole("link", { name: "View result in History" })).toBeInTheDocument();
+    // The run block (and the editor link in it) sits above the form.
+    expect(open.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   // An out-of-memory kill restarts the container; the stream reconnects and
   // delivers the job as "interrupted". The card used to freeze on the last
   // progress line ("stacking 340/5477") with no word that the run was over.
