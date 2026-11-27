@@ -1946,6 +1946,8 @@ export function TargetView() {
         }}
         onRunPlateSolve={() => qcSolve.mutate()}
         onTryHarder={() => tryHarder.mutate()}
+        planning={settings.isPending ? "hidden"
+          : settings.data?.site_lat != null && settings.data?.site_lon != null ? "lazy" : "eager"}
         nextSession={readiness ? {
           safe,
           gapSeconds: readiness.remainingHours * 3600,

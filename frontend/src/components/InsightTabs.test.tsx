@@ -170,3 +170,41 @@ describe("InsightTabs", () => {
     expect(screen.getByText("Last night's session")).not.toBeVisible();
   });
 });
+
+describe("lazy groups (audit 2026-11-26: Planning fetched 11 s of data on every open)", () => {
+  it("does not render a lazy group's cards until its tab is opened, but offers the tab", async () => {
+    let mounted = 0;
+    function Costly() {
+      mounted += 1;
+      return <p>Your next window</p>;
+    }
+    render(
+      <MantineProvider>
+        <InsightTabs groups={[
+          { key: "overview", label: "Overview", node: <p>Hello</p> },
+          { key: "planning", label: "Planning", node: <Costly />, lazy: true,
+            lazyEmpty: <p>Nothing to plan</p> },
+        ]} />
+      </MantineProvider>,
+    );
+    expect(await screen.findByRole("tab", { name: "Planning" })).toBeInTheDocument();
+    expect(mounted).toBe(0);
+    fireEvent.click(screen.getByRole("tab", { name: "Planning" }));
+    expect(await screen.findByText("Your next window")).toBeInTheDocument();
+    expect(mounted).toBeGreaterThan(0);
+  });
+
+  it("says so when an opened lazy group has nothing", async () => {
+    render(
+      <MantineProvider>
+        <InsightTabs groups={[
+          { key: "overview", label: "Overview", node: <p>Hello</p> },
+          { key: "planning", label: "Planning", node: null, lazy: true,
+            lazyEmpty: <p>Nothing to plan</p> },
+        ]} />
+      </MantineProvider>,
+    );
+    fireEvent.click(await screen.findByRole("tab", { name: "Planning" }));
+    expect(await screen.findByText("Nothing to plan")).toBeInTheDocument();
+  });
+});
