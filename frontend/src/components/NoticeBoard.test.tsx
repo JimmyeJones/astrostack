@@ -118,3 +118,73 @@ describe("NoticeBoard", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 });
+
+// 1.0 roadmap M5 ("one notice board per page"): advice and information show as a
+// headline and one line, with "Show more"; problems always show in full.
+describe("NoticeBoard headline mode", () => {
+  const hostOf = (text: string) => screen.getByText(text).parentElement as HTMLElement;
+
+  function stubLayout(scroll: number, client: number) {
+    const sh = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+    const ch = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get: () => scroll });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => client });
+    return () => {
+      if (sh) Object.defineProperty(HTMLElement.prototype, "scrollHeight", sh);
+      if (ch) Object.defineProperty(HTMLElement.prototype, "clientHeight", ch);
+    };
+  }
+
+  it("clamps advice to its headline but never a warning", () => {
+    render(
+      <MantineProvider>
+        <NoticeBoard headlinesFrom={NOTICE_PRIORITY.advisory} items={[
+          note("warn", NOTICE_PRIORITY.warning, "Something is wrong"),
+          note("tip", NOTICE_PRIORITY.advisory, "Shoot it as a mosaic"),
+        ]} />
+      </MantineProvider>,
+    );
+    expect(hostOf("Shoot it as a mosaic").style.maxHeight).toBe("54px");
+    expect(hostOf("Something is wrong").style.maxHeight).toBe("");
+  });
+
+  it("offers Show more only on a note that is cut off, and opens it", async () => {
+    const restore = stubLayout(300, 54);
+    try {
+      render(
+        <MantineProvider>
+          <NoticeBoard headlinesFrom={NOTICE_PRIORITY.advisory} items={[
+            note("tip", NOTICE_PRIORITY.advisory, "A long piece of advice"),
+          ]} />
+        </MantineProvider>,
+      );
+      const more = await screen.findByRole("button", { name: "Show more" });
+      fireEvent.click(more);
+      expect(hostOf("A long piece of advice").style.maxHeight).toBe("");
+      expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not offer Show more when the note fits", () => {
+    const restore = stubLayout(60, 60);
+    try {
+      render(
+        <MantineProvider>
+          <NoticeBoard headlinesFrom={NOTICE_PRIORITY.advisory} items={[
+            note("tip", NOTICE_PRIORITY.advisory, "Short"),
+          ]} />
+        </MantineProvider>,
+      );
+      expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("clamps nothing when headline mode is off", () => {
+    board([note("tip", NOTICE_PRIORITY.advisory, "Plain advice")]);
+    expect(hostOf("Plain advice").style.maxHeight).toBe("");
+  });
+});

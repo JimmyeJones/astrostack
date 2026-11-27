@@ -427,6 +427,20 @@ describe("TargetView hero action row grouping", () => {
     ).toBeInTheDocument();
   });
 
+  it("puts the title and its buttons above the notice board", async () => {
+    // 1.0 roadmap M5: the rendered-page check found three notes (~450 px)
+    // above the target's own name, and the picture below the screen's half.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    const edit = await screen.findByRole("link", { name: "Edit your picture" });
+    const board = screen.getByTestId("target-notes");
+    expect(edit.compareDocumentPosition(board) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("makes Process the main button while there is no picture yet", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);

@@ -152,9 +152,9 @@ confirm it finds the scope.
    tabs (Frames, Plan, History).
 4. ✅ (0.512.2) **Stack form:** "Start" at the top, expert switches folded away, and a finished stack goes
    straight to "Open in editor".
-5. **One notice board per page:** the top 1–2 notices as one-line headlines with "Why?"; the
+5. ✅ (0.512.3: Target and Dashboard boards; headlines for advice, problems in full) **One notice board per page:** the top 1–2 notices as one-line headlines with "Why?"; the
    rest folded.
-6. **A clutter check that measures the rendered page**, not the route file. It caps the
+6. ✅ (0.512.3: `scripts/dogfood_probe.mjs` prints the measure per page and flags >5 blocks or >2 notices; the route-file ratchet stays until the ceilings are set from it) **A clutter check that measures the rendered page**, not the route file. It caps the
    top-level blocks, notices and words above the fold, and requires the main thing to start in
    the top half of the screen.
 

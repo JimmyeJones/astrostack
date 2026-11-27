@@ -3,6 +3,12 @@
 Plain-language notes for each released milestone on the way to AstroStack 1.0.
 The plan is in [`docs/ROADMAP-1.0.md`](docs/ROADMAP-1.0.md).
 
+## 0.512.3 — Shorter notes
+
+**Notes** on the Target page and the Dashboard now sit under the target's name and
+show as one-line headlines. Press **Show more** to read one. Problems and
+warnings still show in full.
+
 ## 0.512.2 — Simpler pages, faster drizzle
 
 - **Editor:** your picture comes first and stays on screen while you scroll the
