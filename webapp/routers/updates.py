@@ -11,8 +11,8 @@ root on the NAS, on an app whose password is off by default.
 
 What the page can ask for is deliberately small, and the helper re-checks all of
 it (the request is data it validates, never a command): *check*, *update* — which
-always installs the ``stable`` branch, the newest ``main`` commit that has had
-three days and a green CI run — and *roll back* to the version before the last
+always installs the ``stable`` branch, the last milestone released on purpose
+(a green ``main`` commit; see ``.github/workflows/stable.yml``) — and *roll back* to the version before the last
 update, optionally restoring the backup taken just before it (typed RESTORE).
 
 Nothing here reaches the network. The helper runs ``git fetch`` on the NAS only

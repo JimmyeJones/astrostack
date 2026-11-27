@@ -548,7 +548,7 @@ def test_devices_endpoint_disabled_by_default(client):
 
 def test_scan_and_control_blocked_when_disabled(client):
     assert client.post("/api/seestar/scan").status_code == 409
-    assert client.post("/api/seestar/1.2.3.4/goto",
+    assert client.post("/api/seestar/192.168.1.234/goto",
                        json={"ra_hours": 1, "dec_deg": 2}).status_code == 409
 
 
@@ -559,7 +559,7 @@ def test_control_blocked_when_only_monitoring_enabled(client):
     })
     assert client.post("/api/seestar/scan").status_code == 200
     # Control still gated.
-    r = client.post("/api/seestar/1.2.3.4/park")
+    r = client.post("/api/seestar/192.168.1.234/park")
     assert r.status_code == 409
     client.put("/api/settings", json={"seestar_enabled": False})
 
@@ -574,7 +574,7 @@ def test_control_blocked_when_only_monitoring_enabled(client):
 def test_goto_rejects_out_of_range_coordinates(client, ra_hours, dec_deg):
     # Malformed coordinates must be rejected before they'd ever reach the
     # telescope's RPC, regardless of whether control is enabled.
-    r = client.post("/api/seestar/1.2.3.4/goto",
+    r = client.post("/api/seestar/192.168.1.234/goto",
                      json={"ra_hours": ra_hours, "dec_deg": dec_deg})
     assert r.status_code == 422
 
@@ -582,10 +582,10 @@ def test_goto_rejects_out_of_range_coordinates(client, ra_hours, dec_deg):
 def test_goto_accepts_boundary_coordinates(client):
     # 0 <= ra_hours < 24 and -90 <= dec_deg <= 90 are valid; with control
     # disabled the request still gets past validation and is gated at 409.
-    r = client.post("/api/seestar/1.2.3.4/goto",
+    r = client.post("/api/seestar/192.168.1.234/goto",
                      json={"ra_hours": 0, "dec_deg": 90})
     assert r.status_code == 409
-    r = client.post("/api/seestar/1.2.3.4/goto",
+    r = client.post("/api/seestar/192.168.1.234/goto",
                      json={"ra_hours": 23.999, "dec_deg": -90})
     assert r.status_code == 409
 

@@ -1,5 +1,7 @@
 # AstroStack improvement backlog
 
+> **FROZEN 2026-11-26.** Autonomous development has ended; the work queue is now [`ROADMAP-1.0.md`](ROADMAP-1.0.md). This file is agent-era history.
+
 The shared blackboard for autonomous development. Read
 [`../AGENTS.md`](../AGENTS.md) first — it defines the loop, the decision
 framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.

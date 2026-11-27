@@ -113,11 +113,44 @@ def _probe(host: str, port: int = DEFAULT_PORT) -> bool:
         return False
 
 
+def lan_hint_network(host: str | None) -> ipaddress.IPv4Network | None:
+    """The home network the app was reached on, from a request's ``Host``.
+
+    Inside a bridged Docker container the app's own address is the bridge's
+    (172.x), so the "auto" subnet and its broadcast never reach the LAN the
+    scope is on — the owner's scope was never found. The browser, though,
+    reached the app on the NAS's LAN address (or a name that resolves to it),
+    which names the right network. Only a private IPv4 is accepted; anything
+    else (a public name, a loopback address, IPv6) gives ``None``.
+    """
+    if not host:
+        return None
+    name = host.strip()
+    if name.startswith("["):  # IPv6 literal
+        return None
+    name = name.rsplit(":", 1)[0] if name.count(":") == 1 else name
+    try:
+        ip = ipaddress.ip_address(name)
+    except ValueError:
+        try:
+            ip = ipaddress.ip_address(socket.gethostbyname(name))
+        except (OSError, ValueError, UnicodeError):
+            return None
+    if not isinstance(ip, ipaddress.IPv4Address) or not ip.is_private or ip.is_loopback:
+        return None
+    return ipaddress.ip_network(f"{ip}/24", strict=False)
+
+
 def scan(subnet: str = "", *, extra_ips: list[str] | None = None,
-         udp_timeout: float = 1.5) -> list[str]:
+         udp_timeout: float = 1.5,
+         lan_hint: ipaddress.IPv4Network | None = None) -> list[str]:
     """Discover Seestars. Combines native UDP discovery (trustworthy), any
     ``extra_ips`` the user pinned, and — only when ``subnet`` is explicitly
-    set — a TCP-4700 sweep of that subnet. Returns sorted, de-duplicated IPs."""
+    set — a TCP-4700 sweep of that subnet. With no subnet set, nothing pinned
+    and nothing answering UDP, the home network the app was reached on
+    (``lan_hint``, see :func:`lan_hint_network`) is swept instead: that is how
+    a scope is found from inside a bridged container. Returns sorted,
+    de-duplicated IPs."""
     found: set[str] = set(discover_udp(subnet, timeout=udp_timeout))
 
     # User-pinned IPs: confirm with a quick TCP probe so dead entries drop off.
@@ -132,6 +165,9 @@ def scan(subnet: str = "", *, extra_ips: list[str] | None = None,
                             net, len(hosts))
             else:
                 tcp_targets.extend(str(h) for h in hosts)
+
+    if not subnet.strip() and not found and not tcp_targets and lan_hint is not None:
+        tcp_targets.extend(str(h) for h in lan_hint.hosts())
 
     if tcp_targets:
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:

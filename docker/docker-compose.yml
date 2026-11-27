@@ -48,6 +48,11 @@ services:
       - ASTROSTACK_CPU_WORKERS=4        # blank/remove to use all cores
       - SEESTACK_ASTAP_PATH=/opt/astap/astap
       - TZ=UTC
+      # The API answers home-network names only (IP addresses, single names like
+      # "truenas-scale", *.local / *.lan / *.home.arpa, Tailscale *.ts.net). If you
+      # reach AstroStack through your own domain, list it in .env, e.g.
+      #   ASTROSTACK_ALLOWED_HOSTS=astro.example.com
+      - ASTROSTACK_ALLOWED_HOSTS=${ASTROSTACK_ALLOWED_HOSTS:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=10).status==200 else 1)"]

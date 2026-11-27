@@ -255,9 +255,9 @@ cd astrostack
 sudo bash scripts/deploy.sh
 ```
 
-That deploys the **`stable`** version — a build that has been on `main` for at
-least three days with its tests passing, so you don't catch a change halfway
-through being fixed. It shows you what's running and what it's about to
+That deploys the **`stable`** version — a finished milestone, released on
+purpose with every test passing, so you never catch a change halfway through
+being built. It shows you what's running and what it's about to
 install, **builds the new version while the old one keeps running**, then
 **stops the app, backs up your data** (a ZFS snapshot when your data folder is
 its own dataset, otherwise a copy of the databases and settings), starts the

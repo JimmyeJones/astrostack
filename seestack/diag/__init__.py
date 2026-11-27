@@ -58,6 +58,9 @@ class Diagnostic:
     #: answer to mean anything? A diagnostic that is not ready is not queued,
     #: and is asked again at the next boot.
     ready: Callable[[Any], bool] | None = None
+    #: Run only when the owner presses "Create a report for Claude", never on
+    #: its own after an update (the 1.0 roadmap's checks read hundreds of subs).
+    on_demand: bool = False
 
 
 class DiagnosticStopped(RuntimeError):
@@ -103,14 +106,20 @@ def registry() -> list[Diagnostic]:
     fails loudly in the test suite rather than silently at boot."""
     from seestack.diag import (
         filter_card,
+        hot_pixels,
+        library_inventory,
+        machine_speed,
         mosaic_hints,
+        registration_sharpness,
         sensor_pattern,
         sky_falloff,
         twin_overcount,
     )
 
-    return [sensor_pattern.DIAGNOSTIC, filter_card.DIAGNOSTIC, mosaic_hints.DIAGNOSTIC,
-            sky_falloff.DIAGNOSTIC, twin_overcount.DIAGNOSTIC]
+    return [library_inventory.DIAGNOSTIC, machine_speed.DIAGNOSTIC,
+            sensor_pattern.DIAGNOSTIC, filter_card.DIAGNOSTIC, mosaic_hints.DIAGNOSTIC,
+            sky_falloff.DIAGNOSTIC, twin_overcount.DIAGNOSTIC, hot_pixels.DIAGNOSTIC,
+            registration_sharpness.DIAGNOSTIC]
 
 
 # A host or container path, a Windows path, or two decimals that could be a
