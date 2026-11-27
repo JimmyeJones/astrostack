@@ -208,12 +208,26 @@ CREATE INDEX IF NOT EXISTS idx_frames_ts     ON frames(timestamp_utc);
 #: for an identical picture. A run with no rows here was recorded before the
 #: table existed (or carried in from one that was), and is measured by the
 #: capture-time rule instead.
+#:
+#: ``solve_attempts`` is how many times the **walk-away** pipeline has tried and
+#: failed to plate-solve a sub, and when it last did — the back-off
+#: :func:`seestack.solve.runner.apply_solve_backoff` reads so a sub ASTAP cannot
+#: place is not re-solved (up to three ASTAP runs) on every later import. A
+#: table of its own rather than two ``frames`` columns, so nothing that builds,
+#: copies or merges a ``FrameRow`` has to know about it; a merge or a rollback
+#: that loses a row only costs that sub one early retry.
 _AUX_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS stack_run_frames (
     run_id   INTEGER NOT NULL,   -- stack_runs.id
     frame_id INTEGER NOT NULL,   -- frames.id, at the time the run was recorded
     PRIMARY KEY (run_id, frame_id)
 ) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS solve_attempts (
+    frame_id   INTEGER PRIMARY KEY,  -- frames.id
+    attempts   INTEGER NOT NULL,     -- consecutive walk-away solves that failed
+    last_utc   REAL NOT NULL         -- POSIX time of the newest of them
+);
 """
 
 # Tables whose columns are reconciled additively on open (see
@@ -2281,6 +2295,66 @@ class Project:
 
         parsed = parse_utc(str(row[0]))
         return None if parsed is None else parsed.timestamp()
+
+    def solve_attempts(self) -> dict[int, tuple[int, float]]:
+        """``{frame_id: (attempts, last_utc)}`` for every sub the walk-away
+        pipeline has failed to plate-solve (see ``_AUX_TABLES_SQL``)."""
+        assert self._conn is not None
+        return {
+            int(r[0]): (int(r[1]), float(r[2])) for r in self._conn.execute(
+                "SELECT frame_id, attempts, last_utc FROM solve_attempts")
+        }
+
+    def note_solve_failures(self, frame_ids: Iterable[int], now: float) -> None:
+        """Count one more failed walk-away solve for each of ``frame_ids``."""
+        assert self._conn is not None
+        rows = [(int(fid), float(now)) for fid in frame_ids]
+        if not rows:
+            return
+        with self.transaction() as conn:
+            conn.executemany(
+                "INSERT INTO solve_attempts(frame_id, attempts, last_utc) "
+                "VALUES(?, 1, ?) ON CONFLICT(frame_id) DO UPDATE SET "
+                "attempts = attempts + 1, last_utc = excluded.last_utc",
+                rows,
+            )
+
+    def clear_solve_attempts(self, frame_ids: Iterable[int] | None = None) -> None:
+        """Forget the failed-solve count of ``frame_ids`` (every sub when
+        ``None``) — a solve that worked, or a solver whose settings changed."""
+        assert self._conn is not None
+        if frame_ids is None:
+            self._conn.execute("DELETE FROM solve_attempts")
+            return
+        ids = [(int(fid),) for fid in frame_ids]
+        if ids:
+            with self.transaction() as conn:
+                conn.executemany(
+                    "DELETE FROM solve_attempts WHERE frame_id = ?", ids)
+
+    def finished_source_stats(self) -> dict[str, tuple[int, float]]:
+        """``{source_path: (size, mtime)}`` for every sub the auto-pipeline has
+        nothing left to do for: QC'd (or terminally unreadable), and either
+        located, set aside, or already tried by the plate solver.
+
+        What the folder watcher seeds itself with on start-up
+        (``webapp.watcher.StabilityTracker.seed``), so a container restart does
+        not read every file in ``incoming/`` as newly arrived and queue a whole
+        scan → QC → solve. A sub the pipeline was interrupted part-way through
+        (imported but never QC'd, or accepted and never offered to the solver)
+        is deliberately left out, so a restart still finishes it. Rows with no
+        stored fingerprint (ingested before it existed) are left out too.
+        """
+        assert self._conn is not None
+        return {
+            row[0]: (int(row[1]), float(row[2])) for row in self._conn.execute(
+                "SELECT source_path, source_size_bytes, source_mtime FROM frames "
+                "WHERE source_size_bytes IS NOT NULL AND source_mtime IS NOT NULL "
+                "AND (star_count IS NOT NULL "
+                "     OR COALESCE(reject_reason, '') LIKE 'qc_error_final%') "
+                "AND (wcs_json IS NOT NULL OR accept = 0 "
+                "     OR COALESCE(reject_reason, '') LIKE 'solve_failed:%')")
+        }
 
     def source_paths(self) -> list[str]:
         """Every registered frame's ``source_path``, in id order.

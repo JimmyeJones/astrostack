@@ -108,6 +108,39 @@ def _stranded_batch_needs_retry(app: FastAPI) -> bool:
     return True
 
 
+def _library_finished_sources(store: SettingsStore) -> dict[str, tuple[int, float]]:
+    """Watcher seed: ``source_path -> (size, mtime)`` of every sub the library
+    has imported and finished, across all targets (``Project.finished_source_stats``).
+
+    Read-only. A library that does not exist yet answers ``{}`` (nothing is
+    created here), and a target that cannot be opened is skipped — its files
+    simply go through the watcher's quiet timer the way every file used to.
+    """
+    from seestack.io.library import Library
+    from seestack.io.project import Project
+
+    root = Path(store.get().resolved_library_root)
+    if not Library(root).registry_path.exists():
+        return {}
+    known: dict[str, tuple[int, float]] = {}
+    lib = Library.open(root)
+    try:
+        for entry in lib.list_targets():
+            try:
+                proj = Project.open(lib.target_dir(entry))
+            except Exception:  # noqa: BLE001 — one bad target must not cost the rest
+                log.warning("watcher seed: could not open target %s", entry.safe_name)
+                continue
+            try:
+                known.update(proj.finished_source_stats())
+            finally:
+                proj.close()
+    finally:
+        lib.close()
+    log.info("watcher: %d already-imported sub(s) will not be re-imported", len(known))
+    return known
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.basicConfig(
@@ -157,6 +190,7 @@ async def lifespan(app: FastAPI):
         get_settings=store.get,
         on_batch_ready=lambda: _on_batch_ready(app),
         on_check_stranded=lambda: _stranded_batch_needs_retry(app),
+        known_sources=lambda: _library_finished_sources(store),
     )
     watcher.start()
     app.state.watcher = watcher
