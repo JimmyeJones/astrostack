@@ -444,6 +444,64 @@ function offEdgeControls() {
   return out;
 }
 
+/** The rendered-page clutter measure (1.0 roadmap M5 item 6). The old
+ *  `tests/test_ui_clutter_budget.py` counted components in the route *file*,
+ *  which the 2026-11-26 audit showed could be gamed by moving JSX into a child
+ *  file. This measures what the owner sees at 1440x900 instead:
+ *   - `blocks`: visible top-level blocks of the page (AGENTS.md §1: at most five).
+ *     The page root is found by descending through single-child wrappers;
+ *     fixed/absolute layers (the starfield, toasts) are not part of the flow;
+ *   - `notices`: visible alerts starting above the fold (one notice board: at
+ *     most two headlines inline);
+ *   - `words`: words of text above the fold;
+ *   - `pictureTop`: where the first picture-sized image or canvas starts, so
+ *     "the main thing starts in the top half" can be read off the run. */
+function clutterMeasure() {
+  const main = document.querySelector("main");
+  if (!main) return null;
+  const vh = window.innerHeight;
+  const inFlow = (el) => {
+    for (let e = el; e && e !== main; e = e.parentElement) {
+      const pos = getComputedStyle(e).position;
+      if (pos === "fixed" || pos === "absolute") return false;
+    }
+    return true;
+  };
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const st = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none";
+  };
+  let root = main;
+  for (let i = 0; i < 8; i++) {
+    const kids = [...root.children].filter((k) => visible(k) && inFlow(k));
+    if (kids.length === 1) root = kids[0]; else break;
+  }
+  const blocks = [...root.children].filter((k) => visible(k) && inFlow(k)).length;
+  const notices = [...main.querySelectorAll('.mantine-Alert-root, [role="alert"]')]
+    .filter((el) => visible(el) && inFlow(el) && el.getBoundingClientRect().top < vh).length;
+  let words = 0;
+  const range = document.createRange();
+  const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = (n.textContent || "").trim();
+    const p = n.parentElement;
+    if (!t || !p || !visible(p) || !inFlow(p)) continue;
+    range.selectNodeContents(n);
+    const r = range.getBoundingClientRect();
+    if (r.height === 0 || r.top >= vh || r.bottom <= 0) continue;
+    words += t.split(/\s+/).length;
+  }
+  const pic = [...main.querySelectorAll("img, canvas")].find((el) => {
+    const r = el.getBoundingClientRect();
+    return visible(el) && inFlow(el) && r.width >= 240 && r.height >= 160;
+  });
+  return {
+    blocks, notices, words,
+    pictureTop: pic ? Math.round(pic.getBoundingClientRect().top + window.scrollY) : null,
+  };
+}
+
 function clippedLabels() {
   // Same exclusion as `overflowingLeaves` — see the note there.
   const screenReaderOnly = (node) => {
@@ -688,6 +746,8 @@ const browser = await chromium.launch(
 let findings = 0;
 /** [width name, route, full-page scroll height] — reported at the end. */
 const heights = [];
+/** [route, clutterMeasure()] on the desktop landing view — reported at the end. */
+const clutter = [];
 /** What the Target page prescribes, collected once (desktop) and printed at the
  *  end so the sentences land together rather than scattered through the sweep. */
 let claims = [];
@@ -788,6 +848,22 @@ for (const { name, width, height } of WIDTHS) {
     // by a factor of four.
     heights.push([name, route, (await page.evaluate(
       () => document.documentElement.scrollHeight))]);
+    // The rendered clutter measure (see `clutterMeasure`), on the landing view
+    // at desktop width — the screen the "five things" rule is about.
+    if (name === "desktop") {
+      const m = await page.evaluate(clutterMeasure);
+      if (m) {
+        clutter.push([route, m]);
+        if (m.blocks > 5) {
+          findings++;
+          console.log(`[${name}] ${route}: CLUTTER ${m.blocks} top-level blocks (at most 5)`);
+        }
+        if (m.notices > 2) {
+          findings++;
+          console.log(`[${name}] ${route}: CLUTTER ${m.notices} notices above the fold (at most 2)`);
+        }
+      }
+    }
     // What the page keeps behind a click. `page.goto` lands on one view of a
     // SegmentedControl and on a shut Accordion, so everything else was
     // structurally unreachable: Compare's Split and Blink carry a provenance
@@ -967,6 +1043,14 @@ if (tonight.length) {
   console.log(
     "\nthe Tonight page prescribes nothing (no observing site, or nothing of"
     + " yours is well placed — check the location_source line above)");
+}
+
+// The rendered clutter measure, busiest first.
+console.log("\nrendered clutter at 1440x900 (blocks · notices above the fold · words above"
+  + " the fold · where the first picture starts):");
+for (const [route, m] of clutter.sort((a, b) => b[1].words - a[1].words)) {
+  const pic = m.pictureTop == null ? "no picture" : `picture at ${m.pictureTop}px`;
+  console.log(`  ${route}: ${m.blocks} blocks · ${m.notices} notices · ${m.words} words · ${pic}`);
 }
 
 // Tallest first, so the worst offender is the first line you read.
