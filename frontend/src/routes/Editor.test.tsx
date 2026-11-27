@@ -390,6 +390,29 @@ describe("EditorView", () => {
     expect(client.api.stackHealth).toHaveBeenCalledWith("M_42", 3);
   });
 
+  it("puts the picture first and folds the info cards into 'About this picture' below it", async () => {
+    // Audit 2026-11-26: three cards above the editor pushed the picture 715 px
+    // down a laptop screen. They now live, collapsed, below the editor.
+    mockEditorQueries();
+    vi.spyOn(client.api, "stackHealth").mockResolvedValue({
+      run_id: 3,
+      notes: [{ kind: "frames", severity: "good", message: "42 subs went into this picture",
+        action: null }],
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    const about = await screen.findByTestId("about-this-picture");
+    const health = await screen.findByText("How's my stack?");
+    expect(about.contains(health)).toBe(true);
+    // The editor's own controls come before the folded section in the page.
+    const addOp = screen.getAllByText(/Add operation/)[0];
+    expect(addOp.compareDocumentPosition(about) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("shows a recoverable error, not an endless spinner, when the run is missing", async () => {
     // A deleted stack run (or a stale "View result" link) 404s from getRecipe.
     // Before the isError guard the editor chrome rendered but the preview never

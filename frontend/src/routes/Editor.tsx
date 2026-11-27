@@ -1,8 +1,8 @@
 import {
-  ActionIcon, Alert, Badge, Button, Center, Checkbox, CopyButton, Grid, Group, Loader, Menu, Paper,
+  Accordion, ActionIcon, Alert, Badge, Button, Center, Checkbox, CopyButton, Grid, Group, Loader, Menu, Paper,
   Select, Stack, Switch, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
-import { useDebouncedValue } from "@mantine/hooks";
+import { useDebouncedValue, useMediaQuery } from "@mantine/hooks";
 import {
   IconAlertTriangle, IconArrowBackUp, IconArrowForwardUp, IconArrowLeft, IconCheck, IconChevronDown,
   IconChevronUp, IconCopy, IconCrop, IconDeviceFloppy, IconDownload, IconHistory, IconInfoCircle,
@@ -139,6 +139,8 @@ function newOp(spec: EditOp): OpInstance {
 
 export function EditorView() {
   const { safe = "", runId = "" } = useParams();
+  // Mantine's `md` breakpoint: side-by-side layout, where the picture can stay put.
+  const wide = useMediaQuery("(min-width: 62em)");
   const rid = Number(runId);
   const qc = useQueryClient();
 
@@ -1877,47 +1879,12 @@ export function EditorView() {
           and nothing here is permanent. */}
       <SampleTourNote step="editor" safe={safe} />
 
-      {/* "What am I looking at?" — the same offline catalog card as the Target
-          page, shown here where a beginner is admiring the finished picture and
-          most wants to know what it is. Renders nothing unless it matches.
-
-          `hideFraming` for the same reason the Target page passes it: the card's
-          catalogue line is a *prediction* made before the shoot ("… is bigger than
-          the Seestar's single frame — shoot it in mosaic mode"), and on a target
-          that has already been shot as a mosaic that is advice the owner has taken.
-          The measured verdict below knows the picture it is judging — it says "is
-          bigger than **this mosaic** — only about 55% of it is in this picture", and
-          carries the same panel plan — so where it speaks, the prediction steps
-          aside. Both self-hide, so a target with no catalogue match, no vetted size
-          or no usable WCS is exactly as it was. */}
-      <ObjectInfoCard safe={safe} hideFraming={!!measuredFraming} />
-
-      {/* The measured "did I frame it well?" verdict for *this* run. The Target
-          page and History have carried it since it shipped; the editor — the one
-          screen that is looking at a single finished picture — was left with only
-          the pre-capture prediction, so the two screens disagreed about one
-          mosaic. Self-hiding, and it is the only surface here that can offer the
-          re-centre crop, which lands in this very editor. */}
-      {measuredFraming ? <FramingVerdictNote safe={safe} runId={rid} /> : null}
-
-      {/* "How's my stack?" — the same plain-language health check the Target and
-          History pages show, surfaced here on the result the beginner is actually
-          working on, so "is this any good, and what next?" is answered right where
-          they're crafting the picture. `inEditor` drops the redundant Trim-border
-          self-link (that button is in the op list on this very page). Read-only,
-          self-hides until there's a genuine stack to grade. */}
-      <StackHealthCard safe={safe} runId={rid} inEditor />
-
-      {/* "Watch your picture appear" reel — the Process-target deep-link lands
-          here, so this is where the "my galaxy came out of the noise" delight
-          moment belongs. Self-hides unless this run was stacked with
-          save_progress on. */}
-      <ProgressReelCard safe={safe} runId={rid} />
-
       <Grid>
         {/* Preview + histogram */}
         <Grid.Col span={{ base: 12, md: 7 }}>
-          <Paper withBorder p="xs">
+          {/* The picture stays on screen while the controls beside it scroll
+              (audit 2026-11-26: Stretch's sliders sat ~650 px below the image). */}
+          <Paper withBorder p="xs" style={wide ? { position: "sticky", top: 72, zIndex: 1 } : undefined}>
             <div style={{ position: "relative", background: "#000", borderRadius: 8,
               minHeight: 220, overflow: "hidden" }}>
               {previewProblem ? (
@@ -3244,6 +3211,57 @@ export function EditorView() {
           </Stack>
         </Grid.Col>
       </Grid>
+
+      {/* "About this picture" (1.0 roadmap M5, audit 2026-11-26): the catalogue
+          card, the framing verdict, "How's my stack?" and the progress reel used
+          to stand *above* the editor and pushed the picture 715 px down a laptop
+          screen — the owner could not see what he was editing. They are folded
+          here, one click away, below the editor. Nothing is removed. */}
+      <Accordion variant="contained" data-testid="about-this-picture">
+        <Accordion.Item value="about">
+          <Accordion.Control>About this picture</Accordion.Control>
+          <Accordion.Panel>
+            <Stack gap="sm">
+            {/* "What am I looking at?" — the same offline catalog card as the Target
+                page, shown here where a beginner is admiring the finished picture and
+                most wants to know what it is. Renders nothing unless it matches.
+
+                `hideFraming` for the same reason the Target page passes it: the card's
+                catalogue line is a *prediction* made before the shoot ("… is bigger than
+                the Seestar's single frame — shoot it in mosaic mode"), and on a target
+                that has already been shot as a mosaic that is advice the owner has taken.
+                The measured verdict below knows the picture it is judging — it says "is
+                bigger than **this mosaic** — only about 55% of it is in this picture", and
+                carries the same panel plan — so where it speaks, the prediction steps
+                aside. Both self-hide, so a target with no catalogue match, no vetted size
+                or no usable WCS is exactly as it was. */}
+            <ObjectInfoCard safe={safe} hideFraming={!!measuredFraming} />
+
+            {/* The measured "did I frame it well?" verdict for *this* run. The Target
+                page and History have carried it since it shipped; the editor — the one
+                screen that is looking at a single finished picture — was left with only
+                the pre-capture prediction, so the two screens disagreed about one
+                mosaic. Self-hiding, and it is the only surface here that can offer the
+                re-centre crop, which lands in this very editor. */}
+            {measuredFraming ? <FramingVerdictNote safe={safe} runId={rid} /> : null}
+
+            {/* "How's my stack?" — the same plain-language health check the Target and
+                History pages show, surfaced here on the result the beginner is actually
+                working on, so "is this any good, and what next?" is answered right where
+                they're crafting the picture. `inEditor` drops the redundant Trim-border
+                self-link (that button is in the op list on this very page). Read-only,
+                self-hides until there's a genuine stack to grade. */}
+            <StackHealthCard safe={safe} runId={rid} inEditor />
+
+            {/* "Watch your picture appear" reel — the Process-target deep-link lands
+                here, so this is where the "my galaxy came out of the noise" delight
+                moment belongs. Self-hides unless this run was stacked with
+                save_progress on. */}
+            <ProgressReelCard safe={safe} runId={rid} />
+            </Stack>
+          </Accordion.Panel>
+        </Accordion.Item>
+      </Accordion>
 
       <ImageLightbox src={lightbox ? (shownSrc ?? null) : null}
         title={`${target.data?.name ?? safe} — ${overlay ? overlay.label : "edited"}`
