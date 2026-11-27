@@ -92,8 +92,9 @@ R1–R7 and R9 ship in **M1**. R8 is re-run at the end of M2 and M3 with the new
 4. **Housekeeping:**
    - ✅ archive the agent process docs (0.512.0);
    - ✅ `stable` moves only when a milestone is declared ready (0.512.0);
-   - close the four stale observer issues with a note;
-   - remove dead code (`aligned_cache_path`).
+   - ✅ close the four stale observer issues with a note (#878, #880, #903, #1015);
+   - ~~remove dead code (`aligned_cache_path`)~~ — kept: it is a database column, and
+     migrations are additive only (AGENTS.md §9), so dropping it is not a safe upgrade.
 
 **His check:** update; press the report button and send the file; open the Seestar page and
 confirm it finds the scope.
@@ -144,11 +145,11 @@ confirm it finds the scope.
 1. **Navigation down to Home · Pictures · Plan · Tools**, plus header icons for Jobs, Help and
    Settings. Every page stays within two clicks. The pages he never asked for are folded under
    "Extras", not deleted: year recap, universe map, keepsake, life list and similar.
-2. **Editor:** the picture stays in view while the controls scroll, and the explanation cards
+2. ✅ (0.512.2) **Editor:** the picture stays in view while the controls scroll, and the explanation cards
    fold into one "About this picture" tab.
-3. **Target page:** one big picture with "Edit" as the main button. Everything else goes into
+3. ✅ (0.512.2, header) **Target page:** one big picture with "Edit" as the main button. Everything else goes into
    tabs (Frames, Plan, History).
-4. **Stack form:** "Start" at the top, expert switches folded away, and a finished stack goes
+4. ✅ (0.512.2) **Stack form:** "Start" at the top, expert switches folded away, and a finished stack goes
    straight to "Open in editor".
 5. **One notice board per page:** the top 1–2 notices as one-line headlines with "Why?"; the
    rest folded.
