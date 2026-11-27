@@ -117,19 +117,23 @@ describe("TargetView action row on a phone", () => {
 
     renderTarget();
 
-    // Three of the six are `component={Link}`, so they are links, not buttons.
+    // Two of the five are `component={Link}`, so they are links, not buttons.
     const named: [string, "button" | "link", string][] = [
       ["Process this target", "button", "Process"],
-      ["Re-run QC and Solve", "button", "Re-check"],
-      ["History", "link", "History"],
       ["Edit your picture", "link", "Edit"],
       ["Save or share your picture", "button", "Save"],
       ["Stack", "link", "Stack"],
+      ["More actions", "button", "More"],
     ];
     for (const [aria, role, label] of named) {
       const btn = await screen.findByRole(role, { name: aria });
       expect(phoneLabel(btn)).toBe(label);
     }
+    // The two folded under More keep their words there.
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Re-run QC and Solve" }))
+      .toHaveTextContent("Re-run QC + Solve");
+    expect(screen.getByRole("menuitem", { name: "History" })).toHaveTextContent("History");
   });
 
   it("still spells the two long actions out in full on a wide screen", async () => {
@@ -143,7 +147,8 @@ describe("TargetView action row on a phone", () => {
     // rendered, behind the same `visibleFrom` it always used.
     const process = await screen.findByRole("button", { name: "Process this target" });
     expect(process).toHaveTextContent("Process target");
-    const recheck = await screen.findByRole("button", { name: "Re-run QC and Solve" });
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const recheck = await screen.findByRole("menuitem", { name: "Re-run QC and Solve" });
     expect(recheck).toHaveTextContent("Re-run QC + Solve");
   });
 });
@@ -378,7 +383,7 @@ describe("TargetView latest-picture download", () => {
     renderTarget();
 
     await waitFor(() =>
-      expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument());
+      expect(screen.getByRole("button", { name: "More actions" })).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Save or share your picture" }))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Wallpaper/ }))
@@ -391,19 +396,26 @@ describe("TargetView hero action row grouping", () => {
   // the row used to be nine controls wide, four of them the same "do something
   // with the finished picture" family, with *two* dropdowns side by side
   // ("Picture" and "Wallpaper") that were both "save this picture".
-  it("leaves five controls inline and folds the picture actions into one menu", async () => {
+  it("leaves Edit as the one main button and folds the rest into two menus", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
     vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
 
     renderTarget();
 
-    // The job and the two navigations stay where they were…
-    await screen.findByRole("button", { name: "Process this target" });
-    expect(screen.getByRole("button", { name: "Re-run QC and Solve" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Edit your picture" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Stack" })).toBeInTheDocument();
+    // 1.0 roadmap M5: with a picture, Edit is the one filled button…
+    const process = await screen.findByRole("button", { name: "Process this target" });
+    const edit = screen.getByRole("link", { name: "Edit your picture" });
+    expect(edit).toHaveAttribute("data-variant", "filled");
+    expect(process).toHaveAttribute("data-variant", "default");
+    expect(screen.getByRole("link", { name: "Stack" })).toHaveAttribute("data-variant", "default");
+    // …the two occasional actions are under More, not inline…
+    expect(screen.queryByRole("button", { name: "Re-run QC and Solve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "History" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Re-run QC and Solve" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "History" })).toHaveAttribute(
+      "href", expect.stringMatching(/\/history$/));
     // …and the four picture controls are gone from the row itself — not as
     // buttons and not as links — leaving exactly one dropdown in their place.
     for (const gone of [/^Picture$/, /^Wallpaper$/, "Share picture", "Scan to phone"]) {
@@ -413,6 +425,18 @@ describe("TargetView hero action row grouping", () => {
     expect(
       screen.getByRole("button", { name: "Save or share your picture" }),
     ).toBeInTheDocument();
+  });
+
+  it("makes Process the main button while there is no picture yet", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    const process = await screen.findByRole("button", { name: "Process this target" });
+    expect(process).toHaveAttribute("data-variant", "filled");
+    expect(screen.queryByRole("link", { name: "Edit your picture" })).not.toBeInTheDocument();
   });
 
   it("keeps every folded action reachable inside the one menu", async () => {
