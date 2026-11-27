@@ -244,7 +244,18 @@ def _find_disk(luma: np.ndarray) -> _Disk | None:
     hi = float(np.percentile(lum, 99.5))
     if not (math.isfinite(lo) and math.isfinite(hi)) or hi - lo <= 1e-6:
         return None
-    mask = lum > lo + 0.5 * (hi - lo)
+    # The *whole lit shape*, not its brightest parts (audit 2026-11-26): halfway
+    # up, a gibbous Moon's mask was the highlands alone, split by the maria into
+    # pieces whose "largest" differed between the sharp reference and the softer
+    # frames — every frame sat a constant ~25 px off, and the 2 px refinement
+    # cap kept it there. A low threshold above the sky's own noise, with holes
+    # filled and the mask lightly smoothed first, takes maria and highlands
+    # together, so the centre is the shape's, in every frame.
+    sky = lum[lum <= lo]
+    noise = float(np.median(np.abs(sky - np.median(sky)))) * 1.4826 if sky.size else 0.0
+    smooth = ndimage.uniform_filter(lum, size=3)
+    mask = smooth > lo + max(5.0 * noise, 0.15 * (hi - lo))
+    mask = ndimage.binary_fill_holes(mask)
     labels, n = ndimage.label(mask)
     if n == 0:
         return None
@@ -452,21 +463,43 @@ def _measure_disk_shift(
     return coarse[0] + fine[0], coarse[1] + fine[1]
 
 
+#: Bounds on the per-frame brightness correction: a thin cloud or the camera's
+#: auto-exposure moves a capture's level by a few to tens of percent; anything
+#: beyond this is not the same scene and is left alone.
+_LEVEL_GAIN_RANGE = (0.67, 1.5)
+
+
+def _frame_level(rgb: np.ndarray, mask: np.ndarray | None) -> np.ndarray | None:
+    """Per-channel mean brightness of ``rgb`` over the disk (``mask``), or the
+    whole frame without one — ``None`` when it cannot be measured."""
+    pix = rgb[mask] if mask is not None and mask.any() else rgb.reshape(-1, 3)
+    level = np.nanmean(pix, axis=0)
+    if not np.all(np.isfinite(level)) or np.any(level <= 1e-6):
+        return None
+    return level.astype(np.float32)
+
+
 def _shift_frame(rgb: np.ndarray, dy: float, dx: float) -> np.ndarray:
     """Sub-pixel shift all three channels, leaving vacated edges as NaN.
 
-    ``cval=np.nan`` with order-1 interpolation makes every output pixel that
-    drew on the outside of the frame NaN, so the strip the shift vacates is
-    honest "no coverage" rather than a dark band averaged into the result.
+    Cubic-spline interpolation (audit 2026-11-26): the bilinear shift this used
+    to do blurred every kept frame a little more on the plain (non-drizzle)
+    path — 1.1 px stack blur where the kept frames' own seeing was 0.73 px.
+    The vacated strip is found by shifting a coverage mask the old way and
+    stays honest "no coverage" (NaN) rather than a dark band.
     """
     from scipy.ndimage import shift as nd_shift
 
+    h, w = rgb.shape[:2]
+    cover = nd_shift(np.ones((h, w), dtype=np.float32), shift=(dy, dx), order=1,
+                     mode="constant", cval=0.0, prefilter=False)
+    edge = cover < 0.999
     out = np.empty_like(rgb, dtype=np.float32)
     for c in range(3):
-        out[..., c] = nd_shift(
-            rgb[..., c].astype(np.float32, copy=False), shift=(dy, dx),
-            order=1, mode="constant", cval=np.nan, prefilter=False,
-        )
+        plane = nd_shift(rgb[..., c].astype(np.float32, copy=False), shift=(dy, dx),
+                         order=3, mode="nearest", prefilter=True)
+        plane[edge] = np.nan
+        out[..., c] = plane
     return out
 
 
@@ -622,6 +655,14 @@ def stack_video(
         frame_luma(graded.best_frame) if graded.best_frame is not None else None
     )
     ref_disk = _find_disk(ref_luma) if ref_luma is not None else None
+    # Every kept frame is brought to the reference's brightness before it is
+    # added (audit 2026-11-26): at ×1.5 each drizzle output phase is filled by a
+    # different subset of frames, so frame-to-frame flicker (thin cloud, the
+    # camera's auto-exposure) became a fixed coloured 3-pixel mesh — 2–3 % per
+    # channel at ±8 % flicker. Measured on the disk, per channel.
+    ref_level = (_frame_level(graded.best_frame.astype(np.float32) / 255.0,
+                              ref_disk.mask if ref_disk is not None else None)
+                 if graded.best_frame is not None else None)
     # Nothing else needs the reference *frame* once its luma is measured, and it
     # is the one full frame pass 1 was holding.
     graded.best_frame = None
@@ -636,8 +677,15 @@ def stack_video(
     driz: LuckyDrizzle | None = None
     shifts: list[tuple[float, float]] = []
 
-    def add(rgb: np.ndarray, dy: float, dx: float, *, shift: bool = True) -> None:
-        nonlocal driz
+    def add(rgb: np.ndarray, dy: float, dx: float, *, shift: bool = True,
+            mask: np.ndarray | None = None) -> None:
+        nonlocal driz, ref_level
+        level = _frame_level(rgb, mask)
+        if ref_level is None:
+            ref_level = level
+        elif level is not None:
+            gain = np.clip(ref_level / level, *_LEVEL_GAIN_RANGE).astype(np.float32)
+            rgb = rgb * gain
         acc.add(_shift_frame(rgb, dy, dx) if shift else rgb)
         if drizzle_reason is None:
             if driz is None:
@@ -678,7 +726,8 @@ def stack_video(
                 ref_index = i
                 ref_luma = frame_luma(frame)
                 ref_disk = _find_disk(ref_luma)
-            add(rgb, 0.0, 0.0, shift=False)
+            add(rgb, 0.0, 0.0, shift=False,
+                mask=ref_disk.mask if ref_disk is not None else None)
             n_stacked += 1
         else:
             luma = frame_luma(frame)
@@ -691,7 +740,7 @@ def stack_video(
                     n_align_failed += 1
                 else:
                     dy, dx = _measure_disk_shift(ref_luma, ref_disk, luma, disk)
-                    add(rgb, dy, dx)
+                    add(rgb, dy, dx, mask=disk.mask)
                     n_stacked += 1
             elif ref_disk is not None:
                 n_align_failed += 1     # the disk is gone from this frame (cloud, slew)
