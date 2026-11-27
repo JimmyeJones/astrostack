@@ -253,6 +253,7 @@ def cfa_gain(h: int, w: int, pattern: str) -> np.ndarray:
 
 def solar_raw_jittered_video(
     path: Path, n_frames: int, *, jitter: float, seed: int = 0, pattern: str = "GBRG",
+    flicker: float = 0.0,
 ) -> Path:
     """A raw ``pal8`` solar capture (the owner's file shape) whose disk — and the
     fine surface detail riding on it — wanders up to ``jitter`` px between frames,
@@ -267,6 +268,13 @@ def solar_raw_jittered_video(
         cy, cx = h / 2 + jy, w / 2 + jx
         disk = np.clip((radius - np.hypot(xx - cx, yy - cy)) / 2.0 + 0.5, 0.0, 1.0)
         scene = 8.0 + disk * (170.0 + 30.0 * jitter_detail(yy - cy, xx - cx))
+        if flicker:
+            # Thin cloud / auto-exposure move the frame's level slowly, and the
+            # mount's drift moves the disk slowly too, so on a real capture the
+            # level and the sub-pixel position are correlated — which is what
+            # turns flicker into a fixed drizzle pattern. Tie them together here.
+            scene = scene * (1.0 + flicker * (jy / jitter if jitter else 0.0))
         img = scene * gain + rng.normal(0.0, 1.5, scene.shape)
         planes.append(np.clip(img, 0, 255).astype(np.uint8))
     return write_pal8_video(path, planes)
+

@@ -3,6 +3,20 @@
 Plain-language notes for each released milestone on the way to AstroStack 1.0.
 The plan is in [`docs/ROADMAP-1.0.md`](docs/ROADMAP-1.0.md).
 
+## 0.512.1 — Moon & Sun, and faster pages
+
+- **Moon & Sun:**
+  - a Moon that isn't full (gibbous, with dark maria) now lines up properly; it used to
+    come out soft or doubled;
+  - drizzled pictures no longer pick up a faint coloured mesh when the brightness
+    flickers between frames (thin cloud, auto-exposure);
+  - stacks that aren't drizzled are a touch sharper.
+- **Faster pages:**
+  - the app now compresses what it sends your browser, so a big target's page loads
+    about ten times less data;
+  - a target's Planning tab only loads when you open it, which took most of the
+    8–18 seconds the Target page needed to open.
+
 ## 0.512.0 — Milestone 1 (in progress): foundations
 
 - **"Create a report for Claude".** Settings → Updates & upkeep → *App updates* now

@@ -3369,3 +3369,25 @@ describe("TargetView thin-stack warning's next step", () => {
     expect(warn.textContent).not.toMatch(/restack to fold/);
   });
 });
+
+describe("TargetView planning loads on demand (audit 2026-11-26)", () => {
+  it("does not fetch best months until the Planning tab is opened", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "getSettings").mockResolvedValue({ site_lat: 10, site_lon: 20 } as never);
+    vi.spyOn(client.api, "stackHealth").mockResolvedValue({
+      run_id: 1,
+      notes: [{ kind: "frames", severity: "good",
+                message: "42 subs went into this picture", action: null }],
+    });
+    const best = vi.spyOn(client.api, "bestMonths").mockResolvedValue({ months: [] } as never);
+
+    renderTarget();
+    await waitFor(() =>
+      expect(screen.getByText("42 subs went into this picture")).toBeVisible());
+    expect(best).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("tab", { name: "Planning" }));
+    await waitFor(() => expect(best).toHaveBeenCalled());
+  });
+});

@@ -1,3 +1,4 @@
+import { Text } from "@mantine/core";
 import { type ComponentProps } from "react";
 import type { StackRun } from "../../api/client";
 import { InsightTabs } from "../InsightTabs";
@@ -38,6 +39,7 @@ export function TargetInsights({
   onTryHarder,
   nextSession,
   runs,
+  planning = "eager",
 }: {
   safe: string;
   name?: string;
@@ -48,6 +50,12 @@ export function TargetInsights({
   hideFraming: boolean;
   rejection: Pick<ComponentProps<typeof RejectionBreakdownCard>,
     "summary" | "deepRescueOffered" | "examples">;
+  /** How the Planning cards load — they fetch the slowest data on the page
+   *  (7.2 s + 3.7 s, audit 2026-11-26). ``lazy``: only once their tab is opened
+   *  (there is a location to plan from). ``eager``: rendered hidden like the
+   *  other groups, so they can self-hide (no location: they answer at once).
+   *  ``hidden``: not yet known (settings loading) — nothing fetched. */
+  planning?: "lazy" | "eager" | "hidden";
   onRunPlateSolve: () => void;
   onTryHarder: () => void;
   /** The readiness gap, when there is one — null hides "your next session". */
@@ -87,7 +95,14 @@ export function TargetInsights({
             <StackHealthCard safe={safe} />
           </>
         ) },
-        { key: "planning", label: "Planning", node: (
+        { key: "planning", label: "Planning", lazy: planning === "lazy",
+          lazyEmpty: (
+            <Text size="sm" c="dimmed">
+              Nothing to plan for this target yet — planning needs your location
+              (Settings) and the target's position in the sky.
+            </Text>
+          ),
+          node: planning === "hidden" ? null : (
           <>
             {/* Forward-looking companion to "Is it enough yet?" (which stays
                 beside the picture — it answers the question the beginner came

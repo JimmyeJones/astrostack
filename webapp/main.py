@@ -225,6 +225,7 @@ def create_app() -> FastAPI:
 
     _install_validation_handler(app)
     _install_auth_gate(app)
+    _install_compression(app)
     _mount_spa(app)
     return app
 
@@ -447,6 +448,25 @@ def _credential_verdict(settings, header: str | None) -> str:  # noqa: ANN001
     if auth.check_readonly_auth(settings, header):
         return "readonly"
     return "none"
+
+
+def _install_compression(app: FastAPI) -> None:
+    """Compress API responses for browsers that accept it (audit 2026-11-26).
+
+    The owner's deepest target sent 20.6 MB of frame JSON to its page (7.6 s),
+    about 1.9 MB gzipped. Pictures, archives, FITS and the live event stream are
+    left alone: they are already compressed, too big to be worth the CPU, or
+    must stream unbuffered. (``minimum_size`` only applies to a body sent in
+    one piece; the auth gate streams every response, so small JSON is
+    compressed too — harmless, and only for clients that ask.)
+    """
+    from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
+
+    app.add_middleware(
+        GZipMiddleware, minimum_size=2048, compresslevel=5,
+        exclude_content_types=DEFAULT_EXCLUDED_CONTENT_TYPES + (
+            "image/tiff", "application/fits", "application/octet-stream"),
+    )
 
 
 def _install_auth_gate(app: FastAPI) -> None:

@@ -14,6 +14,12 @@ export type InsightGroup = {
   key: string;
   label: string;
   node: ReactNode;
+  /** Render the group's cards only once its tab is opened, and always offer
+   *  the tab. For groups whose cards fetch expensive data (the Target page's
+   *  Planning cards took 7.2 s + 3.7 s on every open — audit 2026-11-26). */
+  lazy?: boolean;
+  /** What an opened lazy group says when none of its cards had anything. */
+  lazyEmpty?: ReactNode;
 };
 
 /**
@@ -50,16 +56,24 @@ export function InsightTabs({
   const container = useRef<HTMLDivElement | null>(null);
   const [speaking, setSpeaking] = useState<string[] | null>(null);
   const [active, setActive] = useState<string | null>(null);
+  const [opened, setOpened] = useState<Set<string>>(() => new Set());
+  const [filled, setFilled] = useState<string[]>([]);
 
   // The current group order, kept in a ref so `measure` can stay identity-stable
   // (it is a MutationObserver callback) while still seeing fresh keys.
   const orderRef = useRef<string[]>([]);
   orderRef.current = groups.map((g) => g.key);
+  const lazyRef = useRef<Set<string>>(new Set());
+  lazyRef.current = new Set(groups.filter((g) => g.lazy).map((g) => g.key));
 
   const measure = useCallback(() => {
-    const next = orderRef.current.filter(
-      (k) => (hosts.current.get(k)?.childNodes.length ?? 0) > 0,
-    );
+    const has = (k: string) => (hosts.current.get(k)?.childNodes.length ?? 0) > 0;
+    const full = orderRef.current.filter(has);
+    setFilled((prev) =>
+      prev.length === full.length && prev.every((k, i) => k === full[i]) ? prev : full);
+    // A lazy group always has a tab: whether it has anything is only known
+    // once it has been opened and its cards have fetched.
+    const next = orderRef.current.filter((k) => lazyRef.current.has(k) || has(k));
     setSpeaking((prev) =>
       prev !== null && prev.length === next.length && prev.every((k, i) => k === next[i])
         ? prev
@@ -87,13 +101,20 @@ export function InsightTabs({
   const shown = speaking === null ? groups : groups.filter((g) => speaking.includes(g.key));
   // Keep the user's chosen tab while it still has something in it; otherwise fall
   // back to the first group that does, so the panel on screen is never empty.
-  const value = active && shown.some((g) => g.key === active) ? active : shown[0]?.key ?? null;
+  // A lazy group is never opened on its own (its cards fetch the slowest data
+  // on the page) — and its tab stays reachable even when it is the only one.
+  const firstEager = shown.find((g) => !g.lazy);
+  const value = active && shown.some((g) => g.key === active) ? active : firstEager?.key ?? null;
+  const showStrip = shown.length > 1 || shown.some((g) => g.lazy);
 
   return (
     <div ref={container} data-testid={testId}
       style={speaking !== null && speaking.length === 0 ? { display: "none" } : undefined}>
-      <Tabs value={value} onChange={setActive} keepMounted mt="xs">
-        {shown.length > 1 ? (
+      <Tabs value={value} onChange={(v) => {
+        setActive(v);
+        if (v && !opened.has(v)) setOpened(new Set(opened).add(v));
+      }} keepMounted mt="xs">
+        {showStrip ? (
           // Short labels on purpose: the owner reads these pages on a phone, and a
           // tab strip that overflows is its own kind of busy.
           <Tabs.List>
@@ -112,8 +133,10 @@ export function InsightTabs({
                 else hosts.current.delete(g.key);
               }}
             >
-              {g.node}
+              {g.lazy && !opened.has(g.key) ? null : g.node}
             </div>
+            {g.lazy && opened.has(g.key) && !filled.includes(g.key)
+              ? g.lazyEmpty ?? null : null}
           </Tabs.Panel>
         ))}
       </Tabs>
