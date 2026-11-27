@@ -248,6 +248,12 @@ class DrizzleStacker:
     def output_canvas_shape(self) -> tuple[int, int]:
         return self.out_shape
 
+    def pixmap_for(self, in_wcs, in_shape: tuple[int, int]) -> np.ndarray:
+        """The pixmap :meth:`add_frame` needs for a frame of ``in_shape`` with
+        ``in_wcs``. Reads only the (fixed) output WCS, so it is safe to call
+        from worker threads while another thread runs :meth:`add_frame`."""
+        return _build_pixmap(in_wcs, self.out_wcs, int(in_shape[0]), int(in_shape[1]))
+
     def add_frame(
         self,
         rgb: np.ndarray,
@@ -255,6 +261,7 @@ class DrizzleStacker:
         *,
         weight: float = 1.0,
         clip: tuple[np.ndarray, np.ndarray] | None = None,
+        pixmap: np.ndarray | None = None,
     ) -> bool:
         """
         Add one debayered, optionally bg-flattened frame to the drizzle.
@@ -281,8 +288,12 @@ class DrizzleStacker:
         """
         # Drizzle wants a "pixmap" — for each input pixel, the (x, y)
         # coordinate in the output. Compute once per frame, share across
-        # channels (saves ~3× the WCS transform cost).
-        pixmap = _build_pixmap(in_wcs, self.out_wcs, rgb.shape[0], rgb.shape[1])
+        # channels (saves ~3× the WCS transform cost). A caller may build it
+        # ahead, on a worker thread, with :meth:`pixmap_for` — it is pure
+        # per-frame work and ~0.65 s of the serial cost per sub (audit
+        # 2026-11-26, perf I-3).
+        if pixmap is None:
+            pixmap = self.pixmap_for(in_wcs, rgb.shape[:2])
         # Mask out-of-bounds pixels with a weight map of 0. Astropy 0-based pixel
         # *centres* validly span ``[-0.5, N-0.5]`` (a pixel centred at, say,
         # ``-0.4`` still lies inside output pixel 0's ``[-0.5, 0.5]`` extent), so
@@ -315,7 +326,16 @@ class DrizzleStacker:
         # post-add weight increase into one bool plane, snapshotting each
         # channel's ``out_wht`` right before its own ``add_image`` — so only one
         # float snapshot is live at a time (memory-bounded, as before).
-        deposited = np.zeros(self.out_shape, dtype=bool)
+        #
+        # Only the window this frame can reach is snapshotted and compared
+        # (audit 2026-11-26, perf I-3): three full-canvas ``out_wht`` copies,
+        # a full-canvas compare and a full-canvas ``+=`` cost 0.6–1.5 s a sub
+        # on a mosaic canvas that one sub covers ~1/20 of. Outside the window
+        # nothing can be deposited, so the result is bit-identical.
+        win = _deposit_window(pixmap, in_bounds, self.out_shape, self.params.scale)
+        if win is not None:
+            wy, wx = win
+            deposited = np.zeros((wy.stop - wy.start, wx.stop - wx.start), dtype=bool)
         # Input-space "this frame lost a sample here" mask, OR-ed across the three
         # channels before it is scattered to the output grid — the clip is
         # per-channel, and a trail that only reddens a pixel is still a trail the
@@ -344,7 +364,8 @@ class DrizzleStacker:
                 if dropped_any is not None:
                     dropped_any |= contributing & rejected
             ch = np.where(finite, vals, 0.0).astype(np.float32, copy=False)
-            prev_wht = self._drizzlers[c].out_wht.copy()
+            prev_wht = (self._drizzlers[c].out_wht[wy, wx].copy()
+                        if win is not None else None)
             self._drizzlers[c].add_image(
                 data=ch,
                 exptime=1.0,
@@ -353,7 +374,8 @@ class DrizzleStacker:
                 pixfrac=self.params.pixfrac,
                 in_units="counts",
             )
-            deposited |= self._drizzlers[c].out_wht > prev_wht
+            if win is not None:
+                deposited |= self._drizzlers[c].out_wht[wy, wx] > prev_wht
             if self._sq_drizzlers is not None:
                 self._sq_drizzlers[c].add_image(
                     data=ch * ch,
@@ -363,7 +385,8 @@ class DrizzleStacker:
                     pixfrac=self.params.pixfrac,
                     in_units="counts",
                 )
-        self._count += deposited.astype(np.uint32, copy=False)
+        if win is not None:
+            self._count[wy, wx] += deposited.astype(np.uint32, copy=False)
         if dropped_any is not None and dropped_any.any():
             self._scatter_rejected(dropped_any, yi, xi)
         self._n_added += 1
@@ -486,6 +509,45 @@ class DrizzleStacker:
         when this drizzler wasn't asked to record one (the default) — which every
         consumer reads as "no overlay available", never as an error."""
         return self._rej_map
+
+
+#: Output pixels kept around the in-bounds input-pixel centres when bounding a
+#: frame's deposit. A drizzle drop extends at most half an input pixel
+#: (``scale`` output pixels) plus the kernel's reach (≤3 px for lanczos3)
+#: beyond its centre; this is several times that.
+_WINDOW_PAD = 8
+
+
+def _deposit_window(pixmap: np.ndarray, in_bounds: np.ndarray,
+                    out_shape: tuple[int, int], scale: float
+                    ) -> tuple[slice, slice] | None:
+    """The output ``(rows, cols)`` window that holds every pixel this frame
+    can deposit weight into, or ``None`` when it can deposit nothing.
+
+    Only in-bounds input pixels carry weight (the caller zero-weights the
+    rest), so the window is their centres' bounding box, padded by
+    :data:`_WINDOW_PAD` plus ``2 × scale``. If any pixmap entry is the
+    "outside the projection" marker (-1, -1) a neighbour's corner may be
+    interpolated towards it, so the whole canvas is returned instead.
+    """
+    h_out, w_out = out_shape
+    if not in_bounds.any():
+        return None
+    px = pixmap[..., 0]
+    py = pixmap[..., 1]
+    if np.any((px == -1.0) & (py == -1.0)):
+        return slice(0, h_out), slice(0, w_out)
+    rows = np.flatnonzero(in_bounds.any(axis=1))
+    cols = np.flatnonzero(in_bounds.any(axis=0))
+    sub = in_bounds[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
+    sx = px[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1][sub]
+    sy = py[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1][sub]
+    pad = _WINDOW_PAD + int(np.ceil(2.0 * max(scale, 1.0)))
+    x0 = max(0, int(np.floor(sx.min())) - pad)
+    x1 = min(w_out, int(np.ceil(sx.max())) + pad + 1)
+    y0 = max(0, int(np.floor(sy.min())) - pad)
+    y1 = min(h_out, int(np.ceil(sy.max())) + pad + 1)
+    return slice(y0, y1), slice(x0, x1)
 
 
 def _compute_output_canvas(ref_wcs, ref_shape: tuple[int, int], scale: float):
