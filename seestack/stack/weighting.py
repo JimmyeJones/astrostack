@@ -85,6 +85,61 @@ def _median_of(values: list[float]) -> float | None:
     return float(np.median(values)) if values else None
 
 
+@dataclass(frozen=True)
+class WeightYardsticks:
+    """The run-level reference values every frame's weight is measured against.
+
+    ``best_fwhm`` is the 10th-percentile FWHM, the other four are target-wide
+    medians — exactly the numbers :func:`compute_frame_weights` derives from the
+    frames it is given on a single-field target. They are pulled out so an
+    **incremental** stack (``StackOptions.incremental``) can weight the new subs
+    against the *same* yardsticks the subs already in its running sums were
+    weighted against: re-deriving them from a set that now includes tonight's
+    subs would quietly weight the two halves of one stack by two different rules.
+    ``None`` means "not measurable on that run" (the factor is then neutral, as
+    it is today).
+    """
+
+    best_fwhm: float | None
+    median_ecc: float | None
+    median_stars: float | None
+    median_sky: float | None
+    median_transp: float | None
+
+
+def _wide_medians(
+    frames: list[FrameRow],
+) -> tuple[float | None, float | None, float | None]:
+    """The target-wide (stars, sky, transparency) medians."""
+    return (
+        _median_of([f.star_count for f in frames
+                    if f.star_count is not None and f.star_count > 0]),
+        _median_of([f.sky_adu_median for f in frames
+                    if f.sky_adu_median is not None and f.sky_adu_median > 0]),
+        _median_of([f.transparency_score for f in frames
+                    if f.transparency_score is not None and f.transparency_score > 0]),
+    )
+
+
+def _fwhm_ecc_yardsticks(frames: list[FrameRow]) -> tuple[float | None, float | None]:
+    fwhms = [f.fwhm_px for f in frames if f.fwhm_px is not None and f.fwhm_px > 0]
+    # Eccentricity 0 (perfectly round) is a valid, best-case measurement, so the
+    # median includes it; the factor guards a 0 divisor per-frame instead.
+    eccs = [f.eccentricity_median for f in frames
+            if f.eccentricity_median is not None and f.eccentricity_median >= 0]
+    best_fwhm = float(np.percentile(fwhms, 10)) if fwhms else None
+    median_ecc = float(np.median(eccs)) if eccs else None
+    return best_fwhm, median_ecc
+
+
+def weight_yardsticks(frames: list[FrameRow]) -> WeightYardsticks:
+    """The single-field (target-wide) yardsticks for ``frames`` — the values
+    :func:`compute_frame_weights` uses when ``group_by_pointing`` is off."""
+    best_fwhm, median_ecc = _fwhm_ecc_yardsticks(frames)
+    stars, sky, transp = _wide_medians(frames)
+    return WeightYardsticks(best_fwhm, median_ecc, stars, sky, transp)
+
+
 def _positional_medians(
     frames: list[FrameRow], *, group_by_pointing: bool,
 ) -> _PositionalMedians:
@@ -98,14 +153,7 @@ def _positional_medians(
     back to the target-wide median for *that metric only*, so a sparse panel is
     still weighted rather than left unjudged.
     """
-    wide = (
-        _median_of([f.star_count for f in frames
-                    if f.star_count is not None and f.star_count > 0]),
-        _median_of([f.sky_adu_median for f in frames
-                    if f.sky_adu_median is not None and f.sky_adu_median > 0]),
-        _median_of([f.transparency_score for f in frames
-                    if f.transparency_score is not None and f.transparency_score > 0]),
-    )
+    wide = _wide_medians(frames)
     labels = pointing_groups(
         [(f.ra_center_deg, f.dec_center_deg) for f in frames],
         min_members=_MIN_PANEL_FRAMES,
@@ -143,6 +191,7 @@ def compute_frame_weights(
     *,
     min_weight: float = 0.1,
     group_by_pointing: bool = False,
+    yardsticks: WeightYardsticks | None = None,
 ) -> tuple[dict[int, float], WeightingStats]:
     """
     Build a ``{frame_id: weight}`` map.
@@ -154,19 +203,26 @@ def compute_frame_weights(
     star-count / sky / transparency medians per panel rather than target-wide —
     see the module docstring. It self-disables when the pointings don't split
     soundly, so a single-field target is unaffected either way.
-    """
-    fwhms = [f.fwhm_px for f in frames if f.fwhm_px is not None and f.fwhm_px > 0]
-    # Eccentricity 0 (perfectly round) is a valid, best-case measurement, so the
-    # median includes it; the factor guards a 0 divisor per-frame instead.
-    eccs = [f.eccentricity_median for f in frames
-            if f.eccentricity_median is not None and f.eccentricity_median >= 0]
 
-    best_fwhm = float(np.percentile(fwhms, 10)) if fwhms else None
-    median_ecc = float(np.median(eccs)) if eccs else None
-    # The three position-dependent medians, per mosaic panel where the pointings
-    # split soundly and target-wide otherwise (which is every single-field
-    # target, and therefore byte-for-byte today's behaviour there).
-    panel_medians = _positional_medians(frames, group_by_pointing=group_by_pointing)
+    ``yardsticks`` (optional, single-field only) weights every frame against
+    frozen reference values instead of ones derived from ``frames`` — how an
+    incremental stack weights tonight's subs by the same rule as the subs already
+    in its running sums. ``None`` (every ordinary run) derives them as before.
+    """
+    if yardsticks is not None:
+        if group_by_pointing:
+            raise ValueError("frozen weight yardsticks are single-field only")
+        best_fwhm, median_ecc = yardsticks.best_fwhm, yardsticks.median_ecc
+        frozen = (yardsticks.median_stars, yardsticks.median_sky,
+                  yardsticks.median_transp)
+        panel_medians: _PositionalMedians = {
+            f.id: frozen for f in frames if f.id is not None}
+    else:
+        best_fwhm, median_ecc = _fwhm_ecc_yardsticks(frames)
+        # The three position-dependent medians, per mosaic panel where the
+        # pointings split soundly and target-wide otherwise (which is every
+        # single-field target, and therefore byte-for-byte today's behaviour).
+        panel_medians = _positional_medians(frames, group_by_pointing=group_by_pointing)
 
     weights: dict[int, float] = {}
     weighted_list: list[float] = []

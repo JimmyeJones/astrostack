@@ -3,6 +3,24 @@
 Plain-language notes for each released milestone on the way to AstroStack 1.0.
 The plan is in [`docs/ROADMAP-1.0.md`](docs/ROADMAP-1.0.md).
 
+## 0.513.0 — Add tonight's subs in minutes
+
+- **New, and off unless you turn it on for a target:** *Add new subs to the last
+  stack (much faster)*. It is on the Stack page under **Advanced options**. Turn it
+  on and press **Save as defaults**, and that target's automatic stacks stop
+  re-reading every sub: they keep the last stack and add only the new ones. A night
+  added to a big target takes minutes instead of hours. The Jobs page then says
+  "Added 512 new subs to the last stack".
+- It keeps one file of about 100 MB next to that target's pictures.
+- If anything else changed since the last stack (your settings, a sub you
+  un-accepted, the reference sub, the framing), or there are more new subs than
+  old ones, it rebuilds from every sub by itself, as before. Drizzle and mosaics
+  always rebuild from every sub.
+- The picture can differ very slightly from a full rebuild (at most about 0.4 %
+  of the brightness range in our tests): older subs keep the outlier clean-up
+  they had.
+  To rebuild from scratch, press Stack when there are no new subs.
+
 ## 0.512.4 — Tidier updates and a shorter menu
 
 **Updates keep only the newest 3 backups.** Each update still backs up your data

@@ -890,6 +890,13 @@ RUN_ARTEFACT_SUFFIXES: dict[str, str] = {
     "deepening_webp": "_deepening.webp",
     "deepening_apng": "_deepening.png",
     "deepening_sig": "_deepening.sig",
+    # The running sums an opt-in "add new subs to the last stack" run continues
+    # (``seestack.stack.incremental``): ~64 bytes per canvas pixel before
+    # compression, so it must go with a deleted run. Like the reel above it is
+    # state for the target's *next* stack rather than a picture of this one, so
+    # it is in ``SERIES_ARTEFACTS`` too: a re-stack's archive removes it (the new
+    # run writes a fresh one) and a merge does not carry it.
+    "incremental_state": "_incremental.npz",
 }
 
 
@@ -981,7 +988,8 @@ _REPOINTABLE_ARTEFACTS = frozenset({"fits", "tiff", "preview"})
 # So an archive **removes** them (they are a cache, rebuilt from the masters on
 # the next request), and a merge does not carry them (the destination target's
 # series is a different series).
-SERIES_ARTEFACTS = frozenset({"deepening_webp", "deepening_apng", "deepening_sig"})
+SERIES_ARTEFACTS = frozenset({"deepening_webp", "deepening_apng", "deepening_sig",
+                              "incremental_state"})
 
 
 def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str]:

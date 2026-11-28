@@ -544,7 +544,13 @@ export function processTargetSummary(r: Record<string, unknown>): {
     const stack = r.stack && typeof r.stack === "object"
       ? (r.stack as Record<string, unknown>) : {};
     const used = Number(stack.n_frames_used ?? 0) || solved;
-    let line = `Stacked ${used} frame${used === 1 ? "" : "s"} into a new master`;
+    // "Add new subs to the last stack" (opt-in per target): say that this run
+    // only read tonight's subs, or the owner can't tell why it took minutes.
+    const added = Math.max(0, Number(stack.incremental_added ?? 0) || 0);
+    let line = added > 0
+      ? `Added ${added} new sub${added === 1 ? "" : "s"} to the last stack `
+        + `(${used} in the picture now)`
+      : `Stacked ${used} frame${used === 1 ? "" : "s"} into a new master`;
     if (graded > 0) line += ` (auto-grade dropped ${graded})`;
     // A thin auto-stack (≤4 subs on one part of the picture) is the owner's
     // "gibberish" case: the Jobs page would otherwise cheerfully report a green

@@ -158,6 +158,7 @@ _STACK_OPTIONS_THAT_EXPLAIN_THEMSELVES = {
     "quick_look_interval": "a frame count",
     "save_progress": "a video of the stack appearing",
     "record_rejection_map": "says what the run writes alongside the picture",
+    "incremental": "a speed-up that reuses the last stack, not an astronomy concept",
     "max_workers": "a thread count",
     "use_gpu": "hardware, not astronomy",
 }

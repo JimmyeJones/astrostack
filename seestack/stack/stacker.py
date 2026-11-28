@@ -67,12 +67,17 @@ from seestack.stack.pointings import (
 from seestack.stack.reference import (
     ReferenceChoice, pick_central_frame, pick_reference_frame,
 )
-from seestack.stack.photometric import PhotometricStats, compute_photometric_scales
+from seestack.stack.photometric import (
+    PhotometricStats,
+    compute_photometric_scales,
+    photometric_reference,
+)
 from seestack.stack.weighting import (
     WeightingStats,
     combine_weights_with_photometric,
     compute_frame_weights,
     unit_weights,
+    weight_yardsticks,
 )
 
 if TYPE_CHECKING:
@@ -709,6 +714,17 @@ class StackOptions:
     # byte-for-byte unchanged, and the only thing that turns it on is the
     # owner-approved ``Settings.auto_drizzle``.
     auto_drizzle: bool = False
+    # "Add new subs to the last stack" (:mod:`seestack.stack.incremental`). When
+    # on, a standard κ-σ or weighted-mean stack of a single field saves its
+    # running sums beside the outputs (``{base}_incremental.npz``, ~64 bytes per
+    # canvas pixel before compression), and the next run reads only the subs
+    # that are new since then instead of every sub again. Anything that would
+    # make that answer differ from a real re-stack — changed options, a sub
+    # un-accepted since, another reference, a canvas that moved, a mosaic,
+    # drizzle — makes the run an ordinary full stack instead, which saves fresh
+    # state. Off by default: a per-target choice the owner makes ("Save as
+    # defaults"), so every existing config, run record and output is unchanged.
+    incremental: bool = False
 
     def background_options(self) -> BackgroundOptions:
         return BackgroundOptions(
@@ -795,6 +811,11 @@ class StackResult:
     # .calibration_warnings`` (the wording lives there, once). Empty when the dark
     # matches, when no dark was applied, or when the headers didn't say.
     calibration_warnings: list[str] = field(default_factory=list)
+    # ``StackOptions.incremental`` only: how many subs this run *added* to the
+    # last stack's saved sums (None when it was a full stack), and — when the
+    # option was on but a full stack ran — the plain-language reason why.
+    incremental_added: int | None = None
+    incremental_reason: str | None = None
 
 
 @dataclass
@@ -3888,12 +3909,90 @@ def run_stack(
     # every consumer reads as "no overlay available".
     rejection_map: np.ndarray | None = None
 
+    # ---- 2b. "Add new subs to the last stack" (opt-in, per target) ---------
+    # See :mod:`seestack.stack.incremental`. With the option off nothing here
+    # runs beyond one stat() of a crashed run's leftover spill file, so every
+    # ordinary stack is byte-for-byte what it was. With it on, ``inc_plan`` says
+    # whether this run may continue the saved sums; when it may, the passes
+    # below read only ``pass1_frames``/``pass2_frames`` (the new subs) into the
+    # restored accumulators, and the weights of *every* sub are re-derived from
+    # the yardsticks frozen by the first full stack — identical for the old subs,
+    # and the same rule for the new ones.
+    from seestack.stack import incremental as _inc
+
+    _inc_out_dir = project.project_dir / "output"
+    inc_sidecar = _inc.sidecar_path(_inc_out_dir, options.output_name)
+    inc_spill_path = _inc.welford_spill_path(_inc_out_dir, options.output_name)
+    if inc_spill_path.exists():
+        _inc.discard(inc_spill_path)  # a crashed run's leftover
+    inc_spill: Path | None = None
+    inc_plan: _inc.IncrementalPlan | None = None
+    inc_meta: dict = {}
+    inc_reason: str | None = None   # why a requested incremental run went full
+    inc_save_state = False          # whether this run leaves state for the next
+    pass1_frames: list[FrameRow] = frames
+    pass2_frames: list[FrameRow] = frames
+    #: The pass whose ``used`` ids are the subs now in the weighted sum.
+    inc_pass2_log: _PassFrameLog | None = None
+    #: …and the pass whose ``used`` ids are the subs now in the Welford state.
+    inc_welford_log: _PassFrameLog | None = None
+    #: The weighted-sum accumulator whose state the sidecar saves.
+    wsum_for_state: WeightedSumAccumulator | None = None
+
+    def _inc_load(loader: Callable[[Path], dict]) -> dict:
+        """Read saved accumulator arrays; a damaged file is removed (so the next
+        run rebuilds in full rather than failing on it again) and reported."""
+        try:
+            state = loader(inc_sidecar)
+            if any(a.shape[:2] != tuple(dst_shape) for a in state.values()):
+                raise ValueError("saved arrays do not match the canvas")
+        except Exception as exc:  # noqa: BLE001 — any damage → remove and say so
+            _inc.discard(inc_sidecar)
+            raise ValueError(
+                "The saved quick-stack state for this target was damaged, so it "
+                "has been removed. Stack again and it rebuilds from every sub."
+            ) from exc
+        return state
+
+    if options.incremental:
+        _inc_combine = combine_method(eff, n)
+        inc_save_state = _inc.unsupported_reason(
+            eff, _inc_combine, is_mosaic=bool(is_mosaic_canvas),
+            frames=frames) is None
+        _plan = _inc.plan(
+            inc_sidecar, options=eff, combine=_inc_combine,
+            is_mosaic=bool(is_mosaic_canvas), frames=frames, ref=ref,
+            dst_wcs_text=dst_wcs_text, dst_shape=dst_shape,
+            min_base=(kappa_min_frames(eff.sigma_kappa)
+                      if _inc_combine == "sigma-clip" else 1))
+        if _plan.eligible:
+            inc_plan = _plan
+            inc_meta = _plan.meta
+            pass1_frames = _plan.pass1_frames
+            pass2_frames = _plan.pass2_frames
+            log.info("Incremental stack: %s", _plan.reason)
+            if options.quality_weighted:
+                weights, wstats = compute_frame_weights(
+                    frames, yardsticks=_plan.yardsticks)
+            if options.photometric_normalize:
+                pscales, pstats = compute_photometric_scales(
+                    frames, frozen_reference=_plan.photometric_reference)
+                if pstats.n_scaled == 0:
+                    pscales = None
+            combine_weights = combine_weights_with_photometric(weights, pscales)
+        else:
+            inc_reason = _plan.reason
+            log.info("Incremental stack not possible, stacking every sub: %s",
+                     _plan.reason)
+
     # Periodic pass-1 previews: the legacy quick-look PNG and, when
     # ``save_progress`` is on, the "watch it appear" reel. Wired into the
     # standard (non-drizzle) accumulator paths below; assembled after the
-    # outputs are written (post-archive).
-    ql = _QuickLook(project.project_dir, options.output_name, options, n,
-                    frames=frames)
+    # outputs are written (post-archive). An incremental run previews the subs
+    # it actually reads.
+    _ql_frames = pass1_frames or pass2_frames
+    ql = _QuickLook(project.project_dir, options.output_name, options,
+                    len(_ql_frames), frames=_ql_frames)
 
     # Honest-accounting: contributing frames that sub-pixel refine had to leave
     # unshifted because the measured shift exceeded its cap (only roughly
@@ -4086,7 +4185,10 @@ def run_stack(
     # If sigma-clipping is off we go directly to the weighted sum and we're
     # done after one pass.
     elif combine == "sigma-clip":
-        wel = WelfordAccumulator(canvas_3)
+        # An incremental run continues the saved Welford state (the same three
+        # canvas arrays a fresh accumulator allocates) over the new subs only.
+        wel = (WelfordAccumulator.from_state(_inc_load(_inc.load_welford_state))
+               if inc_plan is not None else WelfordAccumulator(canvas_3))
         p1_log = _new_pass_log()
         p2_log = _new_pass_log()
 
@@ -4095,7 +4197,7 @@ def run_stack(
             ql.on_frame(wel.mean)
 
         n_used_p1 = _pass(
-            frames, ref, dst_wcs_text, dst_shape, weights,
+            pass1_frames, ref, dst_wcs_text, dst_shape, weights,
             options=options,
             phase_label="Pass 1/2 (mean & σ)",
             consumer=consume_pass1,
@@ -4113,8 +4215,12 @@ def run_stack(
             on_settled=ql.settled,
         )
         ql.close_series(wel.mean)
-        if n_used_p1 == 0 and not cancel():
+        if n_used_p1 == 0 and not cancel() and inc_plan is None:
             raise ValueError("pass 1 produced no usable frames")
+        if inc_save_state and not cancel():
+            # Park the pass-1 state for the sidecar before it is freed below, so
+            # pass 2 runs inside the same memory bound as an ordinary stack.
+            inc_spill = _inc.spill_welford(inc_spill_path, wel.state())
 
         # ---- 4. Pass 2: clipped weighted sum ------------------------------
         mean = wel.mean()
@@ -4128,7 +4234,8 @@ def run_stack(
         # large mosaic the guard certified as safe could then OOM mid-stack. The
         # drizzle two-pass path already frees its pass-1 stats the same way.
         del wel
-        wsum = WeightedSumAccumulator(canvas_3)
+        wsum = (WeightedSumAccumulator.from_state(_inc_load(_inc.load_wsum_state))
+                if inc_plan is not None else WeightedSumAccumulator(canvas_3))
         # Memory-free rejection tally: sum two scalars over the per-pixel keep
         # mask this pass already computes (no extra canvas). "contributed" = the
         # covered samples seen; "rejected" = those clipped by the κ-σ test. Where
@@ -4136,7 +4243,10 @@ def run_stack(
         # mean unknown → keep — see ``_kappa_sigma_keep_mask``) nothing is
         # clipped, so it's excluded from rejected but still counted as
         # contributed — the honest denominator.
-        clip_counts = {"contributed": 0, "rejected": 0}
+        clip_counts = {
+            "contributed": int(inc_meta.get("clip_contributed") or 0),
+            "rejected": int(inc_meta.get("clip_rejected") or 0),
+        }
         # …and, when asked for, the *spatial* half of the same truth: how many
         # samples the clip dropped at each pixel, so the finished picture can show
         # the user the satellite trail it removed rather than only a percentage.
@@ -4168,7 +4278,7 @@ def run_stack(
             wsum.add_window(np.where(keep, aligned, np.nan), y0, x0, weight=weight)
 
         n_used_p2 = _pass(
-            frames, ref, dst_wcs_text, dst_shape, combine_weights,
+            pass2_frames, ref, dst_wcs_text, dst_shape, combine_weights,
             options=options,
             phase_label="Pass 2/2 (clipped sum)",
             consumer=consume_clipped,
@@ -4202,6 +4312,9 @@ def run_stack(
         # the two passes see the same frames; the difference only ever shows up when
         # they diverge, and only ever in the direction of the truth.
         n_used = n_used_p2
+        inc_pass2_log = p2_log
+        inc_welford_log = p1_log
+        wsum_for_state = wsum
         # Pass 1 succeeded but pass 2 aligned nothing (e.g. the cached/source
         # frames became unreadable *between* the two passes on a long run) →
         # ``wsum`` is empty and ``result()`` is all-NaN. Guard it exactly like
@@ -4214,7 +4327,7 @@ def run_stack(
         # frame (``n_used_p2==0`` → ``n_used==0``), so without it a routine
         # cancel of the *default* κ-σ stack raises a spurious error instead of
         # returning the graceful cancelled result below.
-        if n_used == 0 and not cancel():
+        if n_used == 0 and not cancel() and inc_plan is None:
             raise ValueError("pass 2 produced no usable frames")
         result_image = wsum.result()
         coverage = wsum.coverage
@@ -4226,15 +4339,18 @@ def run_stack(
         )
         rejection_map = rej_map
     else:
-        # Single-pass weighted mean.
-        wsum = WeightedSumAccumulator(canvas_3)
+        # Single-pass weighted mean (continuing the saved sums when incremental).
+        wsum = (WeightedSumAccumulator.from_state(_inc_load(_inc.load_wsum_state))
+                if inc_plan is not None else WeightedSumAccumulator(canvas_3))
+        inc_pass2_log = _new_pass_log()
+        wsum_for_state = wsum
 
         def consume_one_pass(aligned: np.ndarray, y0: int, x0: int, weight: float) -> None:
             wsum.add_window(aligned, y0, x0, weight=weight)
             ql.on_frame(wsum.result)
 
         n_used = _pass(
-            frames, ref, dst_wcs_text, dst_shape, combine_weights,
+            pass2_frames, ref, dst_wcs_text, dst_shape, combine_weights,
             options=options,
             phase_label="Stacking",
             consumer=consume_one_pass,
@@ -4248,17 +4364,27 @@ def run_stack(
             max_in_flight=max_in_flight,
             roughly_aligned_ids=roughly_ids,
             out_of_reach_ids=out_of_reach_ids,
-            frame_log=_new_pass_log(),
+            frame_log=inc_pass2_log,
             on_settled=ql.settled,
         )
         ql.close_series(wsum.result)
-        if n_used == 0 and not cancel():
+        if n_used == 0 and not cancel() and inc_plan is None:
             raise ValueError("no frames could be aligned")
         result_image = wsum.result()
         coverage = wsum.coverage
         frame_cov = wsum.frame_coverage
 
+    # An incremental run read only the new subs; the picture holds every sub in
+    # the saved sums as well, and every count below must say so.
+    inc_prev_used: set[int] = set()
+    if inc_plan is not None:
+        inc_prev_used = {int(i) for i in inc_meta.get("used_ids") or []}
+        n_used += len(inc_prev_used)
+        roughly_ids.update(int(i) for i in inc_meta.get("roughly_ids") or [])
+        out_of_reach_ids.update(int(i) for i in inc_meta.get("out_of_reach_ids") or [])
+
     if cancel():
+        _inc.discard(inc_spill)
         return StackResult(
             output_dir=project.project_dir / "output",
             fits_path=Path(),
@@ -4445,6 +4571,14 @@ def run_stack(
                                                 rejection_map_written),
                                             peak_depth=peak_depth,
                                             half_depth=half_depth)
+    inc_added = (len(inc_pass2_log.used) if inc_plan is not None
+                 and inc_pass2_log is not None else None)
+    if options.incremental:
+        header_meta["INCRMODE"] = ("added" if inc_plan is not None else "full",
+                                   "quick-stack: new subs added, or full stack")
+        if inc_plan is not None:
+            header_meta["INCRADD"] = (int(inc_added or 0), "subs added to the last stack")
+            header_meta["INCRBASE"] = (len(inc_prev_used), "subs already in the last stack")
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     if stack_fwhm is not None:
@@ -4561,7 +4695,9 @@ def run_stack(
             # and any re-run reflect what actually ran) while ``auto_reject`` stays
             # True in the record to show it was auto-picked. With auto_reject off
             # (the default), ``eff is options`` so this is byte-for-byte unchanged.
-            options_json=_json.dumps(asdict(eff)),
+            options_json=_json.dumps(_run_options_record(
+                eff, incremental=options.incremental, added=inc_added,
+                base=len(inc_prev_used), reason=inc_reason)),
             notes=color_cal_note or None,
             total_exposure_s=_integration_time_s(frames, n_used),
             # When the subs were *shot*, as opposed to when this stack ran —
@@ -4653,6 +4789,53 @@ def run_stack(
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)
 
+    # ---- 6. Save the running sums for the next "add new subs" run ----------
+    # Only for a run that asked for it and whose combine the state can describe;
+    # after the outputs, so the state always belongs to a finished picture. A
+    # failure here costs the next run its shortcut, never this run its picture.
+    if inc_save_state and inc_pass2_log is not None and wsum_for_state is not None:
+        try:
+            _wel_ids = (set(int(i) for i in inc_meta.get("welford_ids") or [])
+                        | set(inc_welford_log.used)
+                        if inc_welford_log is not None else set())
+            _used_ids = inc_prev_used | set(inc_pass2_log.used)
+            _by_id = {f.id: f for f in frames}
+            _old = [_by_id[i] for i in (_used_ids | _wel_ids) if i in _by_id]
+            if inc_plan is not None:
+                _yard = inc_meta.get("yardsticks")
+                _pref = inc_meta.get("photometric_reference")
+            else:
+                import dataclasses as _dc
+
+                _yard = (_dc.asdict(weight_yardsticks(frames))
+                         if options.quality_weighted else None)
+                _pref = (photometric_reference(frames)
+                         if options.photometric_normalize else None)
+            _inc.write_sidecar(inc_sidecar, {
+                "options_hash": _inc.options_hash(eff, combine),
+                "combine": combine,
+                "ref_id": ref.id,
+                "canvas_wcs": dst_wcs_text,
+                "canvas_shape": [int(dst_shape[0]), int(dst_shape[1])],
+                "used_ids": sorted(_used_ids),
+                "welford_ids": sorted(_wel_ids),
+                "frames_digest": _inc.frames_digest(_old),
+                "yardsticks": _yard,
+                "photometric_reference": _pref,
+                "n_used": int(n_used),
+                "clip_contributed": int(rej_stats.n_contributed) if rej_stats else 0,
+                "clip_rejected": int(rej_stats.n_rejected) if rej_stats else 0,
+                "roughly_ids": sorted(int(i) for i in roughly_ids),
+                "out_of_reach_ids": sorted(int(i) for i in out_of_reach_ids),
+                "run_id": run_id,
+            }, wsum_for_state.state(), inc_spill)
+            log.info("Saved quick-stack state for the next run (%d subs): %s",
+                     len(_used_ids), inc_sidecar.name)
+        except Exception as exc:  # noqa: BLE001 — the shortcut is optional
+            log.warning("Could not save the quick-stack state: %s", exc)
+            _inc.discard(inc_sidecar)
+    _inc.discard(inc_spill)
+
     # Coverage min/max for diagnostics — an honest *frame* count (unweighted)
     # when available, so quality weighting doesn't understate it; else the
     # coverage map (channels share the valid mask in our pipeline). Mirror the
@@ -4688,7 +4871,29 @@ def run_stack(
         rejection_mode=rej_stats.mode if _rej_recorded else None,
         rejection_fraction=rej_stats.fraction if _rej_recorded else None,
         calibration_warnings=calib_warnings,
+        incremental_added=inc_added,
+        incremental_reason=inc_reason,
     )
+
+
+def _run_options_record(eff: StackOptions, *, incremental: bool, added: int | None,
+                        base: int, reason: str | None) -> dict[str, Any]:
+    """The run's persisted ``options_json``: its effective options, plus — only
+    when ``incremental`` was asked for — what that run actually did, so History
+    can say "Added 512 new subs to the last stack" (``incremental_added`` and
+    ``incremental_base``) or why it stacked every sub (``incremental_reason``).
+    With the option off this is exactly ``asdict(eff)``. Readers that build
+    options back from a record ignore the extra keys (``coerce_stack_options``)."""
+    from dataclasses import asdict
+
+    record = asdict(eff)
+    if incremental:
+        if added is not None:
+            record["incremental_added"] = int(added)
+            record["incremental_base"] = int(base)
+        elif reason:
+            record["incremental_reason"] = reason
+    return record
 
 
 def _imap_bounded(ex: ThreadPoolExecutor, fn, items, max_in_flight: int):

@@ -119,12 +119,29 @@ def _pointing_references(
     }, len(refs)
 
 
+def photometric_reference(
+    frames: list[FrameRow], *, min_frames: int = _MIN_MEASURED_FRAMES,
+) -> float | None:
+    """The single-field reference transparency :func:`compute_photometric_scales`
+    normalises ``frames`` against, or ``None`` when too few frames carry a usable
+    score (the run is then neutral). Pulled out so an incremental stack can freeze
+    it beside its running sums."""
+    measured = [
+        f.transparency_score for f in frames
+        if f.transparency_score is not None and f.transparency_score > 0
+    ]
+    if len(measured) < max(1, int(min_frames)):
+        return None
+    return float(np.median(measured))
+
+
 def compute_photometric_scales(
     frames: list[FrameRow],
     *,
     max_ratio: float = 2.0,
     min_frames: int = _MIN_MEASURED_FRAMES,
     group_by_pointing: bool = False,
+    frozen_reference: float | None = None,
 ) -> tuple[dict[int, float], PhotometricStats]:
     """
     Build a ``{frame_id: scale}`` map that gain-matches every frame's signal to
@@ -139,14 +156,26 @@ def compute_photometric_scales(
     :func:`_pointing_references` for why comparing panels is wrong. It falls
     back to the single target-wide reference whenever the pointings don't split
     soundly, so a single-field target is unaffected either way.
+
+    ``frozen_reference`` (optional, single-field only) normalises every frame
+    against a reference transparency fixed by an earlier run instead of the
+    median of ``frames`` — how an incremental stack gain-matches tonight's subs
+    to the *same* level as the subs already in its running sums. ``None`` (every
+    ordinary run) derives it as before.
     """
     max_ratio = max(1.0, float(max_ratio))
     min_frames = max(1, int(min_frames))
 
-    # Per-panel references on a mosaic; ``None`` means "one target-wide median",
-    # which is both the single-field case and the mosaic that didn't split.
-    grouped = _pointing_references(frames, min_frames) if group_by_pointing else None
-    refs, n_groups = grouped if grouped is not None else (None, 0)
+    if frozen_reference is not None:
+        if group_by_pointing or not frozen_reference > 0:
+            raise ValueError("a frozen photometric reference is single-field and > 0")
+        refs = {f.id: float(frozen_reference) for f in frames if f.id is not None}
+        n_groups = 0
+    else:
+        # Per-panel references on a mosaic; ``None`` means "one target-wide
+        # median", which is both the single-field case and the unsplit mosaic.
+        grouped = _pointing_references(frames, min_frames) if group_by_pointing else None
+        refs, n_groups = grouped if grouped is not None else (None, 0)
     if refs is None:
         measured = [
             f.transparency_score for f in frames

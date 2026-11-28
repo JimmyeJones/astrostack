@@ -193,6 +193,11 @@ def past_stack(run: Any) -> PastStack | None:
         return None
     if not isinstance(options, dict):
         return None
+    # A run that only *added* new subs to the last stack's saved sums read a
+    # fraction of the subs it records, so its seconds-per-sub would price the
+    # next full stack at a small fraction of what it really costs.
+    if options.get("incremental_added") is not None:
+        return None
     if seconds <= 0 or n_frames <= 0 or canvas_px <= 0:
         return None
     return PastStack(n_frames=n_frames, duration_s=seconds, canvas_px=canvas_px,
