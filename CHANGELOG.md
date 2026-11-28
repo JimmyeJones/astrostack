@@ -21,6 +21,17 @@ The plan is in [`docs/ROADMAP-1.0.md`](docs/ROADMAP-1.0.md).
   they had.
   To rebuild from scratch, press Stack when there are no new subs.
 
+## 0.512.4 — Tidier updates and a shorter menu
+
+**Updates keep only the newest 3 backups.** Each update still backs up your data
+before it starts the new version. Once the new version is running, older update
+backups beyond the newest 3 are removed. Only the update's own backups are
+touched, never your pictures or subs.
+
+**A shorter menu.** *Your sky, so far*, *My life list* and *Your universe* are now
+under **Extras** in the menu. Nothing is gone: one click opens Extras, and it opens
+by itself when you are on one of those pages.
+
 ## 0.512.3 — Shorter notes
 
 **Notes** on the Target page and the Dashboard now sit under the target's name and

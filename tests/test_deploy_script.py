@@ -49,6 +49,14 @@ exit 0
 """,
     "zfs": """#!/usr/bin/env bash
 echo "zfs $*" >> "$STUB_LOG"
+if [ "$1" = list ] && [ "$3" = "-t" ] && [ "$4" = snapshot ]; then
+  cat "$STUB_DIR/snapshots" 2>/dev/null; exit 0
+fi
+if [ "$1" = snapshot ]; then
+  rc="$(cat "$STUB_DIR/snap_rc" 2>/dev/null || echo 0)"
+  [ "$rc" = 0 ] && echo "$2" >> "$STUB_DIR/snapshots"
+  exit "$rc"
+fi
 if [ "$1" = list ]; then
   for i in $(seq 1 4); do printf 'boot-pool/ROOT/%s\\t/sys%s\\n' "$i" "$i"; done
   printf 'tank/astro\\t%s\\n' "$STUB_DATA"
@@ -248,3 +256,53 @@ def test_zfs_dataset_helper_reads_the_whole_listing(nas, path, expect) -> None:
                        env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == f"[{expect}]"
+
+
+# ---- keeping only the newest backups (owner's decision 2026-11-28) ---------
+#
+# Every update used to add a snapshot (or a tar of the databases) and nothing
+# ever removed one. After a healthy update the script now keeps the newest
+# three of its OWN backups, and touches nothing else.
+
+def test_only_the_three_newest_update_snapshots_are_kept(nas) -> None:
+    old = [f"tank/astro@astrostack-pre-v0.0.{i}-2026010{i}T0000Z" for i in range(1, 6)]
+    others = ["tank/astro@my-own-snapshot", "tank/astro@auto-2026-11-01_00-00"]
+    (nas.stubs / "snapshots").write_text("\n".join(old[:2] + others + old[2:]) + "\n")
+    r = nas.run()
+    assert r.returncode == 0, r.stdout + r.stderr
+    new = (nas.state / "last-backup").read_text().strip()
+    destroyed = [c.split(" ", 2)[2] for c in nas.calls() if c.startswith("zfs destroy")]
+    # 5 old + the new one = 6 of ours: the 3 oldest go, the newest 3 stay.
+    assert destroyed == old[:3]
+    assert new not in destroyed
+    assert not any(o in destroyed for o in others)
+    assert not any("-r" in c.split() for c in nas.calls() if c.startswith("zfs destroy"))
+
+
+def test_three_or_fewer_update_snapshots_are_all_kept(nas) -> None:
+    (nas.stubs / "snapshots").write_text(
+        "tank/astro@astrostack-pre-v0.0.1-20260101T0000Z\n")
+    r = nas.run()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not [c for c in nas.calls() if c.startswith("zfs destroy")]
+
+
+def test_only_the_three_newest_backup_copies_are_kept(nas) -> None:
+    nas.state.mkdir(parents=True, exist_ok=True)
+    olds = []
+    for i in range(1, 5):
+        f = nas.state / f"backup-pre-v0.0.{i}-2026010{i}T0000Z.tar.gz"
+        f.write_bytes(b"old")
+        os.utime(f, (1_700_000_000 + i, 1_700_000_000 + i))
+        olds.append(f)
+    keep_me = nas.state / "notes.tar.gz"
+    keep_me.write_bytes(b"not ours")
+    os.utime(keep_me, (1_600_000_000, 1_600_000_000))
+    r = nas.run(zfs=False)
+    assert r.returncode == 0, r.stdout + r.stderr
+    new = Path((nas.state / "last-backup").read_text().strip())
+    assert new.exists()
+    # 4 old + the new one = 5: the 2 oldest go.
+    assert [f.exists() for f in olds] == [False, False, True, True]
+    assert keep_me.exists()
+    assert (nas.data / "incoming" / "M 42_sub" / "a.fit").read_text() == "sub"

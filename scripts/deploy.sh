@@ -165,5 +165,42 @@ if [ "$s" != healthy ]; then
   exit 1
 fi
 FINISHED=1
+
+# Keep the newest KEEP_BACKUPS backups this script made and delete the older
+# ones (owner's decision 2026-11-28: "keep only the newest 3"). Before this,
+# every update added one and nothing ever removed any. Only after the new
+# version is up and healthy, only names this script itself writes
+# (DATASET@astrostack-pre-v<ver>-<stamp> and backup-pre-v<ver>-<stamp>.tar.gz
+# in STATE_DIR), never the backup just taken (it is in last-backup), never a
+# recursive destroy, and a failure here is a note, never a failed update.
+KEEP_BACKUPS="${ASTROSTACK_KEEP_BACKUPS:-3}"
+prune_backups() {
+  local keep="$KEEP_BACKUPS" current old n
+  current="$(cat "$STATE_DIR/last-backup" 2>/dev/null || true)"
+  if [ -n "$DATASET" ] && command -v zfs >/dev/null 2>&1; then
+    old="$(zfs list -H -t snapshot -o name -s creation -d 1 "$DATASET" 2>/dev/null \
+      | grep -E '@astrostack-pre-v[0-9][0-9.]*-[0-9]{8}T[0-9]{4}Z$' \
+      | awk -v p="$DATASET@" 'index($0, p) == 1' || true)"
+    n="$(printf '%s\n' "$old" | grep -c . || true)"
+    if [ "$n" -gt "$keep" ]; then
+      printf '%s\n' "$old" | head -n "$((n - keep))" | while read -r snap; do
+        [ -n "$snap" ] && [ "$snap" != "$current" ] || continue
+        if zfs destroy "$snap"; then echo "Removed an old backup: $snap"
+        else echo "note: could not remove the old backup $snap — it stays."; fi
+      done
+    fi
+  fi
+  old="$(ls -1tr "$STATE_DIR" 2>/dev/null \
+    | grep -E '^backup-pre-v[0-9][0-9.]*-[0-9]{8}T[0-9]{4}Z\.tar\.gz$' || true)"
+  n="$(printf '%s\n' "$old" | grep -c . || true)"
+  if [ "$n" -gt "$keep" ]; then
+    printf '%s\n' "$old" | head -n "$((n - keep))" | while read -r f; do
+      [ -n "$f" ] && [ "$STATE_DIR/$f" != "$current" ] || continue
+      rm -f -- "$STATE_DIR/$f" && echo "Removed an old backup: $STATE_DIR/$f"
+    done
+  fi
+}
+prune_backups || echo "note: tidying old backups did not finish — nothing else is affected."
+
 echo "Done: running $(docker exec astrostack python -c 'import webapp;print(webapp.__version__)'). Backup: $SNAP"
 echo "If anything looks wrong:  sudo bash scripts/rollback.sh"

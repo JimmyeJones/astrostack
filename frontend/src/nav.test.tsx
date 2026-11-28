@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -78,7 +78,7 @@ describe("NAV_SECTIONS", () => {
   });
 });
 
-function renderApp(outdated = 0) {
+function renderApp(outdated = 0, at = "/") {
   vi.spyOn(client.api, "listJobs").mockResolvedValue([]);
   vi.spyOn(client.api, "getSystem").mockResolvedValue({ version: "9.9.9" } as never);
   vi.spyOn(client.api, "reprocessStatus").mockResolvedValue({ outdated } as never);
@@ -86,7 +86,7 @@ function renderApp(outdated = 0) {
   return render(
     <MantineProvider>
       <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={["/"]}>
+        <MemoryRouter initialEntries={[at]}>
           <App />
         </MemoryRouter>
       </QueryClientProvider>
@@ -94,14 +94,31 @@ function renderApp(outdated = 0) {
   );
 }
 
+const FOLDED = new Set(NAV_SECTIONS.filter((s) => s.folded).flatMap((s) => s.links.map((l) => l.to)));
+
 describe("sidebar", () => {
-  it("renders every link visibly — the headings group, they never hide", () => {
+  it("renders every link visibly except the Extras, which are one click away", async () => {
     renderApp();
     const nav = screen.getByRole("navigation");
-    for (const l of FLAT_LINKS_BEFORE_SLICE_D) {
+    for (const l of FLAT_LINKS_BEFORE_SLICE_D.filter((x) => !FOLDED.has(x.to))) {
       const link = within(nav).getByRole("link", { name: new RegExp(`^${l.label}$`) });
       expect(link).toHaveAttribute("href", l.to);
     }
+    // The owner's choice (2026-11-28): only "Extras" folds, and one click opens it.
+    expect(NAV_SECTIONS.filter((s) => s.folded).map((s) => s.title)).toEqual(["Extras"]);
+    fireEvent.click(within(nav).getByRole("button", { name: /Extras/ }));
+    for (const to of FOLDED) {
+      const l = NAV_LINKS.find((x) => x.to === to)!;
+      const link = await within(nav).findByRole("link", { name: new RegExp(`^${l.label}$`) });
+      expect(link).toHaveAttribute("href", to);
+    }
+  });
+
+  it("opens Extras by itself on one of its pages", async () => {
+    renderApp(0, "/life-list");
+    const nav = screen.getByRole("navigation");
+    expect(await within(nav).findByRole("link", { name: /^My life list$/ }))
+      .toHaveAttribute("href", "/life-list");
   });
 
   it("shows a heading for each named group, and each group holds its own links", () => {
@@ -110,6 +127,7 @@ describe("sidebar", () => {
     for (const section of NAV_SECTIONS) {
       if (!section.title) continue;
       const group = within(nav).getByRole("group", { name: section.title });
+      if (section.folded) fireEvent.click(within(group).getByRole("button", { name: section.title }));
       for (const l of section.links) {
         expect(within(group).getByRole("link", { name: new RegExp(`^${l.label}$`) })).toBeTruthy();
       }
