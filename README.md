@@ -261,7 +261,9 @@ being built. It shows you what's running and what it's about to
 install, **builds the new version while the old one keeps running**, then
 **stops the app, backs up your data** (a ZFS snapshot when your data folder is
 its own dataset, otherwise a copy of the databases and settings), starts the
-new version and waits until it reports healthy. If the build fails (a network
+new version and waits until it reports healthy. Once it is healthy, it keeps the
+newest three of these update backups and removes older ones (only its own
+`astrostack-pre-…` backups; set `ASTROSTACK_KEEP_BACKUPS` to keep more). If the build fails (a network
 hiccup while downloading, say) the old version simply keeps running; if anything
 fails after the stop, the script starts the old version again by itself.
 
