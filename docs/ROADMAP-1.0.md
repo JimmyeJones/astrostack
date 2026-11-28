@@ -74,7 +74,7 @@ R1–R7 and R9 ship in **M1**. R8 is re-run at the end of M2 and M3 with the new
    - ✅ no re-solving of failed subs on every import or restart (0.511.14);
    - ✅ Host-header check (0.512.0).
 
-   Still open: deploy-snapshot pruning (needs the owner's OK — it deletes old backups).
+   - ✅ deploy-snapshot pruning: the newest 3 kept (owner's OK 2026-11-28; 0.512.4).
    The original list:
    - Host-header check, so a web page can't drive a password-less install;
    - password checks no longer run on the main thread for every request;

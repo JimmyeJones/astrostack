@@ -3,6 +3,13 @@
 Plain-language notes for each released milestone on the way to AstroStack 1.0.
 The plan is in [`docs/ROADMAP-1.0.md`](docs/ROADMAP-1.0.md).
 
+## 0.512.4 — Tidier updates
+
+**Updates keep only the newest 3 backups.** Each update still backs up your data
+before it starts the new version. Once the new version is running, older update
+backups beyond the newest 3 are removed. Only the update's own backups are
+touched, never your pictures or subs.
+
 ## 0.512.3 — Shorter notes
 
 **Notes** on the Target page and the Dashboard now sit under the target's name and
