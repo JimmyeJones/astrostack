@@ -185,6 +185,33 @@ class WeightedSumAccumulator:
     def sum(self) -> np.ndarray:
         return self._sum
 
+    def state(self) -> dict[str, np.ndarray]:
+        """The accumulator's whole running state, as named arrays (no copies).
+
+        ``sum`` and ``weight`` are Σw·x and Σw per pixel and channel; ``count``
+        is the unweighted per-pixel frame count. :meth:`from_state` rebuilds an
+        accumulator that continues exactly where this one stopped — what an
+        incremental stack saves beside a run and adds the next night's subs to.
+        """
+        return {"sum": self._sum, "weight": self._weight, "count": self._count}
+
+    @classmethod
+    def from_state(cls, state: dict[str, np.ndarray]) -> WeightedSumAccumulator:
+        """Rebuild an accumulator from :meth:`state`, adopting the arrays as-is
+        (no extra canvas copy, so a restored accumulator costs exactly what a
+        fresh one does). Raises ``ValueError`` on arrays that don't fit together."""
+        s, w, c = state["sum"], state["weight"], state["count"]
+        if s.shape != w.shape or s.ndim < 2 or c.shape != s.shape[:2]:
+            raise ValueError("weighted-sum state arrays have mismatched shapes")
+        if s.dtype != w.dtype or not np.issubdtype(s.dtype, np.floating):
+            raise ValueError("weighted-sum state arrays have an unexpected dtype")
+        acc = cls.__new__(cls)
+        acc.shape = tuple(s.shape)
+        acc._sum = s
+        acc._weight = w
+        acc._count = c.astype(np.uint32, copy=False)
+        return acc
+
 
 class MinMaxRejectAccumulator:
     """Single-pass top/bottom-*k* (extremes) rejection accumulator, NaN-aware.
@@ -450,3 +477,25 @@ class WelfordAccumulator:
     @property
     def count(self) -> np.ndarray:
         return self._n
+
+    def state(self) -> dict[str, np.ndarray]:
+        """The running Welford state (per-pixel ``n``, ``mean``, ``m2``) as named
+        arrays, no copies — see :meth:`from_state`."""
+        return {"n": self._n, "mean": self._mean, "m2": self._m2}
+
+    @classmethod
+    def from_state(cls, state: dict[str, np.ndarray]) -> WelfordAccumulator:
+        """Rebuild an accumulator from :meth:`state` that continues the same
+        running mean/variance, adopting the arrays as-is. Raises ``ValueError`` on
+        arrays that don't fit together."""
+        n, mean, m2 = state["n"], state["mean"], state["m2"]
+        if not (n.shape == mean.shape == m2.shape):
+            raise ValueError("Welford state arrays have mismatched shapes")
+        if mean.dtype != m2.dtype or not np.issubdtype(mean.dtype, np.floating):
+            raise ValueError("Welford state arrays have an unexpected dtype")
+        acc = cls.__new__(cls)
+        acc.shape = tuple(mean.shape)
+        acc._n = n.astype(np.uint32, copy=False)
+        acc._mean = mean
+        acc._m2 = m2
+        return acc

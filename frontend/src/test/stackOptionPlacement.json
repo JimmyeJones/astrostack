@@ -74,6 +74,11 @@
     "group": "advanced",
     "type": "float"
   },
+  "incremental": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
   "lucky_fraction": {
     "depends_on": null,
     "group": "simple",

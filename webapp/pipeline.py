@@ -5765,6 +5765,11 @@ def _stack_target(
         # not only on History, so the walk-away user reads it the moment the
         # unattended stack lands rather than having to go looking.
         "calibration_warnings": list(getattr(result, "calibration_warnings", []) or []),
+        # "Add new subs to the last stack" (opt-in per target): how many subs this
+        # run added to the saved sums, or — when it was on but every sub had to be
+        # stacked again — why. Both None on every run with the option off.
+        "incremental_added": getattr(result, "incremental_added", None),
+        "incremental_reason": getattr(result, "incremental_reason", None),
     }
 
 

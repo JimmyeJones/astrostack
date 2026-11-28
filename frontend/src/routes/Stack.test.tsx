@@ -143,6 +143,26 @@ describe("StackView", () => {
     expect(screen.queryByText(/builds your night-by-night clip/)).toBeNull();
   });
 
+  it("offers “Add new subs to the last stack” as an Advanced switch, off", async () => {
+    // A per-target opt-in (the owner chose it 2026-11-28), so it sits inside the
+    // existing Advanced group rather than adding anything to the page, and a
+    // never-configured target sees it off.
+    mockSchema([
+      { key: "incremental", label: "Add new subs to the last stack (much faster)",
+        type: "bool", group: "advanced", default: false, min: null, max: null,
+        step: null, options: null,
+        help: "Reuses the last stack and reads only the subs that are new since then.",
+        depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ incremental: false });
+
+    renderStackAt("/targets/M_42/stack?open=advanced");
+    const toggle = await screen.findByRole("switch", { name: /Add new subs to the last stack/ });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByRole("button", { name: /Advanced options/ }))
+      .toHaveAttribute("aria-expanded", "true");
+  });
+
   it("leaves the Advanced disclosure shut without the parameter", async () => {
     mockSchema([
       { key: "subpixel_refine", label: "Sub-pixel alignment refine", type: "bool",

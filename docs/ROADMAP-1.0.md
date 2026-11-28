@@ -130,7 +130,9 @@ confirm it finds the scope.
 **His check:** R8 again; open 3 of his favourite targets, press Auto, and judge.
 
 ### M4 — Fast at his scale
-1. **"Add tonight's subs" incremental stacking:** keep the running sums next to each stack,
+1. Partly done (0.513.0: per-target opt-in, single-field κ-σ and weighted mean; mosaics,
+   drizzle and min/max fall back to a full stack) **"Add tonight's subs" incremental
+   stacking:** keep the running sums next to each stack,
    and process only new subs. 500 new subs: ~10 min instead of ~8–22 h.
 2. **A cheaper first rejection pass** on big targets (about −45 % of a big stack).
 3. ✅ (0.512.2: pixmap on the workers, bookkeeping bounded to the sub's footprint;

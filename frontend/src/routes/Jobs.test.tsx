@@ -1912,6 +1912,18 @@ describe("processTargetSummary", () => {
       cleaned: null, storage: null, calMismatch: null, starMatched: null,
     });
   });
+  it("says when a run only added tonight's subs to the last stack", () => {
+    expect(processTargetSummary({
+      stacked: true, solved_accepted: 512,
+      stack: { n_frames_used: 10512, incremental_added: 512 },
+    }).line).toBe("Added 512 new subs to the last stack (10512 in the picture now).");
+    // A full stack (or an older backend that doesn't report it) reads as before.
+    expect(processTargetSummary({
+      stacked: true, solved_accepted: 8,
+      stack: { n_frames_used: 8, incremental_added: null,
+        incremental_reason: "there is no saved state from a previous stack yet" },
+    }).line).toBe("Stacked 8 frames into a new master.");
+  });
   it("names the outlier clean-up a small auto-stack made with min/max", () => {
     const { cleaned } = processTargetSummary({
       stacked: true, solved_accepted: 8,

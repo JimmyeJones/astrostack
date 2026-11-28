@@ -1402,6 +1402,15 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "picture can show you the satellite trails and cosmic rays it cleaned out "
              "for you. Doesn't change a single pixel of the result — it only watches. "
              "Costs a little extra memory while stacking; off by default."},
+    {"key": "incremental", "label": "Add new subs to the last stack (much faster)",
+     "type": "bool", "group": "advanced",
+     "help": "Reuses the last stack and reads only the subs that are new since then, "
+             "so a night added to a big target takes minutes instead of hours. It keeps "
+             "a file of about 100 MB next to this target's pictures. If anything else "
+             "changed — your settings, a sub you un-accepted, the framing — it rebuilds "
+             "from every sub by itself. Plain and sigma-clipped stacks of one field only; "
+             "drizzle and mosaics always rebuild. Off by default: turn it on and press "
+             "“Save as defaults” to use it for this target's automatic stacks."},
     {"key": "max_workers", "label": "Max workers", "type": "int", "group": "advanced",
      "min": 1, "max": 64, "step": 1, "help": "Blank = all CPU cores."},
     {"key": "use_gpu", "label": "Use GPU (if available)", "type": "bool", "group": "advanced",
