@@ -2,7 +2,7 @@ import {
   AppShell, Badge, Box, Burger, Button, Group, NavLink, ScrollArea, Text, Title, VisuallyHidden,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { IconActivity, IconPhoto, IconRadar2 } from "@tabler/icons-react";
+import { IconActivity, IconDots, IconPhoto, IconRadar2 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink as RouterNavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
@@ -183,10 +183,41 @@ export function App() {
 
       <AppShell.Navbar p="xs" className="astro-nightsky-navbar">
         <ScrollArea>
-          {/* IA slice (d): the same 15 destinations, under plain-language headings.
-              Nothing collapses — the headings only make the list scannable. */}
+          {/* IA slice (d): the same destinations, under plain-language headings.
+              Only "Extras" folds (the owner's choice, 2026-11-28); every other
+              heading just makes the list scannable. */}
           {NAV_SECTIONS.map((section, i) => {
             const headingId = section.title ? `nav-section-${i}` : undefined;
+            if (section.folded) {
+              const here = section.links.some((l) => isNavActive(location.pathname, l.to, l.end));
+              return (
+                <Box key={section.title ?? "extras"} role="group" aria-labelledby={headingId} mb={4}
+                  mt="sm">
+                  <NavLink
+                    component="button"
+                    type="button"
+                    id={headingId}
+                    label={section.title}
+                    leftSection={<IconDots size={18} />}
+                    defaultOpened={here}
+                    childrenOffset={0}
+                  >
+                    {section.links.map((l) => (
+                      <NavLink
+                        key={l.to}
+                        component={RouterNavLink}
+                        to={l.to}
+                        end={l.end}
+                        label={l.label}
+                        leftSection={l.icon}
+                        onClick={closeNav}
+                        active={isNavActive(location.pathname, l.to, l.end)}
+                      />
+                    ))}
+                  </NavLink>
+                </Box>
+              );
+            }
             return (
               <Box key={section.title ?? "home"} role="group" aria-labelledby={headingId} mb={4}>
                 {section.title && (

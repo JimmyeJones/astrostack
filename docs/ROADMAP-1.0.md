@@ -143,7 +143,7 @@ confirm it finds the scope.
 **His check:** shoot a night, and see the targets update themselves in minutes.
 
 ### M5 — Simple (UX), nothing removed
-1. **Navigation down to Home · Pictures · Plan · Tools**, plus header icons for Jobs, Help and
+1. ✅ partly (0.512.4: the owner's Extras list folded — Your sky so far, life list, universe; the year recap and keepsake live on Your sky so far) **Navigation down to Home · Pictures · Plan · Tools**, plus header icons for Jobs, Help and
    Settings. Every page stays within two clicks. The pages he never asked for are folded under
    "Extras", not deleted: year recap, universe map, keepsake, life list and similar.
 2. ✅ (0.512.2) **Editor:** the picture stays in view while the controls scroll, and the explanation cards
@@ -180,5 +180,5 @@ internet. Deprioritised features stay as they are and keep working.
 
 1. **M2/M3:** for each picture change, old or new look (from R8 on his targets).
 2. **M4:** keep automatic drizzle or make it a manual "extra sharp" option (R2 numbers).
-3. **M5:** which pages go under "Extras" (a short list, proposed by Claude).
+3. ✅ **M5:** which pages go under "Extras" — agreed 2026-11-28.
 4. **M6:** go / no-go for 1.0.

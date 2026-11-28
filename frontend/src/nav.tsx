@@ -19,6 +19,8 @@ import type { ReactNode } from "react";
 //   * every destination that was in the flat list is still here, exactly once;
 //   * every link is still visible without a click — the headings *label* the
 //     groups, they do not collapse them. Grouping is for scanning, not hiding.
+//     The one exception is the "Extras" group, which the owner chose to fold
+//     on 2026-11-28 (1.0 roadmap M5): its pages are one click away.
 // `nav.test.ts` pins both against a frozen copy of the original flat list.
 export type NavLinkSpec = {
   to: string;
@@ -32,6 +34,9 @@ export type NavSection = {
   /** `null` for the lead group, which sits above the first heading. */
   title: string | null;
   links: NavLinkSpec[];
+  /** Folded behind its heading, one click away (opened by itself when you are
+   *  on one of its pages). Only "Extras" — the owner's decision of 2026-11-28. */
+  folded?: boolean;
 };
 
 export const NAV_SECTIONS: NavSection[] = [
@@ -50,9 +55,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: "/library", label: "Library", icon: <IconStars size={18} /> },
       { to: "/gallery", label: "Gallery", icon: <IconLayoutGrid size={18} /> },
       { to: "/best", label: "My best pictures", icon: <IconAward size={18} /> },
-      { to: "/sky-so-far", label: "Your sky, so far", icon: <IconSparkles size={18} /> },
-      { to: "/life-list", label: "My life list", icon: <IconChecklist size={18} /> },
-      { to: "/universe", label: "Your universe", icon: <IconGalaxy size={18} /> },
     ],
   },
   {
@@ -72,6 +74,19 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: "/moon-sun", label: "Moon & Sun", icon: <IconVideo size={18} /> },
       { to: "/calibration", label: "Calibration", icon: <IconFlask size={18} /> },
       { to: "/combine", label: "Channel combine", icon: <IconPalette size={18} /> },
+    ],
+  },
+  {
+    // The pages nobody needs to make a picture: the year in review, the life
+    // list and the 3-D universe. Folded, not removed (1.0 roadmap M5; the owner
+    // agreed the list on 2026-11-28). "Your sky, so far" is also the way to the
+    // year recap and the keepsake poster, which live on it.
+    title: "Extras",
+    folded: true,
+    links: [
+      { to: "/sky-so-far", label: "Your sky, so far", icon: <IconSparkles size={18} /> },
+      { to: "/life-list", label: "My life list", icon: <IconChecklist size={18} /> },
+      { to: "/universe", label: "Your universe", icon: <IconGalaxy size={18} /> },
     ],
   },
   {
